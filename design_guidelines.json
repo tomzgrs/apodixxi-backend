@@ -1,0 +1,136 @@
+{
+  "design_system": {
+    "identity": {
+      "name": "E1_Grocery_Tracker",
+      "tone": "Swiss Utility x Fresh Market",
+      "description": "A hyper-functional, high-contrast utility app that borrows the freshness of a farmer's market. Avoiding the sterile 'finance app' look in favor of bold typography, crisp data visualization, and organic color accents.",
+      "keywords": [
+        "Crisp",
+        "Organic",
+        "Swiss-Style",
+        "High-Contrast",
+        "Tactile"
+      ]
+    },
+    "typography": {
+      "font_family": {
+        "headings": "Manrope, sans-serif",
+        "body": "IBM Plex Sans, sans-serif",
+        "data": "Manrope, monospace"
+      },
+      "scale": {
+        "display": "text-5xl font-bold tracking-tighter",
+        "h1": "text-4xl font-bold tracking-tight",
+        "h2": "text-3xl font-semibold tracking-tight",
+        "h3": "text-2xl font-medium",
+        "body_lg": "text-lg leading-relaxed",
+        "body": "text-base leading-relaxed text-slate-600",
+        "caption": "text-sm text-slate-500 font-medium tracking-wide uppercase",
+        "price_lg": "text-3xl font-manrope font-bold tracking-tight",
+        "price_sm": "text-lg font-manrope font-semibold"
+      },
+      "rules": "Use Manrope for Headings and Data (Prices) as it supports Greek and has excellent tabular figures. Use IBM Plex Sans for Body text for high legibility."
+    },
+    "colors": {
+      "palette": {
+        "primary": {
+          "DEFAULT": "#059669",
+          "foreground": "#FFFFFF",
+          "50": "#ECFDF5",
+          "100": "#D1FAE5",
+          "500": "#10B981",
+          "600": "#059669",
+          "700": "#047857"
+        },
+        "secondary": {
+          "DEFAULT": "#F97316",
+          "foreground": "#FFFFFF",
+          "50": "#FFF7ED",
+          "100": "#FFEDD5",
+          "500": "#F97316",
+          "600": "#EA580C"
+        },
+        "background": "#F8FAFC",
+        "surface": "#FFFFFF",
+        "text": {
+          "primary": "#0F172A",
+          "secondary": "#64748B",
+          "muted": "#94A3B8"
+        },
+        "border": "#E2E8F0",
+        "stores": {
+          "sklavenitis": "#E35205",
+          "masoutis": "#00A651",
+          "ab_vasilopoulos": "#005696",
+          "my_market": "#FF6600",
+          "lidl": "#0050AA",
+          "market_in": "#E30613"
+        }
+      },
+      "usage": "Use 'background' (slate-50) for the app base to avoid clinical white. Use 'surface' (white) for cards. Use 'primary' (Emerald) for positive actions (Add Receipt, Save). Use 'secondary' (Orange) for price alerts and comparison highlights."
+    },
+    "layout": {
+      "spacing": {
+        "container_padding": "p-6",
+        "section_gap": "gap-8",
+        "item_gap": "gap-4"
+      },
+      "border_radius": {
+        "card": "rounded-2xl",
+        "button": "rounded-full",
+        "input": "rounded-xl"
+      },
+      "grid_patterns": {
+        "bento_dashboard": "grid grid-cols-2 gap-4",
+        "receipt_list": "flex flex-col gap-3"
+      }
+    },
+    "components": {
+      "buttons": {
+        "primary": "bg-primary-600 text-white shadow-lg shadow-primary-600/20 hover:bg-primary-700 active:scale-95 transition-all",
+        "secondary": "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 active:scale-95",
+        "ghost": "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+      },
+      "cards": {
+        "base": "bg-white border border-slate-100 shadow-sm rounded-2xl p-5",
+        "highlight": "bg-primary-50 border border-primary-100 rounded-2xl p-5",
+        "interactive": "bg-white border border-slate-100 shadow-sm rounded-2xl p-5 active:scale-[0.98] transition-transform"
+      },
+      "inputs": {
+        "base": "bg-slate-50 border border-slate-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 rounded-xl px-4 py-3 text-base outline-none transition-all"
+      }
+    },
+    "assets": {
+      "images": {
+        "hero_market": "https://images.unsplash.com/photo-1553799262-a37c45961038?auto=format&fit=crop&w=800&q=80",
+        "empty_cart": "https://images.unsplash.com/photo-1693505628207-dbeb3d882c92?auto=format&fit=crop&w=800&q=80",
+        "shopping_person": "https://images.unsplash.com/photo-1768734837679-9b3180433384?auto=format&fit=crop&w=800&q=80",
+        "fresh_produce": "https://images.unsplash.com/photo-1652738515643-4e95b0e4f0e8?auto=format&fit=crop&w=800&q=80"
+      },
+      "icons": {
+        "library": "lucide-react-native",
+        "style": "stroke-width-2",
+        "instructions": "Use Lucide icons for all UI elements. For Supermarket Logos, use the 'StoreIcon' component which renders a colored circle with the store initial if no SVG is available."
+      }
+    },
+    "animations": {
+      "micro_interactions": {
+        "press": "transform scale-95 duration-100",
+        "hover": "transform -translate-y-1 shadow-md duration-200",
+        "entrance": "opacity-0 translate-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500"
+      }
+    },
+    "accessibility": {
+      "contrast": "Ensure text-slate-500 is only used on white backgrounds. Use text-slate-600 for better readability on grey backgrounds.",
+      "touch_targets": "Minimum 44x44px for all interactive elements."
+    },
+    "universal_guidelines": [
+      "Avoid 'SaaS Blue'. Use Emerald Green and Vibrant Orange to evoke freshness and urgency.",
+      "No gradients on text. Keep text sharp and high-contrast.",
+      "Use 'sonner' for toast notifications.",
+      "All interactive elements must have data-testid attributes.",
+      "Do not use generic 'Inter' font. Use 'Manrope' for headings/data and 'IBM Plex Sans' for body to support Greek characters.",
+      "Ensure bilingual support is considered in layout (Greek words can be longer)."
+    ]
+  }
+}
