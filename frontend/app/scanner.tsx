@@ -1,0 +1,222 @@
+import { useContext, useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, ActivityIndicator, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { I18nContext } from './_layout';
+import { COLORS } from '../src/constants';
+import { api } from '../src/api';
+
+let CameraView: any = null;
+let useCameraPermissions: any = null;
+
+try {
+  const cam = require('expo-camera');
+  CameraView = cam.CameraView;
+  useCameraPermissions = cam.useCameraPermissions;
+} catch (e) {
+  // Camera not available (web preview)
+}
+
+function ScannerContent() {
+  const { t, lang } = useContext(I18nContext);
+  const router = useRouter();
+  const [scanned, setScanned] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions ? useCameraPermissions() : [null, () => {}];
+
+  if (!permission) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.permIcon}>📷</Text>
+        <Text style={styles.permTitle}>
+          {lang === 'el' ? 'Απαιτείται πρόσβαση κάμερας' : 'Camera access required'}
+        </Text>
+        <Text style={styles.permDesc}>
+          {lang === 'el'
+            ? 'Σκανάρετε τον QR κωδικό της απόδειξής σας για αυτόματη εισαγωγή'
+            : 'Scan your receipt QR code for automatic import'}
+        </Text>
+        <TouchableOpacity testID="grant-camera-btn" style={styles.permBtn} onPress={requestPermission} activeOpacity={0.8}>
+          <Text style={styles.permBtnText}>
+            {lang === 'el' ? 'Παραχώρηση πρόσβασης' : 'Grant access'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
+    if (scanned || loading) return;
+    setScanned(true);
+
+    // Check if the scanned data is a supported URL
+    const isSupported = data.includes('e-invoicing.gr') || data.includes('einvoice.impact.gr');
+    const isEpsilon = data.includes('epsilondigital') || data.includes('epsilonnet.gr');
+
+    if (isSupported) {
+      setLoading(true);
+      try {
+        const result = await api.importFromUrl(data);
+        Alert.alert(
+          t('success'),
+          t('receipt_imported'),
+          [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
+        );
+      } catch (e: any) {
+        Alert.alert(t('error'), e.message, [{ text: 'OK', onPress: () => setScanned(false) }]);
+      } finally {
+        setLoading(false);
+      }
+    } else if (isEpsilon) {
+      Alert.alert(
+        lang === 'el' ? 'Epsilon Digital' : 'Epsilon Digital',
+        lang === 'el'
+          ? 'Αυτή η απόδειξη είναι από Epsilon Digital. Χρησιμοποιήστε την εξαγωγή myData XML.'
+          : 'This receipt is from Epsilon Digital. Please use myData XML export instead.',
+        [{ text: 'OK', onPress: () => setScanned(false) }]
+      );
+    } else if (data.startsWith('http')) {
+      // Unknown URL - try anyway
+      setLoading(true);
+      try {
+        const result = await api.importFromUrl(data);
+        Alert.alert(t('success'), t('receipt_imported'), [
+          { text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }
+        ]);
+      } catch (e: any) {
+        Alert.alert(t('error'), e.message, [{ text: 'OK', onPress: () => setScanned(false) }]);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      Alert.alert(
+        t('error'),
+        lang === 'el'
+          ? 'Αυτός ο κωδικός δεν περιέχει link απόδειξης.'
+          : 'This code does not contain a receipt link.',
+        [{ text: 'OK', onPress: () => setScanned(false) }]
+      );
+    }
+  };
+
+  return (
+    <View style={styles.scannerContainer}>
+      {CameraView && (
+        <CameraView
+          style={StyleSheet.absoluteFillObject}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr', 'datamatrix', 'pdf417'] }}
+          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        />
+      )}
+
+      {/* Overlay */}
+      <View style={styles.overlay}>
+        <View style={styles.overlayTop} />
+        <View style={styles.overlayMiddle}>
+          <View style={styles.overlaySide} />
+          <View style={styles.scanFrame}>
+            {/* Corner markers */}
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
+          </View>
+          <View style={styles.overlaySide} />
+        </View>
+        <View style={styles.overlayBottom}>
+          <Text style={styles.scanHint}>
+            {loading
+              ? (lang === 'el' ? 'Εισαγωγή απόδειξης...' : 'Importing receipt...')
+              : (lang === 'el' ? 'Σκανάρετε τον QR κωδικό της απόδειξης' : 'Scan the receipt QR code')}
+          </Text>
+          {loading && <ActivityIndicator color="#FFF" style={{ marginTop: 12 }} />}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+export default function ScannerScreen() {
+  const { lang } = useContext(I18nContext);
+  const router = useRouter();
+
+  const cameraAvailable = CameraView !== null && useCameraPermissions !== null;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.topBar}>
+        <TouchableOpacity testID="scanner-back-btn" onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backText}>‹</Text>
+        </TouchableOpacity>
+        <Text style={styles.topTitle}>
+          {lang === 'el' ? 'Σκαν QR Κωδικού' : 'Scan QR Code'}
+        </Text>
+        <View style={{ width: 44 }} />
+      </View>
+
+      {cameraAvailable ? (
+        <ScannerContent />
+      ) : (
+        <View style={styles.center}>
+          <Text style={styles.permIcon}>📷</Text>
+          <Text style={styles.permTitle}>
+            {lang === 'el' ? 'Η κάμερα δεν είναι διαθέσιμη' : 'Camera not available'}
+          </Text>
+          <Text style={styles.permDesc}>
+            {lang === 'el'
+              ? 'Η σάρωση QR κωδικού απαιτεί φυσική συσκευή. Χρησιμοποιήστε το Expo Go στο κινητό σας.'
+              : 'QR scanning requires a physical device. Use Expo Go on your phone.'}
+          </Text>
+          <TouchableOpacity
+            testID="go-to-url-btn"
+            style={styles.permBtn}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.permBtnText}>
+              {lang === 'el' ? 'Επικόλληση Link' : 'Paste URL instead'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const SCAN_SIZE = 260;
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 10 },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  backText: { fontSize: 32, color: '#FFF', fontWeight: '600' },
+  topTitle: { fontSize: 17, fontWeight: '700', color: '#FFF' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40, backgroundColor: COLORS.background },
+  permIcon: { fontSize: 64, marginBottom: 20 },
+  permTitle: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary, textAlign: 'center', marginBottom: 8 },
+  permDesc: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  permBtn: { backgroundColor: COLORS.primary, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 50 },
+  permBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  scannerContainer: { flex: 1 },
+  overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'center' },
+  overlayTop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  overlayMiddle: { flexDirection: 'row', height: SCAN_SIZE },
+  overlaySide: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  scanFrame: { width: SCAN_SIZE, height: SCAN_SIZE, borderRadius: 16 },
+  overlayBottom: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', paddingTop: 30 },
+  scanHint: { fontSize: 16, color: '#FFF', fontWeight: '600', textAlign: 'center' },
+  corner: { position: 'absolute', width: 28, height: 28, borderColor: COLORS.primary, borderWidth: 3 },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 12 },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 12 },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 12 },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 12 },
+});

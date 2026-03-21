@@ -119,6 +119,21 @@ export default function AddReceiptScreen() {
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <Text style={styles.title}>{t('add_receipt')}</Text>
 
+          {/* QR Scanner Button */}
+          <TouchableOpacity
+            testID="open-scanner-btn"
+            style={styles.scannerBtn}
+            onPress={() => router.push('/scanner')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.scannerIcon}>📷</Text>
+            <View style={styles.scannerTextWrap}>
+              <Text style={styles.scannerTitle}>{t('scan_qr')}</Text>
+              <Text style={styles.scannerDesc}>{t('scan_qr_desc')}</Text>
+            </View>
+            <Text style={styles.scannerArrow}>›</Text>
+          </TouchableOpacity>
+
           <View style={styles.tabs}>
             {(['url', 'xml', 'manual'] as Tab[]).map((tab) => (
               <TouchableOpacity
@@ -300,4 +315,10 @@ const styles = StyleSheet.create({
   manualTotal: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary, textAlign: 'right', marginVertical: 8 },
   removeBtn: { width: 36, height: 48, alignItems: 'center', justifyContent: 'center' },
   removeBtnText: { fontSize: 18, color: COLORS.error, fontWeight: '700' },
+  scannerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.primary, borderRadius: 20, padding: 18, marginBottom: 20 },
+  scannerIcon: { fontSize: 28 },
+  scannerTextWrap: { flex: 1, marginLeft: 14 },
+  scannerTitle: { fontSize: 17, fontWeight: '700', color: '#FFF' },
+  scannerDesc: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  scannerArrow: { fontSize: 24, color: 'rgba(255,255,255,0.6)' },
 });

@@ -44,6 +44,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="receipt/[id]" options={{ headerShown: false, presentation: 'card' }} />
+        <Stack.Screen name="scanner" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
       </Stack>
     </I18nContext.Provider>
   );
