@@ -176,7 +176,7 @@ export default function AddReceiptScreen() {
 
               <View style={styles.supportedStores}>
                 <Text style={styles.supportedTitle}>{t('supported_stores')} ({t('auto_import')}):</Text>
-                {['Σκλαβενίτης', 'Μασούτης', 'Jumbo', 'My Market'].map(s => (
+                {['Σκλαβενίτης', 'Μασούτης', 'Jumbo', 'My Market', 'Lidl'].map(s => (
                   <Text key={s} style={styles.supportedItem}>✅ {s}</Text>
                 ))}
               </View>
@@ -203,7 +203,7 @@ export default function AddReceiptScreen() {
 
               <View style={styles.supportedStores}>
                 <Text style={styles.supportedTitle}>{t('supported_stores')} ({t('xml_upload')}):</Text>
-                {['ΑΒ Βασιλόπουλος', 'Market In'].map(s => (
+                {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
                   <Text key={s} style={styles.supportedItem}>📄 {s}</Text>
                 ))}
               </View>

@@ -27,10 +27,12 @@ export const STORE_COLORS: Record<string, string> = {
   'AB': '#005696',
   'MY MARKET': '#FF6600',
   'MYMARKET': '#FF6600',
+  'METRO': '#FF6600',
   'MARKET IN': '#E30613',
   'MARKETIN': '#E30613',
   'JUMBO': '#FFD700',
   'LIDL': '#0050AA',
+  'BAZAAR': '#D4145A',
 };
 
 export function getStoreColor(storeName: string): string {

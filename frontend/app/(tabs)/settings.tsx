@@ -109,8 +109,10 @@ export default function SettingsScreen() {
               { name: 'Μασούτης', method: '✅ Auto', color: '#00A651' },
               { name: 'Jumbo', method: '✅ Auto', color: '#FFD700' },
               { name: 'My Market', method: '✅ Auto', color: '#FF6600' },
+              { name: 'Lidl', method: '✅ Auto', color: '#0050AA' },
               { name: 'ΑΒ Βασιλόπουλος', method: '📄 XML', color: '#005696' },
               { name: 'Market In', method: '📄 XML', color: '#E30613' },
+              { name: 'Bazaar', method: '📄 XML', color: '#D4145A' },
             ].map((store, i) => (
               <View key={i} style={styles.storeItem}>
                 <View style={[styles.storeDot, { backgroundColor: store.color }]} />
