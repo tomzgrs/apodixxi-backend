@@ -101,3 +101,189 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Mobile application for tracking supermarket purchases via QR scanning or URL pasting.
+  Auto-scrapes receipt data from Greek supermarkets. Supports dual language (Greek/English).
+  Recently implemented WebView fallback for Epsilon Digital stores (AB Vassilopoulos, Market In, Bazaar).
+
+backend:
+  - task: "URL Import - Entersoft/Impact providers"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Entersoft and Impact parsers working correctly"
+
+  - task: "URL Import - Epsilon Digital detection"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Returns webview_required status for Epsilon Digital URLs"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: POST /api/receipts/import-url with Epsilon Digital URL correctly returns {status: 'webview_required', url: '...', message: '...'} - Detection working perfectly"
+
+  - task: "WebView Data Import endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Endpoint /api/receipts/import-webview created to accept extracted DOM data"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: POST /api/receipts/import-webview successfully processes mock extracted data with 2 items (ΓΑΛΑ ΦΡΕΣΚΟ 1L, ΨΩΜΙ ΤΟΣΤ), creates receipt with correct totals (5.2€), stores in database, and returns proper response structure. VAT extraction from raw_text working (ΑΦΜ: 123456789). Edge cases tested: empty items rejected, malformed data rejected."
+
+  - task: "XML Import"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "myData XML parser working"
+
+  - task: "Manual Receipt Entry"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Manual entry endpoint working"
+
+  - task: "Device Registration"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Anonymous device ID registration working"
+
+  - task: "Statistics and Dashboard data"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Stats endpoint returning data correctly"
+
+frontend:
+  - task: "Add Receipt Tab - URL Import"
+    implemented: true
+    working: true
+    file: "/app/frontend/app/(tabs)/add.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "URL tab handles webview_required response and redirects to webview-import screen"
+
+  - task: "WebView Import Screen"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/webview-import.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "WebView screen created with DOM extraction JavaScript, fallback for web platform"
+
+  - task: "QR Scanner - Epsilon URL routing"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/scanner.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Scanner now routes Epsilon URLs directly to WebView screen"
+
+  - task: "API Client - importWebViewData"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/api.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added importWebViewData function to API client"
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Implemented WebView fallback for Epsilon Digital stores. Key changes:
+      1. Backend returns status: "webview_required" for epsilon digital URLs
+      2. Frontend add.tsx and scanner.tsx redirect to /webview-import?url=<url>
+      3. webview-import.tsx loads URL in WebView, injects JS to extract DOM data
+      4. Backend /api/receipts/import-webview parses the extracted data
+      Please test:
+      - POST /api/receipts/import-url with epsilon digital URL should return webview_required
+      - POST /api/receipts/import-webview with mock extracted data should create receipt
+  - agent: "testing"
+    message: |
+      ✅ BACKEND TESTING COMPLETE - All WebView import functionality working perfectly!
+      
+      TESTED SUCCESSFULLY:
+      1. Epsilon Digital URL Detection: ✅ Returns webview_required status correctly
+      2. WebView Data Import: ✅ Processes extracted data, creates receipts, stores in DB
+      3. Core API Endpoints: ✅ Device registration, stats, receipts listing all working
+      4. Edge Cases: ✅ Empty items rejected, malformed data rejected, non-supported URLs rejected
+      
+      VERIFICATION:
+      - Created test receipt with 2 items (ΓΑΛΑ ΦΡΕΣΚΟ 1L, ΨΩΜΙ ΤΟΣΤ) totaling 5.2€
+      - Receipt stored in database with correct source_type: "webview" and provider: "Epsilon Digital (WebView)"
+      - VAT extraction from raw text working (ΑΦΜ: 123456789)
+      - All backend endpoints responding correctly via https://deal-finder-396.preview.emergentagent.com/api
+      
+      Backend WebView import flow is production-ready!

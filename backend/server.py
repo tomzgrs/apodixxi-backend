@@ -76,6 +76,13 @@ class DeviceRegister(BaseModel):
     device_id: str
     language: str = "el"
 
+class WebViewExtractedData(BaseModel):
+    device_id: str
+    url: str = ""
+    raw_text: str = ""
+    items: List[dict] = []
+    store_name: str = ""
+
 # ── Parsers ──
 
 def parse_greek_number(text: str) -> float:
@@ -449,6 +456,137 @@ def detect_provider(url: str) -> str:
     return 'unknown'
 
 
+def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str) -> dict:
+    """Parse data extracted from WebView DOM injection (Epsilon Digital pages)."""
+    data = {
+        "store_name": store_hint or "",
+        "store_address": "",
+        "store_vat": "",
+        "receipt_number": "",
+        "date": "",
+        "payment_method": "",
+        "items": [],
+        "subtotal": 0.0,
+        "discount_total": 0.0,
+        "total": 0.0,
+        "vat_total": 0.0,
+        "net_total": 0.0,
+        "source_url": source_url,
+        "source_type": "webview",
+        "provider": "Epsilon Digital (WebView)"
+    }
+
+    lines = raw_text.split('\n') if raw_text else []
+
+    # Extract store info from raw text
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Store name: usually first non-empty line or contains known keywords
+        if not data["store_name"] and len(line) > 3 and not line.startswith('Α/Α') and not line.startswith('Κωδ'):
+            if any(k in line.upper() for k in ['ΑΒ', 'ΒΑΣΙΛΟΠΟΥΛ', 'MARKET', 'BAZAAR', 'Α.Ε', 'Ε.Π.Ε', 'ΣΟΥΠΕΡ', 'ΜΑΡΚΕΤ']):
+                data["store_name"] = line
+        # VAT
+        afm_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)[:\s]*(\d{9})', line)
+        if afm_match:
+            data["store_vat"] = afm_match.group(1)
+        # Date
+        date_match = re.search(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})', line)
+        if date_match and not data["date"]:
+            data["date"] = date_match.group(1)
+        # Receipt number
+        if any(k in line for k in ['Αρ. Παραστατ', 'Αριθμός', 'Α/Α', 'Receipt']):
+            num_match = re.search(r'[\d]+', line.split(':')[-1] if ':' in line else line)
+            if num_match:
+                data["receipt_number"] = num_match.group(0)
+        # Payment
+        if any(k in line for k in ['POS', 'Μετρητ', 'Κάρτα', 'ΠΛΗΡΩΜ']):
+            data["payment_method"] = line.strip()
+
+    # Process items from DOM extraction (structured data from JS)
+    if items_from_dom:
+        for item_raw in items_from_dom:
+            code = str(item_raw.get('code', '')).strip()
+            desc = str(item_raw.get('description', '')).strip()
+            if not desc:
+                continue
+
+            qty_str = str(item_raw.get('quantity', '1')).replace(',', '.')
+            price_str = str(item_raw.get('unit_price', item_raw.get('total', '0'))).replace(',', '.').replace('€', '')
+            total_str = str(item_raw.get('total', '0')).replace(',', '.').replace('€', '')
+
+            try:
+                qty = float(qty_str) if qty_str else 1.0
+            except ValueError:
+                qty = 1.0
+            try:
+                total_val = float(total_str) if total_str else 0.0
+            except ValueError:
+                total_val = 0.0
+            try:
+                unit_price = float(price_str) if price_str else (total_val / qty if qty else total_val)
+            except ValueError:
+                unit_price = total_val / qty if qty else total_val
+
+            item = {
+                "code": code,
+                "description": desc,
+                "unit": str(item_raw.get('unit', 'ΤΕΜ')).strip() or 'ΤΕΜ',
+                "quantity": qty,
+                "unit_price": round(unit_price, 5),
+                "pre_discount_value": round(total_val, 2),
+                "discount": 0.0,
+                "vat_percent": 0.0,
+                "total_value": round(total_val, 2),
+            }
+            data["items"].append(item)
+
+    # If no items from DOM, try parsing raw text for tab/space-separated product lines
+    if not data["items"] and raw_text:
+        for line in lines:
+            parts = re.split(r'\t+', line.strip())
+            if len(parts) >= 4:
+                # Try: code, description, qty, price pattern
+                possible_code = parts[0].strip()
+                if possible_code and re.match(r'^\d+$', possible_code):
+                    desc = parts[1].strip()
+                    try:
+                        total_val = float(parts[-1].replace(',', '.').replace('€', ''))
+                    except ValueError:
+                        continue
+                    item = {
+                        "code": possible_code,
+                        "description": desc,
+                        "unit": "ΤΕΜ",
+                        "quantity": 1.0,
+                        "unit_price": total_val,
+                        "pre_discount_value": total_val,
+                        "discount": 0.0,
+                        "vat_percent": 0.0,
+                        "total_value": total_val,
+                    }
+                    data["items"].append(item)
+
+    if data["items"]:
+        data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
+        data["net_total"] = data["total"]
+
+    # Try to extract total from raw text if it differs
+    for line in lines:
+        if any(k in line.upper() for k in ['ΤΕΛΙΚ', 'ΣΥΝΟΛ', 'TOTAL', 'ΠΛΗΡΩΤ']):
+            total_match = re.search(r'([\d]+[,.][\d]{2})', line)
+            if total_match:
+                try:
+                    parsed_total = float(total_match.group(1).replace(',', '.'))
+                    if parsed_total > 0:
+                        data["total"] = parsed_total
+                except ValueError:
+                    pass
+
+    return data
+
+
 # ── API Routes ──
 
 @api_router.get("/")
@@ -472,7 +610,7 @@ async def import_receipt_from_url(input: URLImportInput):
     provider = detect_provider(url)
 
     if provider == 'epsilon_digital':
-        raise HTTPException(status_code=400, detail="Epsilon Digital receipts require XML upload. Please use the 'myData (detailed)' export option.")
+        return {"status": "webview_required", "url": url, "message": "This receipt requires WebView import. Opening in-app browser..."}
 
     if provider == 'unknown':
         raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: e-invoicing.gr, einvoice.impact.gr")
@@ -543,6 +681,45 @@ async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile =
                 "last_date": receipt_data["date"],
                 "unit": item["unit"],
                 "vat_percent": item["vat_percent"],
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            },
+            "$push": {"price_history": {"price": item["total_value"], "unit_price": item["unit_price"], "date": receipt_data["date"], "quantity": item["quantity"], "receipt_id": doc["id"]}}},
+            upsert=True
+        )
+
+    doc.pop("_id", None)
+    return {"status": "success", "receipt": doc}
+
+
+@api_router.post("/receipts/import-webview")
+async def import_receipt_from_webview(input: WebViewExtractedData):
+    """Import receipt from WebView DOM extraction (Epsilon Digital stores)."""
+    receipt_data = parse_webview_extracted(
+        raw_text=input.raw_text,
+        items_from_dom=input.items,
+        store_hint=input.store_name,
+        source_url=input.url
+    )
+
+    if not receipt_data["items"]:
+        raise HTTPException(status_code=400, detail="Could not parse any products from the extracted data")
+
+    receipt = ReceiptData(device_id=input.device_id, **receipt_data)
+    doc = receipt.dict()
+    await db.receipts.insert_one(doc)
+
+    for item in receipt_data["items"]:
+        await db.products.update_one(
+            {"description": item["description"], "store_name": receipt_data["store_name"]},
+            {"$set": {
+                "description": item["description"],
+                "code": item["code"],
+                "store_name": receipt_data["store_name"],
+                "store_vat": receipt_data["store_vat"],
+                "last_price": item["total_value"],
+                "last_unit_price": item["unit_price"],
+                "last_date": receipt_data["date"],
+                "unit": item["unit"],
                 "updated_at": datetime.now(timezone.utc).isoformat()
             },
             "$push": {"price_history": {"price": item["total_value"], "unit_price": item["unit_price"], "date": receipt_data["date"], "quantity": item["quantity"], "receipt_id": doc["id"]}}},

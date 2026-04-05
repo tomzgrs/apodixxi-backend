@@ -76,18 +76,21 @@ function ScannerContent() {
         setLoading(false);
       }
     } else if (isEpsilon) {
-      Alert.alert(
-        lang === 'el' ? 'Epsilon Digital' : 'Epsilon Digital',
-        lang === 'el'
-          ? 'Αυτή η απόδειξη είναι από Epsilon Digital. Χρησιμοποιήστε την εξαγωγή myData XML.'
-          : 'This receipt is from Epsilon Digital. Please use myData XML export instead.',
-        [{ text: 'OK', onPress: () => setScanned(false) }]
-      );
+      // Navigate directly to WebView for Epsilon Digital (AB, Market In, Bazaar)
+      router.replace(`/webview-import?url=${encodeURIComponent(data)}`);
     } else if (data.startsWith('http')) {
       // Unknown URL - try anyway
       setLoading(true);
       try {
         const result = await api.importFromUrl(data);
+        
+        // Check if WebView is required
+        if (result.status === 'webview_required') {
+          setLoading(false);
+          router.replace(`/webview-import?url=${encodeURIComponent(result.url)}`);
+          return;
+        }
+        
         Alert.alert(t('success'), t('receipt_imported'), [
           { text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }
         ]);

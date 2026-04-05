@@ -103,4 +103,17 @@ export const api = {
     const device_id = await getDeviceId();
     return request(`/backup/export?device_id=${device_id}`);
   },
+
+  importWebViewData: async (data: {
+    device_id: string;
+    url: string;
+    raw_text: string;
+    items: any[];
+    store_name: string;
+  }) => {
+    return request('/receipts/import-webview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
 };

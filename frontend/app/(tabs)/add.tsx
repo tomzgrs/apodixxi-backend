@@ -10,7 +10,7 @@ import { api } from '../../src/api';
 type Tab = 'url' | 'xml' | 'manual';
 
 export default function AddReceiptScreen() {
-  const { t } = useContext(I18nContext);
+  const { t, lang } = useContext(I18nContext);
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('url');
   const [url, setUrl] = useState('');
@@ -27,6 +27,16 @@ export default function AddReceiptScreen() {
     setLoading(true);
     try {
       const result = await api.importFromUrl(url.trim());
+      
+      // Check if WebView is required (Epsilon Digital stores)
+      if (result.status === 'webview_required') {
+        setLoading(false);
+        setUrl('');
+        // Navigate to WebView screen
+        router.push(`/webview-import?url=${encodeURIComponent(result.url)}`);
+        return;
+      }
+      
       Alert.alert(t('success'), t('receipt_imported'), [
         { text: 'OK', onPress: () => { setUrl(''); router.push(`/receipt/${result.receipt.id}`); } }
       ]);
@@ -178,6 +188,10 @@ export default function AddReceiptScreen() {
                 <Text style={styles.supportedTitle}>{t('supported_stores')} ({t('auto_import')}):</Text>
                 {['Σκλαβενίτης', 'Μασούτης', 'Jumbo', 'My Market', 'Lidl'].map(s => (
                   <Text key={s} style={styles.supportedItem}>✅ {s}</Text>
+                ))}
+                <Text style={[styles.supportedTitle, { marginTop: 12 }]}>{lang === 'el' ? 'Με WebView (ανοίγει στην εφαρμογή):' : 'With WebView (opens in app):'}</Text>
+                {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
+                  <Text key={s} style={styles.supportedItem}>🌐 {s}</Text>
                 ))}
               </View>
             </View>
