@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import { useContext } from 'react';
 import { StyleSheet, View, Text, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { I18nContext } from '../_layout';
 import { COLORS } from '../../src/constants';
 
@@ -23,12 +24,20 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 
 export default function TabLayout() {
   const { t } = useContext(I18nContext);
+  const insets = useSafeAreaInsets();
+  
+  // Calculate proper bottom padding for gesture bar
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 0);
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height: 70 + bottomPadding,
+          paddingBottom: bottomPadding + 8,
+        },
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.textMuted,
         tabBarLabelStyle: styles.tabLabel,
@@ -78,8 +87,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderTopColor: COLORS.border,
     borderTopWidth: 1,
-    height: Platform.OS === 'ios' ? 88 : 64,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 8,
     paddingTop: 8,
     elevation: 8,
     shadowColor: '#000',
@@ -88,14 +95,14 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     marginTop: 2,
   },
   iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -103,9 +110,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryLight,
   },
   iconText: {
-    fontSize: 18,
+    fontSize: 22,
   },
   iconTextActive: {
-    fontSize: 20,
+    fontSize: 26,
   },
 });
