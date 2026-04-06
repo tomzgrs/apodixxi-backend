@@ -86,6 +86,27 @@ class WebViewExtractedData(BaseModel):
 
 # ── Parsers ──
 
+# VAT to Store Name mapping
+STORE_VAT_MAPPING = {
+    "094063140": "ΜΑΣΟΥΤΗΣ ΑΕ",
+    "094063169": "ΜΑΣΟΥΤΗΣ ΑΕ",
+    "800764388": "ΣΚΛΑΒΕΝΙΤΗΣ ΑΕ",
+    "094543tried5": "ΣΚΛΑΒΕΝΙΤΗΣ ΑΕ",
+    "094014249": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "094059506": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "800469072": "MARKET IN",
+    "094288618": "BAZAAR",
+    "800424460": "LIDL ΕΛΛΑΣ",
+    "099326240": "JUMBO",
+    "094281307": "MY MARKET",
+}
+
+def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
+    """Get clean store name from VAT number."""
+    if vat and vat in STORE_VAT_MAPPING:
+        return STORE_VAT_MAPPING[vat]
+    return fallback
+
 def parse_greek_number(text: str) -> float:
     if not text:
         return 0.0
@@ -233,6 +254,12 @@ def parse_entersoft(html: str, source_url: str) -> dict:
     if not data["total"] and data["items"]:
         data["total"] = sum(i["total_value"] for i in data["items"])
 
+    # Use VAT mapping for cleaner store name if available
+    if data["store_vat"]:
+        mapped_name = get_store_name_from_vat(data["store_vat"])
+        if mapped_name:
+            data["store_name"] = mapped_name
+
     return data
 
 
@@ -349,7 +376,23 @@ def parse_impact(html: str, source_url: str) -> dict:
 
     if data["items"]:
         data["total"] = sum(i["total_value"] for i in data["items"])
-        data["net_total"] = sum(parse_greek_number(str(i.get("pre_discount_value", 0))) - parse_greek_number(str(i.get("discount", 0))) for i in data["items"])
+        # Calculate net_total properly (don't multiply by 100)
+        net_sum = 0.0
+        for i in data["items"]:
+            pre_disc = i.get("pre_discount_value", 0) or 0
+            disc = i.get("discount", 0) or 0
+            if isinstance(pre_disc, str):
+                pre_disc = parse_greek_number(pre_disc)
+            if isinstance(disc, str):
+                disc = parse_greek_number(disc)
+            net_sum += (pre_disc - disc)
+        data["net_total"] = round(net_sum, 2)
+
+    # Use VAT mapping for cleaner store name if available
+    if data["store_vat"]:
+        mapped_name = get_store_name_from_vat(data["store_vat"])
+        if mapped_name:
+            data["store_name"] = mapped_name
 
     return data
 
@@ -459,8 +502,22 @@ def detect_provider(url: str) -> str:
 
 def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str) -> dict:
     """Parse data extracted from WebView DOM injection (Epsilon Digital pages)."""
+    
+    # Determine store name from URL if not provided
+    detected_store = store_hint or ""
+    if source_url:
+        url_lower = source_url.lower()
+        if 'marketin' in url_lower or 'market-in' in url_lower:
+            detected_store = "MARKET IN"
+        elif 'abmarket' in url_lower or 'epsilondigital-ab' in url_lower:
+            detected_store = "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ"
+        elif 'bazaar' in url_lower:
+            detected_store = "BAZAAR"
+        elif 'sklavenitis' in url_lower:
+            detected_store = "ΣΚΛΑΒΕΝΙΤΗΣ"
+    
     data = {
-        "store_name": store_hint or "",
+        "store_name": detected_store,
         "store_address": "",
         "store_vat": "",
         "receipt_number": "",
@@ -484,10 +541,6 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         line = line.strip()
         if not line:
             continue
-        # Store name: usually first non-empty line or contains known keywords
-        if not data["store_name"] and len(line) > 3 and not line.startswith('Α/Α') and not line.startswith('Κωδ'):
-            if any(k in line.upper() for k in ['ΑΒ', 'ΒΑΣΙΛΟΠΟΥΛ', 'MARKET', 'BAZAAR', 'Α.Ε', 'Ε.Π.Ε', 'ΣΟΥΠΕΡ', 'ΜΑΡΚΕΤ']):
-                data["store_name"] = line
         # VAT
         afm_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)[:\s]*(\d{9})', line)
         if afm_match:
@@ -497,7 +550,7 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         if date_match and not data["date"]:
             data["date"] = date_match.group(1)
         # Receipt number
-        if any(k in line for k in ['Αρ. Παραστατ', 'Αριθμός', 'Α/Α', 'Receipt']):
+        if any(k in line for k in ['Αρ. Παραστατ', 'Αριθμός', 'Αρ. Τιμολ', 'Receipt']):
             num_match = re.search(r'[\d]+', line.split(':')[-1] if ':' in line else line)
             if num_match:
                 data["receipt_number"] = num_match.group(0)
@@ -505,12 +558,30 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         if any(k in line for k in ['POS', 'Μετρητ', 'Κάρτα', 'ΠΛΗΡΩΜ']):
             data["payment_method"] = line.strip()
 
+    # Use VAT mapping for better store name
+    if data["store_vat"]:
+        mapped_name = get_store_name_from_vat(data["store_vat"])
+        if mapped_name:
+            data["store_name"] = mapped_name
+
     # Process items from DOM extraction (structured data from JS)
+    # Helper function to check if this is a total row
+    def is_total_row(text):
+        if not text:
+            return False
+        t = text.upper().strip()
+        return t in ['ΣΥΝΟΛΟ', 'ΣΥΝΟΛΑ', 'ΤΕΛΙΚΟ', 'TOTAL', 'ΠΛΗΡΩΤΕΟ'] or \
+               (len(t) < 8 and re.match(r'^\d+[,.]?\d*$', t))
+
     if items_from_dom:
         for item_raw in items_from_dom:
             code = str(item_raw.get('code', '')).strip()
             desc = str(item_raw.get('description', '')).strip()
             if not desc:
+                continue
+            
+            # Skip total rows
+            if is_total_row(desc) or is_total_row(code):
                 continue
 
             qty_str = str(item_raw.get('quantity', '1')).replace(',', '.')

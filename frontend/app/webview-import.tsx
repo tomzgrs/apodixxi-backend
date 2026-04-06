@@ -26,29 +26,19 @@ const DOM_EXTRACTION_JS = `
     // Get all visible text for backup parsing
     result.raw_text = document.body.innerText || '';
 
-    // Extract store name - try multiple patterns
-    var storeSelectors = [
-      '.mud-typography-h5',
-      '.mud-typography-h6',
-      'h1', 'h2', 'h3',
-      '[class*="issuer"]',
-      '[class*="company"]',
-      '[class*="header"]'
-    ];
-    for (var s = 0; s < storeSelectors.length; s++) {
-      var storeEls = document.querySelectorAll(storeSelectors[s]);
-      for (var se = 0; se < storeEls.length; se++) {
-        var txt = storeEls[se].innerText ? storeEls[se].innerText.trim() : '';
-        if (txt && txt.length > 3 && txt.length < 100) {
-          // Check for known Greek store keywords
-          if (/ΒΑΣΙΛΟΠΟΥΛ|MARKET|BAZAAR|ΑΒ\\s|A\\.?B\\.?|ΜΑΡΚΕΤ/i.test(txt) || 
-              (!result.store_name && !/Κωδικ|Περιγρ|Ποσότ|Σύνολο|Τιμή/i.test(txt))) {
-            result.store_name = txt.split('\\n')[0].trim();
-            break;
-          }
-        }
+    // Extract store name from URL domain
+    var urlMatch = window.location.hostname.match(/epsilondigital-([a-z]+)/i);
+    if (urlMatch) {
+      var storeDomain = urlMatch[1].toLowerCase();
+      if (storeDomain === 'marketin' || storeDomain === 'market-in') {
+        result.store_name = 'MARKET IN';
+      } else if (storeDomain === 'abmarket' || storeDomain === 'ab') {
+        result.store_name = 'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ';
+      } else if (storeDomain === 'bazaar') {
+        result.store_name = 'BAZAAR';
+      } else if (storeDomain === 'sklavenitis') {
+        result.store_name = 'ΣΚΛΑΒΕΝΙΤΗΣ';
       }
-      if (result.store_name) break;
     }
 
     // Extract VAT number
@@ -60,44 +50,70 @@ const DOM_EXTRACTION_JS = `
     if (dateMatch) result.date = dateMatch[1];
 
     // Extract receipt number
-    var receiptMatch = result.raw_text.match(/(?:Αρ\\.?\\s*Παραστ|Αριθμός|Α\\/Α)[^\\d]*(\\d+)/i);
+    var receiptMatch = result.raw_text.match(/(?:Αρ\\.?\\s*Παραστ|Αριθμός|Αρ\\.\\s*Τιμολ)[^\\d]*(\\d+)/i);
     if (receiptMatch) result.receipt_number = receiptMatch[1];
 
-    // Try MudBlazor DataGrid/Table first (most common in Epsilon Digital)
+    // Function to check if a row is the TOTAL row (should be excluded)
+    function isTotalRow(text) {
+      if (!text) return false;
+      var t = text.toUpperCase();
+      return t === 'ΣΥΝΟΛΟ' || t === 'ΣΥΝΟΛΑ' || t === 'ΤΕΛΙΚΟ' || 
+             t === 'TOTAL' || t === 'ΠΛΗΡΩΤΕΟ' || /^\\d+[,.]\\d{2}$/.test(text.trim());
+    }
+
+    // Try MudBlazor DataGrid/Table (Epsilon Digital uses this)
     var mudRows = document.querySelectorAll('.mud-table-body tr, .mud-table-row, [class*="mud-table"] tbody tr');
     for (var m = 0; m < mudRows.length; m++) {
       var mcells = mudRows[m].querySelectorAll('td, .mud-table-cell');
       if (mcells.length >= 3) {
         var codeText = mcells[0] ? mcells[0].innerText.trim() : '';
         var descText = mcells[1] ? mcells[1].innerText.trim() : '';
-        var qtyText = mcells.length > 2 ? mcells[2].innerText.trim() : '1';
-        var unitText = mcells.length > 3 ? mcells[3].innerText.trim() : '';
-        var priceText = mcells.length > 4 ? mcells[4].innerText.trim() : '0';
-        var totalText = mcells[mcells.length - 1] ? mcells[mcells.length - 1].innerText.trim() : '0';
-
-        // Skip header rows
-        if (/^(Κωδ|Περιγρ|Α\\/Α|#|Code|Desc|Ποσότητα|Τιμή)/i.test(descText)) continue;
+        
+        // Skip header rows and total rows
+        if (/^(Κωδ|Περιγρ|Α\\/Α|#|Code|Desc|Ποσότητα|Τιμή|Αξία)/i.test(descText)) continue;
         if (!descText || descText.length < 2) continue;
+        if (isTotalRow(descText)) continue;
+        if (isTotalRow(codeText)) continue;
+
+        // Find the LAST column with a price (this is usually the total with VAT)
+        var totalText = '0';
+        for (var c = mcells.length - 1; c >= 0; c--) {
+          var cellVal = mcells[c] ? mcells[c].innerText.trim() : '';
+          if (/^\\d+[,.]\\d{2}/.test(cellVal.replace('€', '').trim())) {
+            totalText = cellVal;
+            break;
+          }
+        }
+
+        // Get quantity (usually 3rd column)
+        var qtyText = mcells.length > 2 ? mcells[2].innerText.trim() : '1';
+        
+        // Get unit price (usually column before total or after quantity)
+        var priceText = totalText;
+        if (mcells.length > 4) {
+          var possiblePrice = mcells[mcells.length - 2] ? mcells[mcells.length - 2].innerText.trim() : '';
+          if (/^\\d+[,.]\\d{2}/.test(possiblePrice.replace('€', '').trim())) {
+            priceText = possiblePrice;
+          }
+        }
 
         var mitem = {
           code: codeText,
           description: descText,
-          unit: unitText || 'ΤΕΜ',
+          unit: 'ΤΕΜ',
           quantity: qtyText.replace(',', '.'),
-          unit_price: priceText.replace(',', '.').replace('€', ''),
-          total: totalText.replace(',', '.').replace('€', '')
+          unit_price: priceText.replace(',', '.').replace('€', '').trim(),
+          total: totalText.replace(',', '.').replace('€', '').trim()
         };
 
-        // Check for duplicates
-        var exists = false;
-        for (var e = 0; e < result.items.length; e++) {
-          if (result.items[e].description === mitem.description) { exists = true; break; }
+        // DO NOT deduplicate - same product can appear multiple times!
+        if (mitem.description && !isTotalRow(mitem.description)) {
+          result.items.push(mitem);
         }
-        if (!exists && mitem.description) result.items.push(mitem);
       }
     }
 
-    // Try standard HTML tables if MudBlazor didn't work
+    // Try standard HTML tables if MudBlazor didn't find items
     if (result.items.length === 0) {
       var tables = document.querySelectorAll('table');
       for (var t = 0; t < tables.length; t++) {
@@ -105,51 +121,42 @@ const DOM_EXTRACTION_JS = `
         for (var r = 0; r < rows.length; r++) {
           var cells = rows[r].querySelectorAll('td');
           if (cells.length >= 3) {
+            var code = cells[0] ? cells[0].innerText.trim() : '';
             var desc = cells[1] ? cells[1].innerText.trim() : '';
-            if (/^(Κωδ|Περιγρ|Α\\/Α|#|Σύνολο|Code|Desc)/i.test(desc)) continue;
+            
+            // Skip headers and totals
+            if (/^(Κωδ|Περιγρ|Α\\/Α|#|Σύνολο|Code|Desc|Αξία)/i.test(desc)) continue;
             if (!desc || desc.length < 2) continue;
+            if (isTotalRow(desc) || isTotalRow(code)) continue;
+
+            // Get last price column as total
+            var total = '0';
+            for (var ci = cells.length - 1; ci >= 0; ci--) {
+              var cv = cells[ci] ? cells[ci].innerText.trim() : '';
+              if (/^\\d+[,.]\\d{2}/.test(cv.replace('€', '').trim())) {
+                total = cv;
+                break;
+              }
+            }
 
             var item = {
-              code: cells[0] ? cells[0].innerText.trim() : '',
+              code: code,
               description: desc,
               quantity: cells.length > 2 ? cells[2].innerText.trim().replace(',', '.') : '1',
-              unit_price: cells.length > 3 ? cells[3].innerText.trim().replace(',', '.').replace('€', '') : '0',
-              total: cells[cells.length - 1] ? cells[cells.length - 1].innerText.trim().replace(',', '.').replace('€', '') : '0'
+              unit_price: total.replace(',', '.').replace('€', '').trim(),
+              total: total.replace(',', '.').replace('€', '').trim()
             };
             
-            var itemExists = false;
-            for (var ie = 0; ie < result.items.length; ie++) {
-              if (result.items[ie].description === item.description) { itemExists = true; break; }
-            }
-            if (!itemExists) result.items.push(item);
-          }
-        }
-      }
-    }
-
-    // Try extracting from grid/card layouts
-    if (result.items.length === 0) {
-      var gridItems = document.querySelectorAll('[class*="item"], [class*="product"], [class*="line"]');
-      for (var g = 0; g < gridItems.length; g++) {
-        var itemText = gridItems[g].innerText;
-        if (itemText && itemText.length > 5 && itemText.length < 500) {
-          var lines = itemText.split('\\n').filter(function(l) { return l.trim().length > 0; });
-          if (lines.length >= 2) {
-            var priceMatch = itemText.match(/(\\d+[,.]\\d{2})/g);
-            if (priceMatch && priceMatch.length > 0) {
-              result.items.push({
-                code: '',
-                description: lines[0].trim(),
-                quantity: '1',
-                unit_price: priceMatch[priceMatch.length - 1].replace(',', '.'),
-                total: priceMatch[priceMatch.length - 1].replace(',', '.')
-              });
+            // DO NOT deduplicate!
+            if (item.description && !isTotalRow(item.description)) {
+              result.items.push(item);
             }
           }
         }
       }
     }
 
+    // Post result to React Native
     window.ReactNativeWebView.postMessage(JSON.stringify({type: 'extracted', data: result}));
   } catch(err) {
     window.ReactNativeWebView.postMessage(JSON.stringify({type: 'error', message: err.toString()}));
