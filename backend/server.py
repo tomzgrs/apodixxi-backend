@@ -108,10 +108,35 @@ def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
     return fallback
 
 def parse_greek_number(text: str) -> float:
+    """Parse Greek-formatted numbers (uses comma as decimal separator)."""
     if not text:
         return 0.0
     text = text.strip().replace('\xa0', '').replace('EUR', '').replace('€', '').strip()
-    text = text.replace('.', '').replace(',', '.')
+    
+    # Handle different number formats:
+    # Greek: 1.234,56 or 1234,56
+    # English: 1,234.56 or 1234.56
+    
+    # Count dots and commas
+    dots = text.count('.')
+    commas = text.count(',')
+    
+    if commas == 1 and dots == 0:
+        # Format: 1234,56 - comma is decimal
+        text = text.replace(',', '.')
+    elif dots == 1 and commas == 0:
+        # Format: 1234.56 - already correct
+        pass
+    elif dots >= 1 and commas == 1:
+        # Format: 1.234,56 - dot is thousand separator, comma is decimal
+        text = text.replace('.', '').replace(',', '.')
+    elif commas >= 1 and dots == 1:
+        # Format: 1,234.56 - comma is thousand separator, dot is decimal
+        text = text.replace(',', '')
+    else:
+        # Just try to parse, removing non-numeric except decimal point
+        text = text.replace('.', '').replace(',', '.')
+    
     try:
         return float(text)
     except (ValueError, TypeError):

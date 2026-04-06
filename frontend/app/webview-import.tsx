@@ -26,19 +26,18 @@ const DOM_EXTRACTION_JS = `
     // Get all visible text for backup parsing
     result.raw_text = document.body.innerText || '';
 
-    // Extract store name from URL domain
-    var urlMatch = window.location.hostname.match(/epsilondigital-([a-z]+)/i);
-    if (urlMatch) {
-      var storeDomain = urlMatch[1].toLowerCase();
-      if (storeDomain === 'marketin' || storeDomain === 'market-in') {
-        result.store_name = 'MARKET IN';
-      } else if (storeDomain === 'abmarket' || storeDomain === 'ab') {
-        result.store_name = 'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ';
-      } else if (storeDomain === 'bazaar') {
-        result.store_name = 'BAZAAR';
-      } else if (storeDomain === 'sklavenitis') {
-        result.store_name = 'ΣΚΛΑΒΕΝΙΤΗΣ';
-      }
+    // Extract store name from URL - more robust matching
+    var fullUrl = window.location.href.toLowerCase();
+    var hostname = window.location.hostname.toLowerCase();
+    
+    if (hostname.includes('marketin') || fullUrl.includes('marketin')) {
+      result.store_name = 'MARKET IN';
+    } else if (hostname.includes('abmarket') || fullUrl.includes('abmarket')) {
+      result.store_name = 'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ';
+    } else if (hostname.includes('bazaar') || fullUrl.includes('bazaar')) {
+      result.store_name = 'BAZAAR';
+    } else if (hostname.includes('sklavenitis') || fullUrl.includes('sklavenitis')) {
+      result.store_name = 'ΣΚΛΑΒΕΝΙΤΗΣ';
     }
 
     // Extract VAT number
@@ -53,126 +52,105 @@ const DOM_EXTRACTION_JS = `
     var receiptMatch = result.raw_text.match(/(?:Αρ\\.?\\s*Παραστ|Αριθμός|Αρ\\.\\s*Τιμολ)[^\\d]*(\\d+)/i);
     if (receiptMatch) result.receipt_number = receiptMatch[1];
 
-    // Function to check if a row is the TOTAL row (should be excluded)
-    function isTotalRow(text) {
-      if (!text) return false;
-      var t = text.toUpperCase();
-      return t === 'ΣΥΝΟΛΟ' || t === 'ΣΥΝΟΛΑ' || t === 'ΤΕΛΙΚΟ' || 
-             t === 'TOTAL' || t === 'ΠΛΗΡΩΤΕΟ' || /^\\d+[,.]\\d{2}$/.test(text.trim());
-    }
-
-    // Function to check if a row is a payment method (should be excluded)
-    function isPaymentRow(text) {
-      if (!text) return false;
-      var t = text.toUpperCase();
-      return t.includes('EFT-POS') || t.includes('EFT POS') || t.includes('EFTPOS') ||
-             t.includes('POS') || t.includes('ΜΕΤΡΗΤΑ') || t.includes('ΚΑΡΤΑ') ||
-             t.includes('CASH') || t.includes('CARD') || t.includes('ΠΛΗΡΩΜ') ||
-             t.includes('VISA') || t.includes('MASTERCARD') || t.includes('CREDIT') ||
-             t.includes('DEBIT') || t.includes('PAYMENT') || t.includes('ΑΠΟΔ');
+    // Function to check if a row should be excluded (totals, headers, payments)
+    function shouldExcludeRow(text) {
+      if (!text) return true;
+      var t = text.toUpperCase().trim();
+      
+      // Exclude if it's just a number (price without description)
+      if (/^\\d+[,.]\\d{2}$/.test(t)) return true;
+      
+      // Exclude total keywords
+      var totalKeywords = ['ΣΥΝΟΛΟ', 'ΣΥΝΟΛΑ', 'ΤΕΛΙΚΟ', 'TOTAL', 'ΠΛΗΡΩΤΕΟ', 
+                          'ΤΕΛΙΚΗ ΑΞΙΑ', 'ΚΑΘΑΡΗ ΑΞΙΑ', 'ΦΠΑ', 'VAT', 'ΥΠΟΣΥΝΟΛΟ',
+                          'SUBTOTAL', 'GRAND TOTAL', 'ΑΞΙΑ ΜΕ', 'ΑΞΙΑ ΧΩΡΙΣ'];
+      for (var i = 0; i < totalKeywords.length; i++) {
+        if (t.includes(totalKeywords[i])) return true;
+      }
+      
+      // Exclude payment methods
+      var paymentKeywords = ['EFT-POS', 'EFT POS', 'EFTPOS', 'ΜΕΤΡΗΤΑ', 'ΚΑΡΤΑ',
+                            'CASH', 'CARD', 'ΠΛΗΡΩΜ', 'VISA', 'MASTERCARD', 
+                            'CREDIT', 'DEBIT', 'PAYMENT', 'ΑΠΟΔ', 'ΡΕΣΤΑ', 'CHANGE'];
+      for (var j = 0; j < paymentKeywords.length; j++) {
+        if (t.includes(paymentKeywords[j])) return true;
+      }
+      
+      // Exclude header keywords
+      var headerKeywords = ['ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'ΑΞΙΑ',
+                           'Α/Α', 'CODE', 'DESCRIPTION', 'QTY', 'PRICE', 'AMOUNT'];
+      if (headerKeywords.indexOf(t) !== -1) return true;
+      
+      // Exclude if too short
+      if (t.length < 3) return true;
+      
+      return false;
     }
 
     // Try MudBlazor DataGrid/Table (Epsilon Digital uses this)
-    var mudRows = document.querySelectorAll('.mud-table-body tr, .mud-table-row, [class*="mud-table"] tbody tr');
+    var mudRows = document.querySelectorAll('.mud-table-body tr, .mud-table-row, [class*="mud-table"] tbody tr, table tbody tr, table tr');
+    
     for (var m = 0; m < mudRows.length; m++) {
       var mcells = mudRows[m].querySelectorAll('td, .mud-table-cell');
-      if (mcells.length >= 3) {
-        var codeText = mcells[0] ? mcells[0].innerText.trim() : '';
-        var descText = mcells[1] ? mcells[1].innerText.trim() : '';
-        
-        // Skip header rows and total rows
-        if (/^(Κωδ|Περιγρ|Α\\/Α|#|Code|Desc|Ποσότητα|Τιμή|Αξία)/i.test(descText)) continue;
-        if (!descText || descText.length < 2) continue;
-        if (isTotalRow(descText)) continue;
-        if (isTotalRow(codeText)) continue;
-        if (isPaymentRow(descText)) continue;
-        if (isPaymentRow(codeText)) continue;
-
-        // Find ALL columns with prices and get the LAST one (usually with VAT)
-        var totalText = '0';
-        var allPrices = [];
-        for (var c = 0; c < mcells.length; c++) {
-          var cellVal = mcells[c] ? mcells[c].innerText.trim() : '';
-          // Match price format (with optional € symbol)
-          var priceMatch = cellVal.replace('€', '').trim().match(/^(\\d+[,.]\\d{2})$/);
-          if (priceMatch) {
-            allPrices.push({index: c, value: priceMatch[1]});
-          }
-        }
-        // Get the last price (should be total with VAT)
-        if (allPrices.length > 0) {
-          totalText = allPrices[allPrices.length - 1].value;
-        }
-
-        // Get quantity (usually 3rd column)
-        var qtyText = mcells.length > 2 ? mcells[2].innerText.trim() : '1';
-        
-        // Get unit price (usually column before total or after quantity)
-        var priceText = totalText;
-        if (mcells.length > 4) {
-          var possiblePrice = mcells[mcells.length - 2] ? mcells[mcells.length - 2].innerText.trim() : '';
-          if (/^\\d+[,.]\\d{2}/.test(possiblePrice.replace('€', '').trim())) {
-            priceText = possiblePrice;
-          }
-        }
-
-        var mitem = {
-          code: codeText,
-          description: descText,
-          unit: 'ΤΕΜ',
-          quantity: qtyText.replace(',', '.'),
-          unit_price: priceText.replace(',', '.').replace('€', '').trim(),
-          total: totalText.replace(',', '.').replace('€', '').trim()
-        };
-
-        // DO NOT deduplicate - same product can appear multiple times!
-        if (mitem.description && !isTotalRow(mitem.description) && !isPaymentRow(mitem.description)) {
-          result.items.push(mitem);
+      if (mcells.length < 3) continue;
+      
+      // Try to identify code and description columns
+      var codeText = '';
+      var descText = '';
+      var qtyText = '1';
+      
+      // First cell is usually code (numeric)
+      var firstCell = mcells[0] ? mcells[0].innerText.trim() : '';
+      if (/^\\d+$/.test(firstCell)) {
+        codeText = firstCell;
+        descText = mcells[1] ? mcells[1].innerText.trim() : '';
+      } else {
+        // Sometimes description is in first cell
+        descText = firstCell;
+        codeText = '';
+      }
+      
+      // Skip if description should be excluded
+      if (shouldExcludeRow(descText)) continue;
+      if (shouldExcludeRow(codeText) && descText.length < 3) continue;
+      
+      // Find ALL columns with prices
+      var allPrices = [];
+      for (var c = 0; c < mcells.length; c++) {
+        var cellVal = mcells[c] ? mcells[c].innerText.trim() : '';
+        var cleanVal = cellVal.replace(/[€\\s]/g, '').replace(',', '.');
+        if (/^\\d+\\.\\d{2}$/.test(cleanVal)) {
+          allPrices.push({index: c, value: cleanVal});
         }
       }
-    }
-
-    // Try standard HTML tables if MudBlazor didn't find items
-    if (result.items.length === 0) {
-      var tables = document.querySelectorAll('table');
-      for (var t = 0; t < tables.length; t++) {
-        var rows = tables[t].querySelectorAll('tbody tr, tr');
-        for (var r = 0; r < rows.length; r++) {
-          var cells = rows[r].querySelectorAll('td');
-          if (cells.length >= 3) {
-            var code = cells[0] ? cells[0].innerText.trim() : '';
-            var desc = cells[1] ? cells[1].innerText.trim() : '';
-            
-            // Skip headers and totals
-            if (/^(Κωδ|Περιγρ|Α\\/Α|#|Σύνολο|Code|Desc|Αξία)/i.test(desc)) continue;
-            if (!desc || desc.length < 2) continue;
-            if (isTotalRow(desc) || isTotalRow(code)) continue;
-            if (isPaymentRow(desc) || isPaymentRow(code)) continue;
-
-            // Get last price column as total
-            var total = '0';
-            for (var ci = cells.length - 1; ci >= 0; ci--) {
-              var cv = cells[ci] ? cells[ci].innerText.trim() : '';
-              if (/^\\d+[,.]\\d{2}/.test(cv.replace('€', '').trim())) {
-                total = cv;
-                break;
-              }
-            }
-
-            var item = {
-              code: code,
-              description: desc,
-              quantity: cells.length > 2 ? cells[2].innerText.trim().replace(',', '.') : '1',
-              unit_price: total.replace(',', '.').replace('€', '').trim(),
-              total: total.replace(',', '.').replace('€', '').trim()
-            };
-            
-            // DO NOT deduplicate!
-            if (item.description && !isTotalRow(item.description)) {
-              result.items.push(item);
-            }
-          }
+      
+      // Get the last price (should be total with VAT)
+      var totalText = '0';
+      if (allPrices.length > 0) {
+        totalText = allPrices[allPrices.length - 1].value;
+      }
+      
+      // Get quantity (usually 3rd or 4th column, look for decimal or integer)
+      for (var q = 2; q < Math.min(mcells.length - 1, 5); q++) {
+        var qVal = mcells[q] ? mcells[q].innerText.trim().replace(',', '.') : '';
+        if (/^\\d+(\\.\\d+)?$/.test(qVal) && parseFloat(qVal) < 1000) {
+          qtyText = qVal;
+          break;
         }
+      }
+      
+      var mitem = {
+        code: codeText,
+        description: descText,
+        unit: 'ΤΕΜ',
+        quantity: qtyText,
+        unit_price: totalText,
+        total: totalText
+      };
+      
+      // Add item - NO DEDUPLICATION, same product can appear multiple times
+      if (mitem.description && mitem.description.length >= 3) {
+        result.items.push(mitem);
       }
     }
 
