@@ -22,11 +22,34 @@ export default function AddReceiptScreen() {
   const [manualItems, setManualItems] = useState([{ description: '', quantity: '1', price: '' }]);
   const [manualTotal, setManualTotal] = useState('');
 
-  const handleUrlImport = async () => {
+  const handleUrlImport = async (forceImport: boolean = false) => {
     if (!url.trim()) return;
     setLoading(true);
     try {
-      const result = await api.importFromUrl(url.trim());
+      const result = await api.importFromUrl(url.trim(), forceImport);
+      
+      // Check if duplicate receipt
+      if (result.status === 'duplicate') {
+        setLoading(false);
+        Alert.alert(
+          lang === 'el' ? 'Απόδειξη υπάρχει ήδη' : 'Receipt already exists',
+          lang === 'el' 
+            ? `Αυτή η απόδειξη έχει ήδη εισαχθεί από ${result.existing_receipt.store_name} στις ${result.existing_receipt.date}. Θέλετε να την εισάγετε ξανά;`
+            : `This receipt was already imported from ${result.existing_receipt.store_name} on ${result.existing_receipt.date}. Do you want to import it again?`,
+          [
+            { 
+              text: lang === 'el' ? 'Προβολή υπάρχουσας' : 'View existing', 
+              onPress: () => router.push(`/receipt/${result.existing_receipt.id}`)
+            },
+            { 
+              text: lang === 'el' ? 'Εισαγωγή ξανά' : 'Import again',
+              onPress: () => handleUrlImport(true)
+            },
+            { text: lang === 'el' ? 'Άκυρο' : 'Cancel', style: 'cancel' }
+          ]
+        );
+        return;
+      }
       
       // Check if WebView is required (Epsilon Digital stores)
       if (result.status === 'webview_required') {
@@ -177,7 +200,7 @@ export default function AddReceiptScreen() {
               <TouchableOpacity
                 testID="import-url-btn"
                 style={[styles.primaryBtn, (!url.trim() || loading) && styles.btnDisabled]}
-                onPress={handleUrlImport}
+                onPress={() => handleUrlImport(false)}
                 disabled={!url.trim() || loading}
                 activeOpacity={0.8}
               >

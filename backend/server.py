@@ -71,6 +71,7 @@ class ManualReceiptInput(BaseModel):
 class URLImportInput(BaseModel):
     device_id: str
     url: str
+    force_import: bool = False  # If true, import even if duplicate
 
 class DeviceRegister(BaseModel):
     device_id: str
@@ -610,10 +611,33 @@ async def import_receipt_from_url(input: URLImportInput):
     provider = detect_provider(url)
 
     if provider == 'epsilon_digital':
+        # Check for duplicates even for epsilon digital
+        if not input.force_import:
+            existing = await db.receipts.find_one({"source_url": url, "device_id": input.device_id})
+            if existing:
+                existing.pop("_id", None)
+                return {
+                    "status": "duplicate",
+                    "message": "Αυτή η απόδειξη έχει ήδη εισαχθεί.",
+                    "existing_receipt": existing,
+                    "url": url
+                }
         return {"status": "webview_required", "url": url, "message": "This receipt requires WebView import. Opening in-app browser..."}
 
     if provider == 'unknown':
         raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: e-invoicing.gr, einvoice.impact.gr")
+
+    # Check for duplicate receipt by URL
+    if not input.force_import:
+        existing = await db.receipts.find_one({"source_url": url, "device_id": input.device_id})
+        if existing:
+            existing.pop("_id", None)
+            return {
+                "status": "duplicate",
+                "message": "Αυτή η απόδειξη έχει ήδη εισαχθεί.",
+                "existing_receipt": existing,
+                "url": url
+            }
 
     if provider == 'entersoft':
         html = await fetch_entersoft_invoice(url)

@@ -8,7 +8,7 @@ import { api } from '../../src/api';
 
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t } = useContext(I18nContext);
+  const { t, lang } = useContext(I18nContext);
   const router = useRouter();
   const [receipt, setReceipt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -155,15 +155,25 @@ export default function ReceiptDetailScreen() {
         </View>
 
         <View style={styles.sourceCard}>
-          <Text style={styles.sourceLabel}>{lang === 'el' ? 'Πηγή' : 'Source'}: {receipt.provider}</Text>
-          <Text style={styles.sourceType}>{receipt.source_type}</Text>
+          <View style={styles.sourceRow}>
+            <Text style={styles.sourceLabel}>{lang === 'el' ? 'Πηγή' : 'Source'}:</Text>
+            <Text style={styles.sourceValue}>{receipt.provider}</Text>
+          </View>
+          <View style={styles.sourceRow}>
+            <Text style={styles.sourceLabel}>{lang === 'el' ? 'Τύπος' : 'Type'}:</Text>
+            <Text style={styles.sourceValue}>{receipt.source_type}</Text>
+          </View>
+          {receipt.source_url ? (
+            <View style={styles.sourceLinkContainer}>
+              <Text style={styles.sourceLabel}>{lang === 'el' ? 'Link' : 'Link'}:</Text>
+              <Text style={styles.sourceLink} numberOfLines={2}>{receipt.source_url}</Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-const lang = 'el'; // fallback
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
@@ -175,36 +185,39 @@ const styles = StyleSheet.create({
   topTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textPrimary },
   deleteBtn: { padding: 8 },
   deleteText: { fontSize: 20 },
-  scroll: { padding: 20, paddingBottom: 40 },
-  storeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  storeIcon: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  storeIconText: { color: '#FFF', fontSize: 18, fontWeight: '800' },
-  storeInfo: { flex: 1, marginLeft: 16 },
-  storeName: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary },
-  storeAddr: { fontSize: 13, color: COLORS.textSecondary, marginTop: 2 },
-  storeVat: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
-  metaRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  metaItem: { flex: 1, backgroundColor: COLORS.surface, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: COLORS.borderLight },
-  metaLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  metaValue: { fontSize: 14, fontWeight: '600', color: COLORS.textPrimary, marginTop: 4 },
-  itemsCard: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: COLORS.borderLight, marginBottom: 16 },
-  itemsTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  itemRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 12 },
+  scroll: { padding: 16, paddingBottom: 40 },
+  storeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, backgroundColor: COLORS.surface, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: COLORS.borderLight },
+  storeIcon: { width: 50, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  storeIconText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  storeInfo: { flex: 1, marginLeft: 14 },
+  storeName: { fontSize: 18, fontWeight: '800', color: COLORS.textPrimary },
+  storeAddr: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
+  storeVat: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
+  metaRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  metaItem: { flex: 1, backgroundColor: COLORS.surface, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.borderLight },
+  metaLabel: { fontSize: 10, fontWeight: '600', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  metaValue: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: 3 },
+  itemsCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: COLORS.borderLight, marginBottom: 12 },
+  itemsTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  itemRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10 },
   itemBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
   itemInfo: { flex: 1 },
-  itemDesc: { fontSize: 14, fontWeight: '600', color: COLORS.textPrimary, lineHeight: 20 },
-  itemMeta: { fontSize: 12, color: COLORS.textSecondary, marginTop: 3 },
-  itemPriceWrap: { alignItems: 'flex-end', marginLeft: 12 },
-  itemPrice: { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
-  itemDiscount: { fontSize: 11, color: COLORS.success, fontWeight: '600', marginTop: 2 },
-  totalsCard: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 18, borderWidth: 1, borderColor: COLORS.borderLight, marginBottom: 16 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
-  totalLabel: { fontSize: 14, color: COLORS.textSecondary },
-  totalValue: { fontSize: 14, fontWeight: '600', color: COLORS.textPrimary },
-  grandTotal: { borderTopWidth: 2, borderTopColor: COLORS.primary, marginTop: 8, paddingTop: 12 },
-  grandTotalLabel: { fontSize: 16, fontWeight: '800', color: COLORS.textPrimary },
-  grandTotalValue: { fontSize: 20, fontWeight: '800', color: COLORS.primary },
-  sourceCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.borderLight, borderRadius: 14, padding: 12 },
-  sourceLabel: { fontSize: 12, color: COLORS.textSecondary },
-  sourceType: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, textTransform: 'uppercase' },
+  itemDesc: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, lineHeight: 18 },
+  itemMeta: { fontSize: 11, color: COLORS.textSecondary, marginTop: 2 },
+  itemPriceWrap: { alignItems: 'flex-end', marginLeft: 10 },
+  itemPrice: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary },
+  itemDiscount: { fontSize: 10, color: COLORS.success, fontWeight: '600', marginTop: 1 },
+  totalsCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: COLORS.borderLight, marginBottom: 12 },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
+  totalLabel: { fontSize: 13, color: COLORS.textSecondary },
+  totalValue: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary },
+  grandTotal: { borderTopWidth: 2, borderTopColor: COLORS.primary, marginTop: 6, paddingTop: 10 },
+  grandTotalLabel: { fontSize: 15, fontWeight: '800', color: COLORS.textPrimary },
+  grandTotalValue: { fontSize: 18, fontWeight: '800', color: COLORS.primary },
+  sourceCard: { backgroundColor: COLORS.borderLight, borderRadius: 12, padding: 12 },
+  sourceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  sourceLabel: { fontSize: 11, color: COLORS.textSecondary },
+  sourceValue: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted },
+  sourceLinkContainer: { marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: COLORS.surface },
+  sourceLink: { fontSize: 10, color: COLORS.primary, marginTop: 2 },
 });

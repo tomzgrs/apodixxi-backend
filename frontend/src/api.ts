@@ -36,11 +36,11 @@ export const api = {
     });
   },
 
-  importFromUrl: async (url: string) => {
+  importFromUrl: async (url: string, forceImport: boolean = false) => {
     const device_id = await getDeviceId();
     return request('/receipts/import-url', {
       method: 'POST',
-      body: JSON.stringify({ device_id, url }),
+      body: JSON.stringify({ device_id, url, force_import: forceImport }),
     });
   },
 

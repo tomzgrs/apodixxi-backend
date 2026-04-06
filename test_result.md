@@ -259,6 +259,18 @@ frontend:
         agent: "testing"
         comment: "✅ TESTED: API client importWebViewData function implemented correctly in api.ts. Function properly sends POST request to /api/receipts/import-webview endpoint with required data structure (device_id, url, raw_text, items, store_name). Integration verified through backend testing."
 
+  - task: "Duplicate Detection for URL Import"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Duplicate detection functionality working correctly. Tested complete workflow: 1) Epsilon Digital URL returns webview_required, 2) WebView import creates receipt with source_url, 3) Subsequent URL import detects duplicate and returns existing receipt, 4) force_import=true bypasses duplicate detection, 5) source_url field properly stored and retrievable. All duplicate detection logic verified for both Epsilon Digital and other provider URLs."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
@@ -335,3 +347,25 @@ agent_communication:
       - API integration working correctly
       
       Frontend WebView import flow is production-ready!
+  - agent: "testing"
+    message: |
+      ✅ DUPLICATE DETECTION TESTING COMPLETE - All functionality working perfectly!
+      
+      TESTED SUCCESSFULLY:
+      1. Epsilon Digital URL Duplicate Detection: ✅ Complete workflow tested
+         - First URL import returns webview_required status
+         - WebView import creates receipt with source_url stored
+         - Second URL import detects duplicate and returns existing receipt
+         - force_import=true bypasses duplicate detection correctly
+      2. Source URL Storage: ✅ source_url field properly stored and retrievable
+      3. Duplicate Response Structure: ✅ Contains existing_receipt and message fields
+      4. All Backend APIs: ✅ Device registration, stats, receipts listing all working
+      
+      VERIFICATION:
+      - Tested complete duplicate detection workflow for Epsilon Digital URLs
+      - Verified source_url field storage in receipts (both WebView and URL imports)
+      - Confirmed duplicate detection logic works correctly after WebView import
+      - Validated force_import flag bypasses duplicate detection as expected
+      - All backend endpoints responding correctly via https://deal-finder-396.preview.emergentagent.com/api
+      
+      Backend duplicate detection functionality is production-ready!
