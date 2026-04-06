@@ -110,6 +110,7 @@ export const api = {
     raw_text: string;
     items: any[];
     store_name: string;
+    found_final_total?: number;
   }) => {
     return request('/receipts/import-webview', {
       method: 'POST',

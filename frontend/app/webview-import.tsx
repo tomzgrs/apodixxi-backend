@@ -20,7 +20,8 @@ const DOM_EXTRACTION_JS = `
       date: '',
       receipt_number: '',
       raw_text: '',
-      items: []
+      items: [],
+      found_final_total: 0
     };
 
     // Get all visible text for backup parsing
@@ -52,109 +53,156 @@ const DOM_EXTRACTION_JS = `
     var receiptMatch = result.raw_text.match(/(?:Αρ\\.?\\s*Παραστ|Αριθμός|Αρ\\.\\s*Τιμολ)[^\\d]*(\\d+)/i);
     if (receiptMatch) result.receipt_number = receiptMatch[1];
 
-    // Function to check if a row should be excluded (totals, headers, payments)
-    function shouldExcludeRow(text) {
-      if (!text) return true;
-      var t = text.toUpperCase().trim();
-      
-      // Exclude if it's just a number (price without description)
-      if (/^\\d+[,.]\\d{2}$/.test(t)) return true;
-      
-      // Exclude total keywords
-      var totalKeywords = ['ΣΥΝΟΛΟ', 'ΣΥΝΟΛΑ', 'ΤΕΛΙΚΟ', 'TOTAL', 'ΠΛΗΡΩΤΕΟ', 
-                          'ΤΕΛΙΚΗ ΑΞΙΑ', 'ΚΑΘΑΡΗ ΑΞΙΑ', 'ΦΠΑ', 'VAT', 'ΥΠΟΣΥΝΟΛΟ',
-                          'SUBTOTAL', 'GRAND TOTAL', 'ΑΞΙΑ ΜΕ', 'ΑΞΙΑ ΧΩΡΙΣ'];
-      for (var i = 0; i < totalKeywords.length; i++) {
-        if (t.includes(totalKeywords[i])) return true;
-      }
-      
-      // Exclude payment methods
-      var paymentKeywords = ['EFT-POS', 'EFT POS', 'EFTPOS', 'ΜΕΤΡΗΤΑ', 'ΚΑΡΤΑ',
-                            'CASH', 'CARD', 'ΠΛΗΡΩΜ', 'VISA', 'MASTERCARD', 
-                            'CREDIT', 'DEBIT', 'PAYMENT', 'ΑΠΟΔ', 'ΡΕΣΤΑ', 'CHANGE'];
-      for (var j = 0; j < paymentKeywords.length; j++) {
-        if (t.includes(paymentKeywords[j])) return true;
-      }
-      
-      // Exclude header keywords
-      var headerKeywords = ['ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'ΑΞΙΑ',
-                           'Α/Α', 'CODE', 'DESCRIPTION', 'QTY', 'PRICE', 'AMOUNT'];
-      if (headerKeywords.indexOf(t) !== -1) return true;
-      
-      // Exclude if too short
-      if (t.length < 3) return true;
-      
-      return false;
-    }
-
-    // Try MudBlazor DataGrid/Table (Epsilon Digital uses this)
-    var mudRows = document.querySelectorAll('.mud-table-body tr, .mud-table-row, [class*="mud-table"] tbody tr, table tbody tr, table tr');
-    
-    for (var m = 0; m < mudRows.length; m++) {
-      var mcells = mudRows[m].querySelectorAll('td, .mud-table-cell');
-      if (mcells.length < 3) continue;
-      
-      // Try to identify code and description columns
-      var codeText = '';
-      var descText = '';
-      var qtyText = '1';
-      
-      // First cell is usually code (numeric)
-      var firstCell = mcells[0] ? mcells[0].innerText.trim() : '';
-      if (/^\\d+$/.test(firstCell)) {
-        codeText = firstCell;
-        descText = mcells[1] ? mcells[1].innerText.trim() : '';
-      } else {
-        // Sometimes description is in first cell
-        descText = firstCell;
-        codeText = '';
-      }
-      
-      // Skip if description should be excluded
-      if (shouldExcludeRow(descText)) continue;
-      if (shouldExcludeRow(codeText) && descText.length < 3) continue;
-      
-      // Find ALL columns with prices
-      var allPrices = [];
-      for (var c = 0; c < mcells.length; c++) {
-        var cellVal = mcells[c] ? mcells[c].innerText.trim() : '';
-        var cleanVal = cellVal.replace(/[€\\s]/g, '').replace(',', '.');
-        if (/^\\d+\\.\\d{2}$/.test(cleanVal)) {
-          allPrices.push({index: c, value: cleanVal});
-        }
-      }
-      
-      // Get the last price (should be total with VAT)
-      var totalText = '0';
-      if (allPrices.length > 0) {
-        totalText = allPrices[allPrices.length - 1].value;
-      }
-      
-      // Get quantity (usually 3rd or 4th column, look for decimal or integer)
-      for (var q = 2; q < Math.min(mcells.length - 1, 5); q++) {
-        var qVal = mcells[q] ? mcells[q].innerText.trim().replace(',', '.') : '';
-        if (/^\\d+(\\.\\d+)?$/.test(qVal) && parseFloat(qVal) < 1000) {
-          qtyText = qVal;
+    // Find the FINAL TOTAL (ΠΛΗΡΩΤΕΟ) from raw text
+    var lines = result.raw_text.split('\\n');
+    for (var li = lines.length - 1; li >= 0; li--) {
+      var line = lines[li].toUpperCase();
+      // Look for ΠΛΗΡΩΤΕΟ or ΤΕΛΙΚΟ ΣΥΝΟΛΟ (final payable amount)
+      if (line.includes('ΠΛΗΡΩΤ') || line.includes('ΤΕΛΙΚΟ') || line.includes('PAYABLE')) {
+        var totalMatch = lines[li].match(/(\\d+)[,\\.](\\d{2})/);
+        if (totalMatch) {
+          result.found_final_total = parseFloat(totalMatch[1] + '.' + totalMatch[2]);
           break;
         }
       }
-      
-      var mitem = {
-        code: codeText,
-        description: descText,
-        unit: 'ΤΕΜ',
-        quantity: qtyText,
-        unit_price: totalText,
-        total: totalText
-      };
-      
-      // Add item - NO DEDUPLICATION, same product can appear multiple times
-      if (mitem.description && mitem.description.length >= 3) {
-        result.items.push(mitem);
+    }
+    
+    // If not found, look for the LARGEST total after "ΣΥΝΟΛΟ" or at the end
+    if (!result.found_final_total) {
+      var maxTotal = 0;
+      for (var lj = lines.length - 1; lj >= Math.max(0, lines.length - 20); lj--) {
+        var lineText = lines[lj];
+        var allNums = lineText.match(/(\\d+)[,\\.](\\d{2})/g);
+        if (allNums) {
+          for (var ni = 0; ni < allNums.length; ni++) {
+            var num = parseFloat(allNums[ni].replace(',', '.'));
+            if (num > maxTotal && num < 10000) {
+              maxTotal = num;
+            }
+          }
+        }
+      }
+      if (maxTotal > 0) {
+        result.found_final_total = maxTotal;
       }
     }
 
-    // Post result to React Native
+    // Function to check if a row should be excluded
+    function shouldExcludeRow(text) {
+      if (!text) return true;
+      var t = text.toUpperCase().trim();
+      if (/^\\d+[,.]\\d{2}$/.test(t)) return true;
+      var excludeKeywords = ['ΣΥΝΟΛΟ', 'ΣΥΝΟΛΑ', 'ΤΕΛΙΚΟ', 'TOTAL', 'ΠΛΗΡΩΤΕΟ', 
+                            'ΤΕΛΙΚΗ ΑΞΙΑ', 'ΚΑΘΑΡΗ ΑΞΙΑ', 'ΑΞΙΑ ΦΠΑ', 'ΥΠΟΣΥΝΟΛΟ',
+                            'SUBTOTAL', 'GRAND TOTAL', 'EFT-POS', 'EFTPOS', 'ΜΕΤΡΗΤΑ', 
+                            'ΚΑΡΤΑ', 'VISA', 'MASTERCARD', 'ΠΛΗΡΩΜ', 'ΡΕΣΤΑ',
+                            'ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'Μ.Μ.',
+                            'Α/Α', 'CODE', 'DESCRIPTION', 'QTY', 'PRICE'];
+      for (var i = 0; i < excludeKeywords.length; i++) {
+        if (t === excludeKeywords[i] || (excludeKeywords[i].length > 3 && t.includes(excludeKeywords[i]))) {
+          return true;
+        }
+      }
+      if (t.length < 3) return true;
+      return false;
+    }
+
+    // Parse price from text
+    function parsePrice(text) {
+      if (!text) return 0;
+      var clean = text.replace(/[€\\s]/g, '').replace(',', '.');
+      var match = clean.match(/(\\d+\\.\\d{2})/);
+      return match ? parseFloat(match[1]) : 0;
+    }
+
+    // Get all tables
+    var allTables = document.querySelectorAll('table');
+    
+    for (var ti = 0; ti < allTables.length; ti++) {
+      var rows = allTables[ti].querySelectorAll('tbody tr, tr');
+      
+      for (var ri = 0; ri < rows.length; ri++) {
+        var cells = rows[ri].querySelectorAll('td');
+        if (cells.length < 3) continue;
+        
+        // Find description (usually in position 1 or 2, contains text not just numbers)
+        var descText = '';
+        var codeText = '';
+        var descIndex = -1;
+        
+        for (var ci = 0; ci < Math.min(cells.length, 4); ci++) {
+          var cellText = cells[ci] ? cells[ci].innerText.trim() : '';
+          if (/^\\d+$/.test(cellText) && cellText.length < 6) {
+            // This is likely a code or row number
+            if (!codeText) codeText = cellText;
+          } else if (cellText.length >= 3 && !/^\\d+[,.]\\d{2}$/.test(cellText)) {
+            // This looks like a description
+            if (!descText && !shouldExcludeRow(cellText)) {
+              descText = cellText;
+              descIndex = ci;
+            }
+          }
+        }
+        
+        if (!descText || shouldExcludeRow(descText)) continue;
+        
+        // Find ALL price columns (numeric values with 2 decimal places)
+        var prices = [];
+        for (var pi = descIndex + 1; pi < cells.length; pi++) {
+          var priceVal = parsePrice(cells[pi] ? cells[pi].innerText : '');
+          if (priceVal > 0) {
+            prices.push({index: pi, value: priceVal});
+          }
+        }
+        
+        // Determine the final price (with VAT)
+        var finalPrice = 0;
+        var qtyText = '1';
+        
+        if (prices.length >= 3) {
+          // Likely: Qty | Net Price | VAT | Total OR Net Price | VAT Rate | VAT Amount | Total
+          // Take the LAST price as total
+          finalPrice = prices[prices.length - 1].value;
+        } else if (prices.length === 2) {
+          // Could be: Net + VAT (no total column) OR Price + Total
+          // If second price is larger, it's probably the total
+          // If first is larger, they might be Net + VAT, so sum them
+          if (prices[1].value > prices[0].value) {
+            finalPrice = prices[1].value;
+          } else {
+            // Sum them (Net + VAT = Total)
+            finalPrice = prices[0].value + prices[1].value;
+          }
+        } else if (prices.length === 1) {
+          finalPrice = prices[0].value;
+        }
+        
+        // Try to find quantity
+        for (var qi = descIndex + 1; qi < cells.length && qi < descIndex + 4; qi++) {
+          var qVal = cells[qi] ? cells[qi].innerText.trim().replace(',', '.') : '';
+          if (/^\\d+(\\.\\d+)?$/.test(qVal)) {
+            var qNum = parseFloat(qVal);
+            if (qNum > 0 && qNum < 1000 && qNum !== finalPrice) {
+              qtyText = qVal;
+              break;
+            }
+          }
+        }
+        
+        if (finalPrice > 0) {
+          result.items.push({
+            code: codeText,
+            description: descText,
+            unit: 'ΤΕΜ',
+            quantity: qtyText,
+            unit_price: finalPrice.toFixed(2),
+            total: finalPrice.toFixed(2)
+          });
+        }
+      }
+    }
+
+    // Post result
     window.ReactNativeWebView.postMessage(JSON.stringify({type: 'extracted', data: result}));
   } catch(err) {
     window.ReactNativeWebView.postMessage(JSON.stringify({type: 'error', message: err.toString()}));
@@ -196,6 +244,7 @@ export default function WebViewImportScreen() {
             raw_text: data.raw_text || '',
             items: data.items,
             store_name: data.store_name || '',
+            found_final_total: data.found_final_total || 0,
           });
           Alert.alert(
             lang === 'el' ? 'Επιτυχία!' : 'Success!',

@@ -83,6 +83,7 @@ class WebViewExtractedData(BaseModel):
     raw_text: str = ""
     items: List[dict] = []
     store_name: str = ""
+    found_final_total: float = 0.0  # Final total with VAT found in raw text
 
 # ── Parsers ──
 
@@ -525,7 +526,7 @@ def detect_provider(url: str) -> str:
     return 'unknown'
 
 
-def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str) -> dict:
+def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str, found_final_total: float = 0.0) -> dict:
     """Parse data extracted from WebView DOM injection (Epsilon Digital pages)."""
     
     # Determine store name from URL if not provided
@@ -678,8 +679,14 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
                     data["items"].append(item)
 
     if data["items"]:
-        data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
-        data["net_total"] = data["total"]
+        calculated_total = round(sum(i["total_value"] for i in data["items"]), 2)
+        data["net_total"] = calculated_total
+        
+        # Use found_final_total if it's provided and larger (includes VAT)
+        if found_final_total > 0 and found_final_total >= calculated_total:
+            data["total"] = found_final_total
+        else:
+            data["total"] = calculated_total
 
     # Try to extract the FINAL total from raw text (with VAT)
     # Look for specific Greek keywords that indicate the final amount
@@ -699,30 +706,32 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
             if total_match:
                 try:
                     parsed_total = float(total_match.group(1).replace(',', '.'))
-                    if parsed_total > 0:
+                    if parsed_total > 0 and parsed_total >= data["total"]:
                         data["total"] = parsed_total
                         found_final = True
                         break
                 except ValueError:
                     pass
     
-    # If no specific final total found, look for generic ΣΥΝΟΛΟ at the end
+    # If no specific final total found, look for the LARGEST total at the end of receipt
     if not found_final:
-        for line in reversed(lines):
+        max_total = data["total"]
+        for line in reversed(lines[-30:]):  # Check last 30 lines
             line_upper = line.upper()
+            # Skip subtotal lines
             if any(k in line_upper for k in subtotal_keywords):
                 continue
-            if 'ΣΥΝΟΛ' in line_upper or 'TOTAL' in line_upper:
-                total_match = re.search(r'([\d]+[,.][\d]{2})', line)
-                if total_match:
-                    try:
-                        parsed_total = float(total_match.group(1).replace(',', '.'))
-                        # Accept if it's larger than our calculated total (includes VAT)
-                        if parsed_total >= data["total"]:
-                            data["total"] = parsed_total
-                            break
-                    except ValueError:
-                        pass
+            # Look for numbers that could be totals
+            total_matches = re.findall(r'([\d]+[,.][\d]{2})', line)
+            for match in total_matches:
+                try:
+                    parsed_total = float(match.replace(',', '.'))
+                    if parsed_total > max_total and parsed_total < 10000:
+                        max_total = parsed_total
+                except ValueError:
+                    pass
+        if max_total > data["total"]:
+            data["total"] = max_total
 
     return data
 
@@ -861,7 +870,8 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
         raw_text=input.raw_text,
         items_from_dom=input.items,
         store_hint=input.store_name,
-        source_url=input.url
+        source_url=input.url,
+        found_final_total=input.found_final_total
     )
 
     if not receipt_data["items"]:
