@@ -88,14 +88,20 @@ const DOM_EXTRACTION_JS = `
         if (isPaymentRow(descText)) continue;
         if (isPaymentRow(codeText)) continue;
 
-        // Find the LAST column with a price (this is usually the total with VAT)
+        // Find ALL columns with prices and get the LAST one (usually with VAT)
         var totalText = '0';
-        for (var c = mcells.length - 1; c >= 0; c--) {
+        var allPrices = [];
+        for (var c = 0; c < mcells.length; c++) {
           var cellVal = mcells[c] ? mcells[c].innerText.trim() : '';
-          if (/^\\d+[,.]\\d{2}/.test(cellVal.replace('€', '').trim())) {
-            totalText = cellVal;
-            break;
+          // Match price format (with optional € symbol)
+          var priceMatch = cellVal.replace('€', '').trim().match(/^(\\d+[,.]\\d{2})$/);
+          if (priceMatch) {
+            allPrices.push({index: c, value: priceMatch[1]});
           }
+        }
+        // Get the last price (should be total with VAT)
+        if (allPrices.length > 0) {
+          totalText = allPrices[allPrices.length - 1].value;
         }
 
         // Get quantity (usually 3rd column)

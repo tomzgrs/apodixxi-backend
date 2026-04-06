@@ -656,17 +656,48 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
         data["net_total"] = data["total"]
 
-    # Try to extract total from raw text if it differs
+    # Try to extract the FINAL total from raw text (with VAT)
+    # Look for specific Greek keywords that indicate the final amount
+    final_total_keywords = ['ΠΛΗΡΩΤΕΟ', 'ΤΕΛΙΚΟ ΣΥΝΟΛΟ', 'ΣΥΝΟΛΟ ΜΕ ΦΠΑ', 'ΤΕΛΙΚΗ ΑΞΙΑ', 
+                           'GRAND TOTAL', 'TOTAL DUE', 'ΣΥΝΟΛΟ ΠΛΗΡΩΜΗΣ']
+    subtotal_keywords = ['ΥΠΟΣΥΝΟΛΟ', 'ΚΑΘΑΡΗ ΑΞΙΑ', 'ΣΥΝΟΛΟ ΧΩΡΙΣ', 'SUBTOTAL', 'NET TOTAL']
+    
+    found_final = False
     for line in lines:
-        if any(k in line.upper() for k in ['ΤΕΛΙΚ', 'ΣΥΝΟΛ', 'TOTAL', 'ΠΛΗΡΩΤ']):
+        line_upper = line.upper()
+        # Skip subtotal lines
+        if any(k in line_upper for k in subtotal_keywords):
+            continue
+        # Check for final total keywords
+        if any(k in line_upper for k in final_total_keywords):
             total_match = re.search(r'([\d]+[,.][\d]{2})', line)
             if total_match:
                 try:
                     parsed_total = float(total_match.group(1).replace(',', '.'))
                     if parsed_total > 0:
                         data["total"] = parsed_total
+                        found_final = True
+                        break
                 except ValueError:
                     pass
+    
+    # If no specific final total found, look for generic ΣΥΝΟΛΟ at the end
+    if not found_final:
+        for line in reversed(lines):
+            line_upper = line.upper()
+            if any(k in line_upper for k in subtotal_keywords):
+                continue
+            if 'ΣΥΝΟΛ' in line_upper or 'TOTAL' in line_upper:
+                total_match = re.search(r'([\d]+[,.][\d]{2})', line)
+                if total_match:
+                    try:
+                        parsed_total = float(total_match.group(1).replace(',', '.'))
+                        # Accept if it's larger than our calculated total (includes VAT)
+                        if parsed_total >= data["total"]:
+                            data["total"] = parsed_total
+                            break
+                    except ValueError:
+                        pass
 
     return data
 
