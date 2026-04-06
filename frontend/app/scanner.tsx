@@ -65,11 +65,31 @@ function ScannerContent() {
       setLoading(true);
       try {
         const result = await api.importFromUrl(data);
-        Alert.alert(
-          t('success'),
-          t('receipt_imported'),
-          [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
-        );
+        
+        // Check for duplicate
+        if (result.status === 'duplicate') {
+          setLoading(false);
+          Alert.alert(
+            lang === 'el' ? 'Απόδειξη υπάρχει ήδη' : 'Receipt exists',
+            lang === 'el' ? 'Θέλετε να τη δείτε;' : 'Do you want to view it?',
+            [
+              { text: lang === 'el' ? 'Ναι' : 'Yes', onPress: () => router.replace(`/receipt/${result.existing_receipt.id}`) },
+              { text: lang === 'el' ? 'Όχι' : 'No', onPress: () => setScanned(false) }
+            ]
+          );
+          return;
+        }
+        
+        // Check if receipt exists in response
+        if (result.receipt && result.receipt.id) {
+          Alert.alert(
+            t('success'),
+            t('receipt_imported'),
+            [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
+          );
+        } else {
+          Alert.alert(t('success'), t('receipt_imported'), [{ text: 'OK', onPress: () => setScanned(false) }]);
+        }
       } catch (e: any) {
         Alert.alert(t('error'), e.message, [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {

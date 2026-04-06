@@ -573,6 +573,16 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         return t in ['ΣΥΝΟΛΟ', 'ΣΥΝΟΛΑ', 'ΤΕΛΙΚΟ', 'TOTAL', 'ΠΛΗΡΩΤΕΟ'] or \
                (len(t) < 8 and re.match(r'^\d+[,.]?\d*$', t))
 
+    # Helper function to check if this is a payment method row
+    def is_payment_row(text):
+        if not text:
+            return False
+        t = text.upper().strip()
+        payment_keywords = ['EFT-POS', 'EFT POS', 'EFTPOS', 'POS', 'ΜΕΤΡΗΤΑ', 'ΚΑΡΤΑ',
+                          'CASH', 'CARD', 'ΠΛΗΡΩΜ', 'VISA', 'MASTERCARD', 'CREDIT',
+                          'DEBIT', 'PAYMENT', 'ΑΠΟΔ', 'ΡΕΣΤΑ', 'CHANGE']
+        return any(kw in t for kw in payment_keywords)
+
     if items_from_dom:
         for item_raw in items_from_dom:
             code = str(item_raw.get('code', '')).strip()
@@ -580,8 +590,10 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
             if not desc:
                 continue
             
-            # Skip total rows
+            # Skip total rows and payment rows
             if is_total_row(desc) or is_total_row(code):
+                continue
+            if is_payment_row(desc) or is_payment_row(code):
                 continue
 
             qty_str = str(item_raw.get('quantity', '1')).replace(',', '.')

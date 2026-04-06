@@ -61,6 +61,17 @@ const DOM_EXTRACTION_JS = `
              t === 'TOTAL' || t === 'ΠΛΗΡΩΤΕΟ' || /^\\d+[,.]\\d{2}$/.test(text.trim());
     }
 
+    // Function to check if a row is a payment method (should be excluded)
+    function isPaymentRow(text) {
+      if (!text) return false;
+      var t = text.toUpperCase();
+      return t.includes('EFT-POS') || t.includes('EFT POS') || t.includes('EFTPOS') ||
+             t.includes('POS') || t.includes('ΜΕΤΡΗΤΑ') || t.includes('ΚΑΡΤΑ') ||
+             t.includes('CASH') || t.includes('CARD') || t.includes('ΠΛΗΡΩΜ') ||
+             t.includes('VISA') || t.includes('MASTERCARD') || t.includes('CREDIT') ||
+             t.includes('DEBIT') || t.includes('PAYMENT') || t.includes('ΑΠΟΔ');
+    }
+
     // Try MudBlazor DataGrid/Table (Epsilon Digital uses this)
     var mudRows = document.querySelectorAll('.mud-table-body tr, .mud-table-row, [class*="mud-table"] tbody tr');
     for (var m = 0; m < mudRows.length; m++) {
@@ -74,6 +85,8 @@ const DOM_EXTRACTION_JS = `
         if (!descText || descText.length < 2) continue;
         if (isTotalRow(descText)) continue;
         if (isTotalRow(codeText)) continue;
+        if (isPaymentRow(descText)) continue;
+        if (isPaymentRow(codeText)) continue;
 
         // Find the LAST column with a price (this is usually the total with VAT)
         var totalText = '0';
@@ -107,7 +120,7 @@ const DOM_EXTRACTION_JS = `
         };
 
         // DO NOT deduplicate - same product can appear multiple times!
-        if (mitem.description && !isTotalRow(mitem.description)) {
+        if (mitem.description && !isTotalRow(mitem.description) && !isPaymentRow(mitem.description)) {
           result.items.push(mitem);
         }
       }
@@ -128,6 +141,7 @@ const DOM_EXTRACTION_JS = `
             if (/^(Κωδ|Περιγρ|Α\\/Α|#|Σύνολο|Code|Desc|Αξία)/i.test(desc)) continue;
             if (!desc || desc.length < 2) continue;
             if (isTotalRow(desc) || isTotalRow(code)) continue;
+            if (isPaymentRow(desc) || isPaymentRow(code)) continue;
 
             // Get last price column as total
             var total = '0';
