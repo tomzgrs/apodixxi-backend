@@ -87,19 +87,82 @@ class WebViewExtractedData(BaseModel):
 
 # ── Parsers ──
 
-# VAT to Store Name mapping
+# VAT to Store Name mapping - Major Greek supermarket chains
 STORE_VAT_MAPPING = {
-    "094063140": "ΜΑΣΟΥΤΗΣ ΑΕ",
-    "094063169": "ΜΑΣΟΥΤΗΣ ΑΕ",
-    "800764388": "ΣΚΛΑΒΕΝΙΤΗΣ ΑΕ",
-    "094543tried5": "ΣΚΛΑΒΕΝΙΤΗΣ ΑΕ",
-    "094014249": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
-    "094059506": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
-    "800469072": "MARKET IN",
-    "094288618": "BAZAAR",
-    "800424460": "LIDL ΕΛΛΑΣ",
+    # 1. ΣΚΛΑΒΕΝΙΤΗΣ
+    "800764388": "ΣΚΛΑΒΕΝΙΤΗΣ",
+    
+    # 2. ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ
+    "094025817": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "094014249": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",  # Alternative VAT
+    "094059506": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",  # Alternative VAT
+    
+    # 3. METRO
+    "094062259": "METRO",
+    
+    # 4. ΜΑΣΟΥΤΗΣ
+    "094063140": "ΜΑΣΟΥΤΗΣ",
+    "094063169": "ΜΑΣΟΥΤΗΣ",  # Alternative VAT
+    
+    # 5. ΚΡΗΤΙΚΟΣ
+    "094247924": "ΚΡΗΤΙΚΟΣ",
+    
+    # 6. ΓΑΛΑΞΙΑΣ (ΠΕΝΤΕ ΑΕ)
+    "094116278": "ΓΑΛΑΞΙΑΣ",
+    
+    # 7. MARKET IN
+    "998771189": "MARKET IN",
+    "800469072": "MARKET IN",  # Alternative VAT
+    
+    # 8. BAZAAR
+    "094384144": "BAZAAR",
+    "094288618": "BAZAAR",  # Alternative VAT
+    
+    # 9. ΕΓΝΑΤΙΑ
+    "094357707": "ΕΓΝΑΤΙΑ",
+    
+    # 10. ΣΥΝ.ΚΑ ΚΡΗΤΗΣ
+    "996722071": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
+    "096070396": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
+    
+    # Other known stores
+    "800424460": "LIDL",
     "099326240": "JUMBO",
     "094281307": "MY MARKET",
+}
+
+# Keywords to detect store brand from name (for franchises with different VAT)
+STORE_BRAND_KEYWORDS = {
+    "ΣΚΛΑΒΕΝΙΤ": "ΣΚΛΑΒΕΝΙΤΗΣ",
+    "SKLAVENITIS": "ΣΚΛΑΒΕΝΙΤΗΣ",
+    "ΒΑΣΙΛΟΠΟΥΛ": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "ALFA VITA": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "ΑΛΦΑ ΒΗΤΑ": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "A.B.": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "AB ": "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ",
+    "METRO": "METRO",
+    "ΜΕΤΡΟ": "METRO",
+    "ΜΑΣΟΥΤ": "ΜΑΣΟΥΤΗΣ",
+    "MASOUTIS": "ΜΑΣΟΥΤΗΣ",
+    "ΚΡΗΤΙΚΟ": "ΚΡΗΤΙΚΟΣ",
+    "KRITIKOS": "ΚΡΗΤΙΚΟΣ",
+    "ΓΑΛΑΞΙΑ": "ΓΑΛΑΞΙΑΣ",
+    "GALAXIAS": "ΓΑΛΑΞΙΑΣ",
+    "ΠΕΝΤΕ": "ΓΑΛΑΞΙΑΣ",
+    "MARKET IN": "MARKET IN",
+    "MARKETIN": "MARKET IN",
+    "BAZAAR": "BAZAAR",
+    "ΜΠΑΖΑΡ": "BAZAAR",
+    "ΕΓΝΑΤΙΑ": "ΕΓΝΑΤΙΑ",
+    "EGNATIA": "ΕΓΝΑΤΙΑ",
+    "ΣΥΝ.ΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
+    "ΣΥΝΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
+    "LIDL": "LIDL",
+    "ΛΙΝΤΛ": "LIDL",
+    "JUMBO": "JUMBO",
+    "ΤΖΑΜΠΟ": "JUMBO",
+    "MY MARKET": "MY MARKET",
+    "MYMARKET": "MY MARKET",
 }
 
 def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
@@ -107,6 +170,46 @@ def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
     if vat and vat in STORE_VAT_MAPPING:
         return STORE_VAT_MAPPING[vat]
     return fallback
+
+def detect_store_brand(store_name: str) -> str:
+    """Detect store brand from name using keywords (for franchises)."""
+    if not store_name:
+        return ""
+    name_upper = store_name.upper()
+    for keyword, brand in STORE_BRAND_KEYWORDS.items():
+        if keyword in name_upper:
+            return brand
+    return ""
+
+def get_clean_store_name(vat: str, raw_name: str) -> str:
+    """
+    Get the cleanest store name possible:
+    1. First try VAT mapping (most reliable)
+    2. Then try keyword detection from name (for franchises)
+    3. Fallback to raw name
+    """
+    # Try VAT mapping first
+    if vat:
+        mapped = get_store_name_from_vat(vat)
+        if mapped:
+            return mapped
+    
+    # Try keyword detection for franchises
+    if raw_name:
+        brand = detect_store_brand(raw_name)
+        if brand:
+            return brand
+    
+    # Fallback to raw name (cleaned up)
+    if raw_name:
+        # Remove common suffixes like ΑΕ, ΑΕΒΕ, etc.
+        cleaned = raw_name.strip()
+        for suffix in [" ΑΝΩΝΥΜΗ ΕΤΑΙΡΕΙΑ", " ΜΟΝΟΠΡΟΣΩΠΗ", " ΑΕΒΕ", " Α.Ε.", " ΑΕ", " ΕΠΕ", " ΙΚΕ"]:
+            if cleaned.upper().endswith(suffix):
+                cleaned = cleaned[:-len(suffix)].strip()
+        return cleaned
+    
+    return "Άγνωστο Κατάστημα"
 
 def parse_greek_number(text: str) -> float:
     """Parse Greek-formatted numbers (uses comma as decimal separator)."""
@@ -285,11 +388,8 @@ def parse_entersoft(html: str, source_url: str) -> dict:
     if not data["total"] and data["items"]:
         data["total"] = sum(i["total_value"] for i in data["items"])
 
-    # Use VAT mapping for cleaner store name if available
-    if data["store_vat"]:
-        mapped_name = get_store_name_from_vat(data["store_vat"])
-        if mapped_name:
-            data["store_name"] = mapped_name
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
 
     return data
 
@@ -419,11 +519,8 @@ def parse_impact(html: str, source_url: str) -> dict:
             net_sum += (pre_disc - disc)
         data["net_total"] = round(net_sum, 2)
 
-    # Use VAT mapping for cleaner store name if available
-    if data["store_vat"]:
-        mapped_name = get_store_name_from_vat(data["store_vat"])
-        if mapped_name:
-            data["store_name"] = mapped_name
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
 
     return data
 
@@ -589,11 +686,8 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         if any(k in line for k in ['POS', 'Μετρητ', 'Κάρτα', 'ΠΛΗΡΩΜ']):
             data["payment_method"] = line.strip()
 
-    # Use VAT mapping for better store name
-    if data["store_vat"]:
-        mapped_name = get_store_name_from_vat(data["store_vat"])
-        if mapped_name:
-            data["store_name"] = mapped_name
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
 
     # Process items from DOM extraction (structured data from JS)
     # Helper function to check if this is a total row
