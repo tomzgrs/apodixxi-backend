@@ -144,8 +144,13 @@ def parse_greek_number(text: str) -> float:
         return 0.0
 
 async def fetch_html(url: str) -> str:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'el-GR,el;q=0.9,en;q=0.8',
+    }
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=60), ssl=False) as resp:
             if resp.status != 200:
                 raise HTTPException(status_code=400, detail=f"Could not fetch URL: HTTP {resp.status}")
             return await resp.text()
