@@ -32,6 +32,18 @@ export const STORE_LOGOS: Record<string, string> = {
   
   "ΓΑΛΑΞΙΑΣ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/v2uqqihi_1000077078.png",
   "GALAXIAS": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/v2uqqihi_1000077078.png",
+  
+  "ΚΡΗΤΙΚΟΣ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/8snlw13y_1000077073.png",
+  "KRITIKOS": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/8snlw13y_1000077073.png",
+  
+  "ΕΓΝΑΤΙΑ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/a9vi09vw_1000077081.png",
+  "EGNATIA": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/a9vi09vw_1000077081.png",
+  "DISCOUNT MARKT": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/a9vi09vw_1000077081.png",
+  
+  "METRO": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
+  "ΜΕΤΡΟ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
+  "MY MARKET": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
+  "MYMARKET": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
 };
 
 // Get logo URL for a store, returns null if not found
