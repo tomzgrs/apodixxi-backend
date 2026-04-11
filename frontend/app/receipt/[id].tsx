@@ -198,6 +198,7 @@ const styles = StyleSheet.create({
   storeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, backgroundColor: COLORS.surface, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: COLORS.borderLight },
   storeIcon: { width: 50, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   storeIconText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+  storeLogo: { width: 50, height: 50, borderRadius: 12 },
   storeInfo: { flex: 1, marginLeft: 14 },
   storeName: { fontSize: 18, fontWeight: '800', color: COLORS.textPrimary },
   storeAddr: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },

@@ -14,6 +14,11 @@ export const STORE_LOGOS: Record<string, string> = {
   
   "ΘΑΝΟΠΟΥΛΟΣ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/t6g0ywx7_1000077067.png",
   "THANOPOULOS": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/t6g0ywx7_1000077067.png",
+  
+  "ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/bewsxvin_1000077072.jpg",
+  "ΑΒ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/bewsxvin_1000077072.jpg",
+  "AB VASILOPOULOS": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/bewsxvin_1000077072.jpg",
+  "AB": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/bewsxvin_1000077072.jpg",
 };
 
 // Get logo URL for a store, returns null if not found

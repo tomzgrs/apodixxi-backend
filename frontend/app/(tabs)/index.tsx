@@ -1,10 +1,11 @@
 import { useContext, useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { I18nContext } from '../_layout';
 import { COLORS, getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { api } from '../../src/api';
+import { getStoreLogo } from '../../src/storeLogos';
 
 export default function DashboardScreen() {
   const { t } = useContext(I18nContext);
@@ -92,18 +93,29 @@ export default function DashboardScreen() {
             {stats.stores && stats.stores.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{t('top_stores')}</Text>
-                {stats.stores.slice(0, 5).map((store: any, i: number) => (
-                  <View key={i} style={styles.storeRow}>
-                    <View style={[styles.storeIcon, { backgroundColor: getStoreColor(store.name || '') }]}>
-                      <Text style={styles.storeIconText}>{getStoreInitial(store.name || '?')}</Text>
+                {stats.stores.slice(0, 5).map((store: any, i: number) => {
+                  const logoUrl = getStoreLogo(store.name || '');
+                  return (
+                    <View key={i} style={styles.storeRow}>
+                      {logoUrl ? (
+                        <Image 
+                          source={{ uri: logoUrl }} 
+                          style={styles.storeLogo}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <View style={[styles.storeIcon, { backgroundColor: getStoreColor(store.name || '') }]}>
+                          <Text style={styles.storeIconText}>{getStoreInitial(store.name || '?')}</Text>
+                        </View>
+                      )}
+                      <View style={styles.storeInfo}>
+                        <Text style={styles.storeName} numberOfLines={1}>{store.name}</Text>
+                        <Text style={styles.storeVisits}>{store.count} {t('visits')}</Text>
+                      </View>
+                      <Text style={styles.storeTotal}>{formatPrice(store.total)}</Text>
                     </View>
-                    <View style={styles.storeInfo}>
-                      <Text style={styles.storeName} numberOfLines={1}>{store.name}</Text>
-                      <Text style={styles.storeVisits}>{store.count} {t('visits')}</Text>
-                    </View>
-                    <Text style={styles.storeTotal}>{formatPrice(store.total)}</Text>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 
@@ -164,6 +176,7 @@ const styles = StyleSheet.create({
   storeRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, padding: 14, borderRadius: 16, marginBottom: 8, borderWidth: 1, borderColor: COLORS.borderLight },
   storeIcon: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   storeIconText: { color: '#FFF', fontSize: 14, fontWeight: '800' },
+  storeLogo: { width: 42, height: 42, borderRadius: 10 },
   storeInfo: { flex: 1, marginLeft: 12 },
   storeName: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
   storeVisits: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
