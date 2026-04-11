@@ -1,10 +1,11 @@
 import { useContext, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { I18nContext } from '../_layout';
 import { COLORS, getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { api } from '../../src/api';
+import { getStoreLogo } from '../../src/storeLogos';
 
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -72,9 +73,17 @@ export default function ReceiptDetailScreen() {
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.storeHeader}>
-          <View style={[styles.storeIcon, { backgroundColor: getStoreColor(receipt.store_name || '') }]}>
-            <Text style={styles.storeIconText}>{getStoreInitial(receipt.store_name || '?')}</Text>
-          </View>
+          {getStoreLogo(receipt.store_name) ? (
+            <Image 
+              source={{ uri: getStoreLogo(receipt.store_name)! }} 
+              style={styles.storeLogo}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={[styles.storeIcon, { backgroundColor: getStoreColor(receipt.store_name || '') }]}>
+              <Text style={styles.storeIconText}>{getStoreInitial(receipt.store_name || '?')}</Text>
+            </View>
+          )}
           <View style={styles.storeInfo}>
             <Text style={styles.storeName}>{receipt.store_name}</Text>
             {receipt.store_address ? <Text style={styles.storeAddr}>{receipt.store_address}</Text> : null}

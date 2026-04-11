@@ -1,10 +1,11 @@
 import { useContext, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, RefreshControl, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { I18nContext } from '../_layout';
 import { COLORS, getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { api } from '../../src/api';
+import { getStoreLogo } from '../../src/storeLogos';
 
 export default function PurchasesScreen() {
   const { t } = useContext(I18nContext);
@@ -38,28 +39,40 @@ export default function PurchasesScreen() {
     loadReceipts(text);
   };
 
-  const renderReceipt = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      testID={`receipt-card-${item.id}`}
-      style={styles.receiptCard}
-      onPress={() => router.push(`/receipt/${item.id}`)}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.storeIcon, { backgroundColor: getStoreColor(item.store_name || '') }]}>
-        <Text style={styles.storeIconText}>{getStoreInitial(item.store_name || '?')}</Text>
-      </View>
-      <View style={styles.receiptInfo}>
-        <Text style={styles.receiptStore} numberOfLines={1}>{item.store_name || 'Unknown'}</Text>
-        <Text style={styles.receiptMeta}>
-          {item.date} · {item.items?.length || 0} {t('items')} · {item.source_type}
-        </Text>
-      </View>
-      <View style={styles.receiptRight}>
-        <Text style={styles.receiptTotal}>{formatPrice(item.total || 0)}</Text>
-        <Text style={styles.receiptArrow}>›</Text>
-      </View>
-    </TouchableOpacity>
-  );
+  const renderReceipt = ({ item }: { item: any }) => {
+    const logoUrl = getStoreLogo(item.store_name || '');
+    
+    return (
+      <TouchableOpacity
+        testID={`receipt-card-${item.id}`}
+        style={styles.receiptCard}
+        onPress={() => router.push(`/receipt/${item.id}`)}
+        activeOpacity={0.7}
+      >
+        {logoUrl ? (
+          <Image 
+            source={{ uri: logoUrl }} 
+            style={styles.storeLogo}
+            resizeMode="contain"
+          />
+        ) : (
+          <View style={[styles.storeIcon, { backgroundColor: getStoreColor(item.store_name || '') }]}>
+            <Text style={styles.storeIconText}>{getStoreInitial(item.store_name || '?')}</Text>
+          </View>
+        )}
+        <View style={styles.receiptInfo}>
+          <Text style={styles.receiptStore} numberOfLines={1}>{item.store_name || 'Unknown'}</Text>
+          <Text style={styles.receiptMeta}>
+            {item.date} · {item.items?.length || 0} {t('items')} · {item.source_type}
+          </Text>
+        </View>
+        <View style={styles.receiptRight}>
+          <Text style={styles.receiptTotal}>{formatPrice(item.total || 0)}</Text>
+          <Text style={styles.receiptArrow}>›</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -117,6 +130,7 @@ const styles = StyleSheet.create({
   receiptCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, padding: 16, borderRadius: 18, marginBottom: 10, borderWidth: 1, borderColor: COLORS.borderLight },
   storeIcon: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   storeIconText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+  storeLogo: { width: 46, height: 46, borderRadius: 10 },
   receiptInfo: { flex: 1, marginLeft: 14 },
   receiptStore: { fontSize: 16, fontWeight: '600', color: COLORS.textPrimary },
   receiptMeta: { fontSize: 12, color: COLORS.textSecondary, marginTop: 3 },
