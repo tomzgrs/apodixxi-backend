@@ -129,6 +129,9 @@ STORE_VAT_MAPPING = {
     "800424460": "LIDL",
     "099326240": "JUMBO",
     "094281307": "MY MARKET",
+    
+    # THE MART
+    "094021972": "THE MART",
 }
 
 # Keywords to detect store brand from name (for franchises with different VAT)
@@ -163,6 +166,8 @@ STORE_BRAND_KEYWORDS = {
     "ΤΖΑΜΠΟ": "JUMBO",
     "MY MARKET": "MY MARKET",
     "MYMARKET": "MY MARKET",
+    "THE MART": "THE MART",
+    "THEMART": "THE MART",
 }
 
 def get_store_name_from_vat(vat: str, fallback: str = "") -> str:

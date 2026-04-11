@@ -44,6 +44,10 @@ export const STORE_LOGOS: Record<string, string> = {
   "ΜΕΤΡΟ": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
   "MY MARKET": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
   "MYMARKET": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/5k08nkcg_1000077070.png",
+  
+  "THE MART": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/b5eesjut_1000077086.jpg",
+  "THEMART": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/b5eesjut_1000077086.jpg",
+  "MART": "https://customer-assets.emergentagent.com/job_deal-finder-396/artifacts/b5eesjut_1000077086.jpg",
 };
 
 // Get logo URL for a store, returns null if not found
