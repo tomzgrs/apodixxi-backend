@@ -786,56 +786,24 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         calculated_total = round(sum(i["total_value"] for i in data["items"]), 2)
         data["net_total"] = calculated_total
         
-        # Use found_final_total if it's provided and larger (includes VAT)
-        if found_final_total > 0 and found_final_total >= calculated_total:
-            data["total"] = found_final_total
+        # Use found_final_total only if it's provided and reasonably close to calculated
+        # (within 20% tolerance for VAT differences)
+        if found_final_total > 0:
+            # If found_final_total is close to calculated, use calculated (more accurate)
+            diff = abs(found_final_total - calculated_total)
+            if diff <= calculated_total * 0.25:  # 25% tolerance
+                data["total"] = calculated_total
+            elif found_final_total >= calculated_total:
+                # Only use found_final_total if it's larger (includes VAT we didn't capture)
+                data["total"] = found_final_total
+            else:
+                data["total"] = calculated_total
         else:
             data["total"] = calculated_total
 
-    # Try to extract the FINAL total from raw text (with VAT)
-    # Look for specific Greek keywords that indicate the final amount
-    final_total_keywords = ['ΠΛΗΡΩΤΕΟ', 'ΤΕΛΙΚΟ ΣΥΝΟΛΟ', 'ΣΥΝΟΛΟ ΜΕ ΦΠΑ', 'ΤΕΛΙΚΗ ΑΞΙΑ', 
-                           'GRAND TOTAL', 'TOTAL DUE', 'ΣΥΝΟΛΟ ΠΛΗΡΩΜΗΣ']
-    subtotal_keywords = ['ΥΠΟΣΥΝΟΛΟ', 'ΚΑΘΑΡΗ ΑΞΙΑ', 'ΣΥΝΟΛΟ ΧΩΡΙΣ', 'SUBTOTAL', 'NET TOTAL']
-    
-    found_final = False
-    for line in lines:
-        line_upper = line.upper()
-        # Skip subtotal lines
-        if any(k in line_upper for k in subtotal_keywords):
-            continue
-        # Check for final total keywords
-        if any(k in line_upper for k in final_total_keywords):
-            total_match = re.search(r'([\d]+[,.][\d]{2})', line)
-            if total_match:
-                try:
-                    parsed_total = float(total_match.group(1).replace(',', '.'))
-                    if parsed_total > 0 and parsed_total >= data["total"]:
-                        data["total"] = parsed_total
-                        found_final = True
-                        break
-                except ValueError:
-                    pass
-    
-    # If no specific final total found, look for the LARGEST total at the end of receipt
-    if not found_final:
-        max_total = data["total"]
-        for line in reversed(lines[-30:]):  # Check last 30 lines
-            line_upper = line.upper()
-            # Skip subtotal lines
-            if any(k in line_upper for k in subtotal_keywords):
-                continue
-            # Look for numbers that could be totals
-            total_matches = re.findall(r'([\d]+[,.][\d]{2})', line)
-            for match in total_matches:
-                try:
-                    parsed_total = float(match.replace(',', '.'))
-                    if parsed_total > max_total and parsed_total < 10000:
-                        max_total = parsed_total
-                except ValueError:
-                    pass
-        if max_total > data["total"]:
-            data["total"] = max_total
+    # For Epsilon Digital, trust the calculated total from items more than raw text parsing
+    # because raw text may contain confusing numbers (e.g., VAT totals, payment amounts)
+    # Skip the additional total parsing from raw text
 
     return data
 

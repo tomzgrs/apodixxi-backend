@@ -112,7 +112,8 @@ const DOM_EXTRACTION_JS = `
       
       for (var ri = 0; ri < rows.length; ri++) {
         var cells = rows[ri].querySelectorAll('td');
-        if (cells.length < 4) continue;
+        // Reduced minimum cells requirement - some tables may have fewer columns
+        if (cells.length < 3) continue;
         
         // Find description - usually column 1 or 2 (after row number)
         var description = '';
@@ -129,38 +130,43 @@ const DOM_EXTRACTION_JS = `
         
         if (!description) continue;
         
-        // Get quantity (look for columns after description with format like 1,000 or 2,000)
+        // Get quantity - look for decimal numbers like 0,126 or 1,000 or integers
         var quantity = '1';
-        for (var qi = descIndex + 1; qi < Math.min(cells.length, descIndex + 4); qi++) {
+        var qtyValue = 1.0;
+        for (var qi = descIndex + 1; qi < Math.min(cells.length, descIndex + 3); qi++) {
           var qText = cells[qi] ? cells[qi].innerText.trim().replace(',', '.') : '';
-          if (/^\\d+\\.\\d{3}$/.test(qText)) {
-            // Format like 1.000 = quantity 1
-            quantity = Math.round(parseFloat(qText)).toString();
+          // Match quantity patterns: 0.126 (weight), 1.000, 2.500, or just integers
+          if (/^\\d+\\.\\d+$/.test(qText)) {
+            qtyValue = parseFloat(qText);
+            quantity = qText;
             break;
-          } else if (/^\\d+$/.test(qText) && parseInt(qText) < 100) {
+          } else if (/^\\d+$/.test(qText) && parseInt(qText) < 1000) {
+            qtyValue = parseInt(qText);
             quantity = qText;
             break;
           }
         }
         
-        // Find the LAST valid price in the row (this is ΑΞΙΑ - final price with VAT)
-        var finalPrice = 0;
-        for (var pi = cells.length - 1; pi > descIndex; pi--) {
+        // Find ALL valid prices in the row and take the LAST one (Καθαρή αξία / Final price)
+        var allPrices = [];
+        for (var pi = descIndex + 1; pi < cells.length; pi++) {
           var cellText = cells[pi] ? cells[pi].innerText.trim() : '';
           var price = parsePrice(cellText);
           if (price > 0) {
-            finalPrice = price;
-            break; // Take the FIRST valid price from the end
+            allPrices.push(price);
           }
         }
+        
+        // The LAST price is usually the final value (Καθαρή αξία)
+        var finalPrice = allPrices.length > 0 ? allPrices[allPrices.length - 1] : 0;
         
         if (finalPrice > 0) {
           result.items.push({
             code: '',
             description: description,
-            unit: 'ΤΕΜ',
+            unit: qtyValue < 1 ? 'Κιλά' : 'ΤΕΜ',
             quantity: quantity,
-            unit_price: finalPrice.toFixed(2),
+            unit_price: (finalPrice / qtyValue).toFixed(2),
             total: finalPrice.toFixed(2)
           });
         }
