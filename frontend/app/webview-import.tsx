@@ -225,40 +225,35 @@ const DOM_EXTRACTION_JS = `
           }
         }
         
-        // Find VAT amount and Net value
+        // Find VAT amount and Net value from the row
+        // In Epsilon Digital tables:
+        // - Second to last numeric column = Αξία ΦΠΑ (VAT amount)
+        // - Last numeric column = Καθαρή αξία (Net value)
+        // Total price = Net + VAT
+        
+        var allPrices = [];
+        for (var pi = actualDescIndex + 1; pi < cells.length; pi++) {
+          var cellText = cells[pi] ? cells[pi].innerText.trim() : '';
+          var price = parsePrice(cellText);
+          if (price > 0) {
+            allPrices.push(price);
+          }
+        }
+        
         var vatAmount = 0;
         var netValue = 0;
+        var finalPrice = 0;
         
-        // If we know the column indices, use them
-        if (vatAmountColIndex >= 0 && vatAmountColIndex < cells.length) {
-          vatAmount = parsePrice(cells[vatAmountColIndex].innerText);
+        // We need at least 2 prices to get both VAT and Net
+        if (allPrices.length >= 2) {
+          netValue = allPrices[allPrices.length - 1];      // Last = Καθαρή αξία
+          vatAmount = allPrices[allPrices.length - 2];     // Second to last = Αξία ΦΠΑ
+          finalPrice = netValue + vatAmount;               // Total = Net + VAT
+        } else if (allPrices.length === 1) {
+          // Only one price found, use it as final price
+          finalPrice = allPrices[0];
+          netValue = allPrices[0];
         }
-        if (netValueColIndex >= 0 && netValueColIndex < cells.length) {
-          netValue = parsePrice(cells[netValueColIndex].innerText);
-        }
-        
-        // If we couldn't find by column index, find all prices and use last two
-        if (netValue === 0) {
-          var allPrices = [];
-          for (var pi = actualDescIndex + 1; pi < cells.length; pi++) {
-            var cellText = cells[pi] ? cells[pi].innerText.trim() : '';
-            var price = parsePrice(cellText);
-            if (price > 0) {
-              allPrices.push(price);
-            }
-          }
-          
-          // In Epsilon Digital: usually last column is Καθαρή αξία, second-to-last is Αξία ΦΠΑ
-          if (allPrices.length >= 2) {
-            netValue = allPrices[allPrices.length - 1];  // Last = Καθαρή αξία
-            vatAmount = allPrices[allPrices.length - 2]; // Second to last = Αξία ΦΠΑ
-          } else if (allPrices.length === 1) {
-            netValue = allPrices[0];
-          }
-        }
-        
-        // Calculate final price: Net + VAT
-        var finalPrice = netValue + vatAmount;
         
         if (finalPrice > 0) {
           result.items.push({
