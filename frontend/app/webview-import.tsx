@@ -89,21 +89,33 @@ const DOM_EXTRACTION_JS = `
       if (!text || text.length < 3) return false;
       var t = text.toUpperCase().trim();
       
+      // Exclude very long hexadecimal strings (digital signatures)
+      if (t.length > 50 && /^[0-9A-F]+$/.test(t)) return false;
+      
       // Exclude keywords - payment methods, totals, headers
       var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 
                      'ΥΠΟΣΥΝΟΛ', 'EFT', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
                      'ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'Α/Α', 'ΜΜ',
                      'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 
-                     'PAYMENT', 'ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ'];
+                     'PAYMENT', 'ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ',
+                     'ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'ΠΛΗΡΩΜΗ'];
       for (var i = 0; i < excludes.length; i++) {
         if (t.includes(excludes[i]) || t === excludes[i]) return false;
       }
       
       // Exclude if it looks like a payment method pattern (POS / e-POS)
-      if (/^POS\s*[\/\-]/.test(t) || t === 'POS' || t === 'E-POS' || t.startsWith('POS/') || t.startsWith('POS /')) return false;
+      if (/POS/.test(t) && /E-?POS/.test(t)) return false;  // Contains both POS and e-POS
+      if (/^POS\s*[\/\-\s]/.test(t)) return false;  // Starts with POS followed by / - or space
+      if (t === 'POS' || t === 'E-POS' || t === 'EPOS') return false;
+      if (t.includes('POS /') || t.includes('POS/') || t.includes('/ E-POS') || t.includes('/E-POS')) return false;
       
-      // Must contain at least one letter
+      // Must contain at least one Greek or Latin letter (not just numbers/hex)
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
+      
+      // Exclude if it's mostly numbers/hex (likely a signature or code)
+      var letterCount = (t.match(/[A-ZΑ-Ω]/g) || []).length;
+      var digitCount = (t.match(/[0-9]/g) || []).length;
+      if (digitCount > letterCount * 3 && t.length > 30) return false;
       
       return true;
     }
@@ -111,10 +123,13 @@ const DOM_EXTRACTION_JS = `
     // Check if a table row is a payment/total row (not a product)
     function isPaymentOrTotalRow(rowText) {
       var t = rowText.toUpperCase();
-      // Only check for very specific payment section markers
+      // Payment method markers
       if (t.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || t.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) return true;
       if (t.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ')) return true;
-      // Check if row starts with POS payment
+      // Check for POS payment patterns anywhere in the row
+      if (t.includes('POS /') || t.includes('POS/') || t.includes('/ E-POS') || t.includes('/E-POS')) return true;
+      if (t.includes('POS') && t.includes('E-POS')) return true;  // Row contains both POS and e-POS
+      // Row that is just payment methods
       if (/^\s*POS\s*[\/\-]/.test(t) || /^\s*E-?POS/.test(t)) return true;
       return false;
     }
