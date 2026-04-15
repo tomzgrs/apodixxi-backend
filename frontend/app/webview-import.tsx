@@ -214,16 +214,41 @@ export default function WebViewImportScreen() {
   const handleExtract = useCallback(() => {
     if (webviewRef.current && !extracting) {
       setExtracting(true);
+      
+      // Set a timeout to reset if extraction takes too long
+      const timeoutId = setTimeout(() => {
+        setExtracting(false);
+        setExtracted(false);
+        Alert.alert(
+          lang === 'el' ? 'Χρονικό όριο' : 'Timeout',
+          lang === 'el' 
+            ? 'Η εξαγωγή δεδομένων πήρε πολύ χρόνο. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF) και δοκιμάστε ξανά.'
+            : 'Data extraction took too long. Make sure you see products in a table (not PDF) and try again.',
+          [{ text: 'OK' }]
+        );
+      }, 15000); // 15 second timeout
+      
+      // Store timeout ID to clear it on success
+      (webviewRef.current as any)._extractionTimeout = timeoutId;
+      
       webviewRef.current.injectJavaScript(DOM_EXTRACTION_JS);
     }
-  }, [extracting]);
+  }, [extracting, lang]);
 
   const handleMessage = useCallback(async (event: any) => {
     try {
+      // Clear timeout if it exists
+      if (webviewRef.current && (webviewRef.current as any)._extractionTimeout) {
+        clearTimeout((webviewRef.current as any)._extractionTimeout);
+      }
+      
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'extracted' && !extracted) {
         setExtracted(true);
         const data = msg.data;
+        
+        console.log('Extracted data:', JSON.stringify(data, null, 2));
+        
         if (data.items && data.items.length > 0) {
           // Send to backend
           const deviceId = await api.getDeviceId();
@@ -315,32 +340,63 @@ export default function WebViewImportScreen() {
               setPageLoaded(true);
               // Auto-switch from PDF to iframe view for Epsilon Digital sites
               if (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet')) {
-                webviewRef.current?.injectJavaScript(`
-                  (function() {
-                    // Try to find and click the toggle switch to show iframe instead of PDF
-                    // Look for common toggle elements
-                    var toggle = document.querySelector('input[type="checkbox"]');
-                    if (toggle && toggle.checked) {
-                      toggle.click();
-                    }
-                    // Also try common toggle classes/buttons
-                    var switches = document.querySelectorAll('.switch, .toggle, [role="switch"], .pdf-toggle');
-                    switches.forEach(function(sw) {
-                      if (sw.classList.contains('active') || sw.checked) {
-                        sw.click();
+                // Wait a bit for page elements to fully render
+                setTimeout(() => {
+                  webviewRef.current?.injectJavaScript(`
+                    (function() {
+                      try {
+                        // Method 1: Find toggle by looking for element near "PDF" text
+                        var allElements = document.querySelectorAll('*');
+                        for (var i = 0; i < allElements.length; i++) {
+                          var el = allElements[i];
+                          var text = (el.innerText || el.textContent || '').trim();
+                          // Find elements containing just "PDF"
+                          if (text === 'PDF' || text.includes('PDF')) {
+                            // Look for nearby toggle/switch elements (siblings or parent's siblings)
+                            var parent = el.parentElement;
+                            if (parent) {
+                              var toggles = parent.querySelectorAll('input[type="checkbox"], input[type="radio"], .toggle, .switch, .slider, [class*="switch"], [class*="toggle"]');
+                              toggles.forEach(function(t) {
+                                if (t.checked || t.classList.contains('active') || t.classList.contains('on')) {
+                                  t.click();
+                                  console.log('Clicked toggle near PDF');
+                                }
+                              });
+                              // Also check parent siblings
+                              var grandparent = parent.parentElement;
+                              if (grandparent) {
+                                var moreToggles = grandparent.querySelectorAll('input[type="checkbox"], [class*="switch"], [class*="toggle"], [class*="slider"]');
+                                moreToggles.forEach(function(t) {
+                                  t.click();
+                                  console.log('Clicked toggle in grandparent');
+                                });
+                              }
+                            }
+                            break;
+                          }
+                        }
+                        
+                        // Method 2: Try Bootstrap-style switches
+                        var bootstrapSwitches = document.querySelectorAll('.custom-control-input, .form-check-input, .form-switch input');
+                        bootstrapSwitches.forEach(function(sw) {
+                          if (sw.checked) {
+                            sw.click();
+                          }
+                        });
+                        
+                        // Method 3: Click any slider/round toggle
+                        var sliders = document.querySelectorAll('.slider, .round, [class*="slider"], [class*="toggle-slider"]');
+                        sliders.forEach(function(s) {
+                          s.click();
+                        });
+                        
+                      } catch(e) {
+                        console.log('Auto-switch error:', e);
                       }
-                    });
-                    // Click any "Show HTML" or similar button
-                    var buttons = document.querySelectorAll('button, a, div[onclick]');
-                    buttons.forEach(function(btn) {
-                      var text = (btn.innerText || '').toLowerCase();
-                      if (text.includes('html') || text.includes('iframe') || text.includes('προβολή')) {
-                        btn.click();
-                      }
-                    });
-                  })();
-                  true;
-                `);
+                    })();
+                    true;
+                  `);
+                }, 1500); // Wait 1.5 seconds for page to fully load
               }
             }}
             onMessage={handleMessage}
