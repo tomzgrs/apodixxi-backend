@@ -92,6 +92,12 @@ const DOM_EXTRACTION_JS = `
       // Exclude very long hexadecimal strings (digital signatures)
       if (t.length > 50 && /^[0-9A-F]+$/.test(t)) return false;
       
+      // Exclude Base64-like strings (digital signatures) - contain = at end or + /
+      if (t.length > 30 && /[=+\/]/.test(text) && /^[A-Za-z0-9+\/=]+$/.test(text)) return false;
+      
+      // Exclude strings that look like hashes/signatures (mostly alphanumeric, very long)
+      if (t.length > 40 && !/\s/.test(t)) return false;  // No spaces and very long = likely signature
+      
       // Exclude keywords - payment methods, totals, headers
       var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 
                      'ΥΠΟΣΥΝΟΛ', 'EFT', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
@@ -104,13 +110,17 @@ const DOM_EXTRACTION_JS = `
       }
       
       // Exclude if it looks like a payment method pattern (POS / e-POS)
-      if (/POS/.test(t) && /E-?POS/.test(t)) return false;  // Contains both POS and e-POS
-      if (/^POS\s*[\/\-\s]/.test(t)) return false;  // Starts with POS followed by / - or space
+      if (/POS/.test(t) && /E-?POS/.test(t)) return false;
+      if (/^POS\s*[\/\-\s]/.test(t)) return false;
       if (t === 'POS' || t === 'E-POS' || t === 'EPOS') return false;
       if (t.includes('POS /') || t.includes('POS/') || t.includes('/ E-POS') || t.includes('/E-POS')) return false;
       
-      // Must contain at least one Greek or Latin letter (not just numbers/hex)
+      // Must contain at least one Greek or Latin letter
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
+      
+      // Must contain at least one space for product names (usually have multiple words)
+      // Exception: very short names (< 15 chars) may not have spaces
+      if (t.length > 15 && !/\s/.test(t) && !/[Α-Ω]/.test(t)) return false;
       
       // Exclude if it's mostly numbers/hex (likely a signature or code)
       var letterCount = (t.match(/[A-ZΑ-Ω]/g) || []).length;
@@ -137,62 +147,118 @@ const DOM_EXTRACTION_JS = `
     // Get all tables
     var tables = document.querySelectorAll('table');
     
+    // First, find the header row to identify column indices
+    var vatAmountColIndex = -1;  // Αξία ΦΠΑ column
+    var netValueColIndex = -1;   // Καθαρή αξία column
+    var descColIndex = -1;       // Περιγραφή column
+    var qtyColIndex = -1;        // Ποσότητα column
+    
+    for (var ti = 0; ti < tables.length; ti++) {
+      var headerRow = tables[ti].querySelector('tr');
+      if (headerRow) {
+        var headerCells = headerRow.querySelectorAll('th, td');
+        for (var hi = 0; hi < headerCells.length; hi++) {
+          var headerText = (headerCells[hi].innerText || '').toUpperCase().trim();
+          if (headerText.includes('ΑΞΙΑ ΦΠΑ') || headerText === 'ΦΠΑ') {
+            vatAmountColIndex = hi;
+          } else if (headerText.includes('ΚΑΘΑΡΗ') || headerText.includes('ΚΑΘΑΡ')) {
+            netValueColIndex = hi;
+          } else if (headerText.includes('ΠΕΡΙΓΡΑΦΗ')) {
+            descColIndex = hi;
+          } else if (headerText.includes('ΠΟΣΟΤΗΤ') || headerText.includes('ΠΟΣΌΤΗΤ')) {
+            qtyColIndex = hi;
+          }
+        }
+      }
+    }
+    
     for (var ti = 0; ti < tables.length; ti++) {
       var rows = tables[ti].querySelectorAll('tr');
       
       for (var ri = 0; ri < rows.length; ri++) {
         var cells = rows[ri].querySelectorAll('td');
-        // Reduced minimum cells requirement - some tables may have fewer columns
         if (cells.length < 3) continue;
         
         // Get full row text to check if it's a payment/total row
-        var fullRowText = rows[ri].innerText || '';
-        if (isPaymentOrTotalRow(fullRowText)) continue;
+        var fullRowText = (rows[ri].innerText || '').toUpperCase();
         
-        // Find description - usually column 1 or 2 (after row number)
+        // Skip payment method rows and total rows
+        if (fullRowText.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || fullRowText.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) continue;
+        if (fullRowText.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ') || fullRowText.includes('ΣΥΝΟΛΙΚΗ ΑΞΙΑ')) continue;
+        if (fullRowText.includes('ΚΑΘΑΡΗ ΑΞΙΑ:') || fullRowText.includes('ΦΟΡΟΙ:') || fullRowText.includes('ΚΡΑΤΗΣΕΙΣ')) continue;
+        if (fullRowText.includes('POS') && (fullRowText.includes('E-POS') || fullRowText.includes('/') || fullRowText.includes('-'))) continue;
+        // Skip if row starts with POS
+        if (/^\s*POS/.test(fullRowText)) continue;
+        
+        // Find description
         var description = '';
-        var descIndex = -1;
+        var actualDescIndex = descColIndex >= 0 ? descColIndex : -1;
         
-        for (var di = 0; di < Math.min(cells.length, 3); di++) {
+        // Try to find description in known column or search first few columns
+        for (var di = 0; di < Math.min(cells.length, 4); di++) {
           var cellText = cells[di] ? cells[di].innerText.trim() : '';
           if (isValidDescription(cellText)) {
             description = cellText;
-            descIndex = di;
+            actualDescIndex = di;
             break;
           }
         }
         
         if (!description) continue;
         
-        // Get quantity - look for decimal numbers like 0,126 or 1,000 or integers
+        // Get quantity
         var quantity = '1';
         var qtyValue = 1.0;
-        for (var qi = descIndex + 1; qi < Math.min(cells.length, descIndex + 3); qi++) {
+        var qtySearchStart = actualDescIndex + 1;
+        var qtySearchEnd = Math.min(cells.length, actualDescIndex + 4);
+        
+        for (var qi = qtySearchStart; qi < qtySearchEnd; qi++) {
           var qText = cells[qi] ? cells[qi].innerText.trim().replace(',', '.') : '';
-          // Match quantity patterns: 0.126 (weight), 1.000, 2.500, or just integers
-          if (/^\d+\.\d+$/.test(qText)) {
+          if (/^\d+\.\d+$/.test(qText) && parseFloat(qText) < 1000) {
             qtyValue = parseFloat(qText);
             quantity = qText;
             break;
-          } else if (/^\d+$/.test(qText) && parseInt(qText) < 1000) {
+          } else if (/^\d+$/.test(qText) && parseInt(qText) < 100) {
             qtyValue = parseInt(qText);
             quantity = qText;
             break;
           }
         }
         
-        // Find ALL valid prices in the row and take the LAST one (Καθαρή αξία / Final price)
-        var allPrices = [];
-        for (var pi = descIndex + 1; pi < cells.length; pi++) {
-          var cellText = cells[pi] ? cells[pi].innerText.trim() : '';
-          var price = parsePrice(cellText);
-          if (price > 0) {
-            allPrices.push(price);
+        // Find VAT amount and Net value
+        var vatAmount = 0;
+        var netValue = 0;
+        
+        // If we know the column indices, use them
+        if (vatAmountColIndex >= 0 && vatAmountColIndex < cells.length) {
+          vatAmount = parsePrice(cells[vatAmountColIndex].innerText);
+        }
+        if (netValueColIndex >= 0 && netValueColIndex < cells.length) {
+          netValue = parsePrice(cells[netValueColIndex].innerText);
+        }
+        
+        // If we couldn't find by column index, find all prices and use last two
+        if (netValue === 0) {
+          var allPrices = [];
+          for (var pi = actualDescIndex + 1; pi < cells.length; pi++) {
+            var cellText = cells[pi] ? cells[pi].innerText.trim() : '';
+            var price = parsePrice(cellText);
+            if (price > 0) {
+              allPrices.push(price);
+            }
+          }
+          
+          // In Epsilon Digital: usually last column is Καθαρή αξία, second-to-last is Αξία ΦΠΑ
+          if (allPrices.length >= 2) {
+            netValue = allPrices[allPrices.length - 1];  // Last = Καθαρή αξία
+            vatAmount = allPrices[allPrices.length - 2]; // Second to last = Αξία ΦΠΑ
+          } else if (allPrices.length === 1) {
+            netValue = allPrices[0];
           }
         }
         
-        // The LAST price is usually the final value (Καθαρή αξία)
-        var finalPrice = allPrices.length > 0 ? allPrices[allPrices.length - 1] : 0;
+        // Calculate final price: Net + VAT
+        var finalPrice = netValue + vatAmount;
         
         if (finalPrice > 0) {
           result.items.push({
@@ -201,8 +267,30 @@ const DOM_EXTRACTION_JS = `
             unit: qtyValue < 1 ? 'Κιλά' : 'ΤΕΜ',
             quantity: quantity,
             unit_price: (finalPrice / qtyValue).toFixed(2),
-            total: finalPrice.toFixed(2)
+            total: finalPrice.toFixed(2),
+            net_value: netValue.toFixed(2),
+            vat_amount: vatAmount.toFixed(2)
           });
+        }
+      }
+    }
+    
+    // Find the TOTAL (Συνολική Αξία) from the page
+    var totalPatterns = ['ΣΥΝΟΛΙΚΗ ΑΞΙΑ', 'ΣΥΝΟΛΙΚΉ ΑΞΊΑ', 'ΤΕΛΙΚΟ ΣΥΝΟΛΟ', 'ΠΛΗΡΩΤΕΟ'];
+    var allText = document.body.innerText || '';
+    var lines = allText.split('\\n');
+    
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].toUpperCase();
+      for (var tp = 0; tp < totalPatterns.length; tp++) {
+        if (line.includes(totalPatterns[tp])) {
+          var priceMatch = lines[i].match(/([\\d]+[,\\.][\\d]{2})/);
+          if (priceMatch) {
+            var totalVal = parseFloat(priceMatch[1].replace(',', '.'));
+            if (totalVal > 0 && totalVal > result.found_final_total) {
+              result.found_final_total = totalVal;
+            }
+          }
         }
       }
     }
