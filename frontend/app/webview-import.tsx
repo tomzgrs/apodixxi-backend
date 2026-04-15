@@ -89,19 +89,36 @@ const DOM_EXTRACTION_JS = `
       if (!text || text.length < 3) return false;
       var t = text.toUpperCase().trim();
       
-      // Exclude keywords
+      // Exclude keywords - payment methods, totals, headers
       var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 'ΑΞΙΑ', 
-                     'ΥΠΟΣΥΝΟΛ', 'EFT', 'POS', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
+                     'ΥΠΟΣΥΝΟΛ', 'EFT', 'POS', 'E-POS', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
                      'ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'Α/Α', 'ΜΜ',
-                     'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT'];
+                     'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 'ΤΡΟΠΟΣ', 'ΤΡΟΠΟΙ',
+                     'ΠΛΗΡΩΜ', 'PAYMENT', 'ΦΟΡΟΙ', 'ΚΡΑΤΗΣ', 'ΣΥΝΟΛΙΚ', 'ΠΑΡΑΣΤΑΤ',
+                     'ΜΟΝΑΔΑ', 'ΜΕΤΡΗΣ', 'ΠΟΣΟΣΤΟ', 'ΓΡΑΜΜΕΣ'];
       for (var i = 0; i < excludes.length; i++) {
         if (t.includes(excludes[i]) || t === excludes[i]) return false;
       }
+      
+      // Exclude if it looks like a payment method pattern
+      if (/^POS\s*\//.test(t) || /E-?POS/.test(t)) return false;
       
       // Must contain at least one letter
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
       
       return true;
+    }
+
+    // Check if a table row is a payment/total row (not a product)
+    function isPaymentOrTotalRow(rowText) {
+      var t = rowText.toUpperCase();
+      var paymentKeywords = ['ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'POS / E-POS', 
+                             'POS/E-POS', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΚΑΘΑΡΗ ΑΞΙΑ:',
+                             'ΣΥΝΟΛΙΚΗ ΑΞΙΑ', 'ΦΟΡΟΙ:', 'ΚΡΑΤΗΣΕΙΣ'];
+      for (var i = 0; i < paymentKeywords.length; i++) {
+        if (t.includes(paymentKeywords[i])) return true;
+      }
+      return false;
     }
 
     // Get all tables
@@ -114,6 +131,10 @@ const DOM_EXTRACTION_JS = `
         var cells = rows[ri].querySelectorAll('td');
         // Reduced minimum cells requirement - some tables may have fewer columns
         if (cells.length < 3) continue;
+        
+        // Get full row text to check if it's a payment/total row
+        var fullRowText = rows[ri].innerText || '';
+        if (isPaymentOrTotalRow(fullRowText)) continue;
         
         // Find description - usually column 1 or 2 (after row number)
         var description = '';
@@ -291,7 +312,39 @@ export default function WebViewImportScreen() {
             javaScriptEnabled={true}
             domStorageEnabled={true}
             onLoadStart={() => { setLoading(true); setPageLoaded(false); }}
-            onLoadEnd={() => { setLoading(false); setPageLoaded(true); }}
+            onLoadEnd={() => { 
+              setLoading(false); 
+              setPageLoaded(true);
+              // Auto-switch from PDF to iframe view for Epsilon Digital sites
+              if (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet')) {
+                webviewRef.current?.injectJavaScript(`
+                  (function() {
+                    // Try to find and click the toggle switch to show iframe instead of PDF
+                    // Look for common toggle elements
+                    var toggle = document.querySelector('input[type="checkbox"]');
+                    if (toggle && toggle.checked) {
+                      toggle.click();
+                    }
+                    // Also try common toggle classes/buttons
+                    var switches = document.querySelectorAll('.switch, .toggle, [role="switch"], .pdf-toggle');
+                    switches.forEach(function(sw) {
+                      if (sw.classList.contains('active') || sw.checked) {
+                        sw.click();
+                      }
+                    });
+                    // Click any "Show HTML" or similar button
+                    var buttons = document.querySelectorAll('button, a, div[onclick]');
+                    buttons.forEach(function(btn) {
+                      var text = (btn.innerText || '').toLowerCase();
+                      if (text.includes('html') || text.includes('iframe') || text.includes('προβολή')) {
+                        btn.click();
+                      }
+                    });
+                  })();
+                  true;
+                `);
+              }
+            }}
             onMessage={handleMessage}
             userAgent="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
           />
