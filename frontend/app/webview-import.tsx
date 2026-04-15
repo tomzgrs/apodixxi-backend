@@ -90,18 +90,17 @@ const DOM_EXTRACTION_JS = `
       var t = text.toUpperCase().trim();
       
       // Exclude keywords - payment methods, totals, headers
-      var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 'ΑΞΙΑ', 
-                     'ΥΠΟΣΥΝΟΛ', 'EFT', 'POS', 'E-POS', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
+      var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 
+                     'ΥΠΟΣΥΝΟΛ', 'EFT', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
                      'ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'Α/Α', 'ΜΜ',
-                     'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 'ΤΡΟΠΟΣ', 'ΤΡΟΠΟΙ',
-                     'ΠΛΗΡΩΜ', 'PAYMENT', 'ΦΟΡΟΙ', 'ΚΡΑΤΗΣ', 'ΣΥΝΟΛΙΚ', 'ΠΑΡΑΣΤΑΤ',
-                     'ΜΟΝΑΔΑ', 'ΜΕΤΡΗΣ', 'ΠΟΣΟΣΤΟ', 'ΓΡΑΜΜΕΣ'];
+                     'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 
+                     'PAYMENT', 'ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ'];
       for (var i = 0; i < excludes.length; i++) {
         if (t.includes(excludes[i]) || t === excludes[i]) return false;
       }
       
-      // Exclude if it looks like a payment method pattern
-      if (/^POS\s*\//.test(t) || /E-?POS/.test(t)) return false;
+      // Exclude if it looks like a payment method pattern (POS / e-POS)
+      if (/^POS\s*[\/\-]/.test(t) || t === 'POS' || t === 'E-POS' || t.startsWith('POS/') || t.startsWith('POS /')) return false;
       
       // Must contain at least one letter
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
@@ -112,12 +111,11 @@ const DOM_EXTRACTION_JS = `
     // Check if a table row is a payment/total row (not a product)
     function isPaymentOrTotalRow(rowText) {
       var t = rowText.toUpperCase();
-      var paymentKeywords = ['ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'POS / E-POS', 
-                             'POS/E-POS', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΚΑΘΑΡΗ ΑΞΙΑ:',
-                             'ΣΥΝΟΛΙΚΗ ΑΞΙΑ', 'ΦΟΡΟΙ:', 'ΚΡΑΤΗΣΕΙΣ'];
-      for (var i = 0; i < paymentKeywords.length; i++) {
-        if (t.includes(paymentKeywords[i])) return true;
-      }
+      // Only check for very specific payment section markers
+      if (t.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || t.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) return true;
+      if (t.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ')) return true;
+      // Check if row starts with POS payment
+      if (/^\s*POS\s*[\/\-]/.test(t) || /^\s*E-?POS/.test(t)) return true;
       return false;
     }
 
