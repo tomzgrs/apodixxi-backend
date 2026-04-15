@@ -7,6 +7,7 @@ import logging
 import re
 import uuid
 import aiohttp
+import math
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -26,6 +27,28 @@ api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def safe_float(value, default=0.0):
+    """Convert value to float, handling inf/nan and invalid values."""
+    try:
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return f
+    except (ValueError, TypeError):
+        return default
+
+def sanitize_receipt_data(data):
+    """Sanitize all float values in receipt data to prevent JSON serialization errors."""
+    if isinstance(data, dict):
+        return {k: sanitize_receipt_data(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_receipt_data(item) for item in data]
+    elif isinstance(data, float):
+        if math.isnan(data) or math.isinf(data):
+            return 0.0
+        return data
+    return data
 
 # ── Models ──
 
@@ -1029,8 +1052,10 @@ async def get_receipts(device_id: str = Query(...), skip: int = 0, limit: int = 
         ]
     cursor = db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit)
     receipts = await cursor.to_list(limit)
+    # Sanitize all float values to prevent JSON serialization errors
+    sanitized_receipts = [sanitize_receipt_data(r) for r in receipts]
     total = await db.receipts.count_documents(query)
-    return {"receipts": receipts, "total": total}
+    return {"receipts": sanitized_receipts, "total": total}
 
 
 @api_router.get("/receipts/{receipt_id}")
@@ -1038,7 +1063,8 @@ async def get_receipt(receipt_id: str):
     receipt = await db.receipts.find_one({"id": receipt_id}, {"_id": 0})
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
-    return receipt
+    # Sanitize float values
+    return sanitize_receipt_data(receipt)
 
 
 @api_router.delete("/receipts/{receipt_id}")

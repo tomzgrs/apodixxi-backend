@@ -136,11 +136,11 @@ const DOM_EXTRACTION_JS = `
         for (var qi = descIndex + 1; qi < Math.min(cells.length, descIndex + 3); qi++) {
           var qText = cells[qi] ? cells[qi].innerText.trim().replace(',', '.') : '';
           // Match quantity patterns: 0.126 (weight), 1.000, 2.500, or just integers
-          if (/^\\d+\\.\\d+$/.test(qText)) {
+          if (/^\d+\.\d+$/.test(qText)) {
             qtyValue = parseFloat(qText);
             quantity = qText;
             break;
-          } else if (/^\\d+$/.test(qText) && parseInt(qText) < 1000) {
+          } else if (/^\d+$/.test(qText) && parseInt(qText) < 1000) {
             qtyValue = parseInt(qText);
             quantity = qText;
             break;

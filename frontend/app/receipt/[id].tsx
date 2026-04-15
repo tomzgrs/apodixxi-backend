@@ -112,22 +112,35 @@ export default function ReceiptDetailScreen() {
 
         <View style={styles.itemsCard}>
           <Text style={styles.itemsTitle}>{receipt.items?.length || 0} {t('items')}</Text>
+          
+          {/* Table Header */}
+          <View style={styles.tableHeader}>
+            <Text style={[styles.tableHeaderText, styles.colNo]}>#</Text>
+            <Text style={[styles.tableHeaderText, styles.colDesc]}>{lang === 'el' ? 'Περιγραφή' : 'Description'}</Text>
+            <Text style={[styles.tableHeaderText, styles.colQty]}>{lang === 'el' ? 'Ποσ.' : 'Qty'}</Text>
+            <Text style={[styles.tableHeaderText, styles.colPrice]}>{lang === 'el' ? 'Τιμή' : 'Price'}</Text>
+            <Text style={[styles.tableHeaderText, styles.colTotal]}>{lang === 'el' ? 'Σύνολο' : 'Total'}</Text>
+          </View>
+          
+          {/* Table Rows */}
           {receipt.items?.map((item: any, i: number) => (
-            <View key={i} style={[styles.itemRow, i < receipt.items.length - 1 && styles.itemBorder]}>
-              <View style={styles.itemInfo}>
-                <Text style={styles.itemDesc} numberOfLines={2}>{item.description}</Text>
-                <Text style={styles.itemMeta}>
-                  {item.quantity > 1 ? `${item.quantity} × ${formatPrice(item.unit_price)}` : ''}
-                  {item.unit ? ` · ${item.unit}` : ''}
-                  {item.vat_percent ? ` · ${t('vat')} ${item.vat_percent}%` : ''}
-                </Text>
+            <View key={i} style={[styles.tableRow, i % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd]}>
+              <Text style={[styles.tableCell, styles.colNo]}>{i + 1}</Text>
+              <View style={styles.colDesc}>
+                <Text style={styles.tableCellDesc} numberOfLines={2}>{item.description}</Text>
+                {item.unit && <Text style={styles.tableCellUnit}>{item.unit}</Text>}
               </View>
-              <View style={styles.itemPriceWrap}>
-                <Text style={styles.itemPrice}>{formatPrice(item.total_value)}</Text>
-                {item.discount > 0 && (
-                  <Text style={styles.itemDiscount}>-{formatPrice(item.discount)}</Text>
-                )}
-              </View>
+              <Text style={[styles.tableCell, styles.colQty]}>
+                {typeof item.quantity === 'number' && item.quantity !== 1 
+                  ? item.quantity.toFixed(item.quantity < 1 ? 3 : 0) 
+                  : '1'}
+              </Text>
+              <Text style={[styles.tableCell, styles.colPrice]}>
+                {item.unit_price > 0 ? formatPrice(item.unit_price) : '-'}
+              </Text>
+              <Text style={[styles.tableCell, styles.colTotal, styles.tableCellTotal]}>
+                {formatPrice(item.total_value)}
+              </Text>
             </View>
           ))}
         </View>
@@ -209,6 +222,24 @@ const styles = StyleSheet.create({
   metaValue: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: 3 },
   itemsCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: COLORS.borderLight, marginBottom: 12 },
   itemsTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  
+  // Table styles
+  tableHeader: { flexDirection: 'row', backgroundColor: COLORS.primaryLight, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 8, marginBottom: 4 },
+  tableHeaderText: { fontSize: 10, fontWeight: '700', color: COLORS.primary, textAlign: 'center' },
+  tableRow: { flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight, alignItems: 'center' },
+  tableRowEven: { backgroundColor: '#F8FAFC' },
+  tableRowOdd: { backgroundColor: COLORS.surface },
+  tableCell: { fontSize: 11, color: COLORS.textPrimary, textAlign: 'center' },
+  tableCellDesc: { fontSize: 11, fontWeight: '500', color: COLORS.textPrimary, lineHeight: 15 },
+  tableCellUnit: { fontSize: 9, color: COLORS.textMuted, marginTop: 2 },
+  tableCellTotal: { fontWeight: '700', color: COLORS.primary },
+  colNo: { width: 24, textAlign: 'center' },
+  colDesc: { flex: 1, paddingHorizontal: 6 },
+  colQty: { width: 40, textAlign: 'center' },
+  colPrice: { width: 50, textAlign: 'right' },
+  colTotal: { width: 55, textAlign: 'right' },
+  
+  // Legacy styles (keep for compatibility)
   itemRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10 },
   itemBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
   itemInfo: { flex: 1 },
