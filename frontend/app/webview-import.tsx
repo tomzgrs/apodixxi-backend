@@ -92,19 +92,11 @@ const DOM_EXTRACTION_JS = `
       // Exclude very long hexadecimal strings (digital signatures)
       if (t.length > 50 && /^[0-9A-F]+$/.test(t)) return false;
       
-      // Exclude Base64-like strings (digital signatures) - contain = at end or + /
+      // Exclude Base64-like strings (digital signatures)
       if (t.length > 30 && /[=+\/]/.test(text) && /^[A-Za-z0-9+\/=]+$/.test(text)) return false;
       
-      // Exclude strings that look like hashes/signatures (mostly alphanumeric, very long)
+      // Exclude strings that look like hashes/signatures
       if (t.length > 40 && !/\s/.test(t)) return false;
-      
-      // Exclude UNIT OF MEASUREMENT words - these are NOT product descriptions!
-      var unitWords = ['ΚΙΛΑ', 'ΚΙΛΆ', 'ΤΕΜΑΧΙΑ', 'ΤΕΜΆΧΙΑ', 'ΤΕΜ', 'ΛΙΤΡΑ', 'ΛΊΤΡΑ', 
-                       'ΓΡΑΜΜΑΡΙΑ', 'ΜΕΤΡΑ', 'KILOS', 'PIECES', 'LITERS', 'GRAMS',
-                       'KG', 'GR', 'LT', 'ML', 'PCS'];
-      for (var u = 0; u < unitWords.length; u++) {
-        if (t === unitWords[u]) return false;
-      }
       
       // Exclude keywords - payment methods, totals, headers
       var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 
@@ -113,7 +105,7 @@ const DOM_EXTRACTION_JS = `
                      'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 
                      'PAYMENT', 'ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ',
                      'ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'ΠΛΗΡΩΜΗ',
-                     'ΜΟΝΑΔΑ ΜΕΤΡΗΣΗΣ', 'ΜΟΝΑΔΑ', 'ΜΕΤΡΗΣΗΣ'];
+                     'ΜΟΝΑΔΑ ΜΕΤΡΗΣΗΣ'];
       for (var i = 0; i < excludes.length; i++) {
         if (t.includes(excludes[i]) || t === excludes[i]) return false;
       }
@@ -127,11 +119,20 @@ const DOM_EXTRACTION_JS = `
       // Must contain at least one Greek or Latin letter
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
       
-      // Product descriptions usually have more than one word or are longer
-      // Single short words like "Κιλά" should be excluded
-      if (t.length < 6 && !/\s/.test(t)) return false;
-      
       return true;
+    }
+    
+    // Check if text is ONLY a unit of measurement (not a product description)
+    function isUnitOfMeasurement(text) {
+      if (!text) return false;
+      var t = text.toUpperCase().trim();
+      var units = ['ΚΙΛΑ', 'ΚΙΛΆ', 'ΤΕΜΑΧΙΑ', 'ΤΕΜΆΧΙΑ', 'ΤΕΜ', 'ΛΙΤΡΑ', 'ΛΊΤΡΑ', 
+                   'ΓΡΑΜΜΑΡΙΑ', 'ΜΕΤΡΑ', 'KILOS', 'PIECES', 'LITERS', 'GRAMS',
+                   'KG', 'GR', 'LT', 'ML', 'PCS', 'ΤΕΜΑΧΙΟ', 'ΚΙΛΟ'];
+      for (var i = 0; i < units.length; i++) {
+        if (t === units[i]) return true;
+      }
+      return false;
     }
 
     // Check if a table row is a payment/total row (not a product)
@@ -194,13 +195,23 @@ const DOM_EXTRACTION_JS = `
         // Skip if row starts with POS
         if (/^\s*POS/.test(fullRowText)) continue;
         
-        // Find description
+        // Find description - SKIP cells that are just units of measurement
         var description = '';
-        var actualDescIndex = descColIndex >= 0 ? descColIndex : -1;
+        var actualDescIndex = -1;
+        var unitFound = '';
         
-        // Try to find description in known column or search first few columns
-        for (var di = 0; di < Math.min(cells.length, 4); di++) {
+        // Look in first few columns for the description
+        // Column 0 is usually row number, Column 1 is usually description
+        for (var di = 0; di < Math.min(cells.length, 5); di++) {
           var cellText = cells[di] ? cells[di].innerText.trim() : '';
+          
+          // Skip if this is just a unit of measurement
+          if (isUnitOfMeasurement(cellText)) {
+            unitFound = cellText;
+            continue;
+          }
+          
+          // Check if it's a valid description
           if (isValidDescription(cellText)) {
             description = cellText;
             actualDescIndex = di;
@@ -208,7 +219,19 @@ const DOM_EXTRACTION_JS = `
           }
         }
         
+        // If no description found, skip this row
         if (!description) continue;
+        
+        // Also look for unit of measurement in the rest of the row
+        if (!unitFound) {
+          for (var ui = actualDescIndex + 1; ui < cells.length; ui++) {
+            var uText = cells[ui] ? cells[ui].innerText.trim() : '';
+            if (isUnitOfMeasurement(uText)) {
+              unitFound = uText;
+              break;
+            }
+          }
+        }
         
         // Get quantity
         var quantity = '1';
@@ -263,12 +286,10 @@ const DOM_EXTRACTION_JS = `
           result.items.push({
             code: '',
             description: description,
-            unit: qtyValue < 1 ? 'Κιλά' : 'ΤΕΜ',
+            unit: unitFound || (qtyValue < 1 ? 'Κιλά' : 'Τεμάχια'),
             quantity: quantity,
             unit_price: (finalPrice / qtyValue).toFixed(2),
-            total: finalPrice.toFixed(2),
-            net_value: netValue.toFixed(2),
-            vat_amount: vatAmount.toFixed(2)
+            total: finalPrice.toFixed(2)
           });
         }
       }
