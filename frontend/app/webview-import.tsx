@@ -210,8 +210,8 @@ const DOM_EXTRACTION_JS = `
         if (cells.length > 1) {
           var col1Text = cells[1] ? cells[1].innerText.trim() : '';
           if (col1Text && col1Text.length > 2 && !isUnitOfMeasurement(col1Text)) {
-            // Check if it's valid or at least contains Greek letters
-            if (/[Α-Ωα-ω]/.test(col1Text) && col1Text.length > 3) {
+            // Accept both Greek AND Latin letters (for brand names like LIPOSAN)
+            if (/[A-Za-zΑ-Ωα-ω]/.test(col1Text) && col1Text.length > 3) {
               description = col1Text;
               actualDescIndex = 1;
             }
@@ -222,7 +222,7 @@ const DOM_EXTRACTION_JS = `
         if (!description && cells.length > 2) {
           var col2Text = cells[2] ? cells[2].innerText.trim() : '';
           if (col2Text && col2Text.length > 2 && !isUnitOfMeasurement(col2Text)) {
-            if (/[Α-Ωα-ω]/.test(col2Text) && col2Text.length > 3) {
+            if (/[A-Za-zΑ-Ωα-ω]/.test(col2Text) && col2Text.length > 3) {
               description = col2Text;
               actualDescIndex = 2;
             }
