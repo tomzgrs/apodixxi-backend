@@ -322,10 +322,23 @@ const DOM_EXTRACTION_JS = `
     }
     
     // Find the TOTAL (Συνολική Αξία) from the page
-    var totalPatterns = ['ΣΥΝΟΛΙΚΗ ΑΞΙΑ', 'ΣΥΝΟΛΙΚΉ ΑΞΊΑ', 'ΤΕΛΙΚΟ ΣΥΝΟΛΟ', 'ΠΛΗΡΩΤΕΟ'];
+    // Look for patterns like "Συνολική Αξία: 18,53" or "ΠΛΗΡΩΤΕΟ: 18,53"
+    var totalPatterns = ['ΣΥΝΟΛΙΚΗ ΑΞΙΑ', 'ΣΥΝΟΛΙΚΉ ΑΞΊΑ', 'ΤΕΛΙΚΟ ΣΥΝΟΛΟ', 'ΠΛΗΡΩΤΕΟ', 
+                         'ΣΥΝΟΛΟ:', 'TOTAL:', 'GRAND TOTAL', 'ΠΛΗΡΩΤΕΟ ΠΟΣΟ'];
     var allText = document.body.innerText || '';
     var lines = allText.split('\\n');
     
+    // Also calculate the sum of all items as backup
+    var itemsSum = 0;
+    for (var s = 0; s < result.items.length; s++) {
+      itemsSum += parseFloat(result.items[s].total) || 0;
+    }
+    itemsSum = Math.round(itemsSum * 100) / 100;
+    
+    // Set items sum as the found_final_total (this is the most accurate)
+    result.found_final_total = itemsSum;
+    
+    // Try to find explicit total in the text (might be different due to discounts/coupons)
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].toUpperCase();
       for (var tp = 0; tp < totalPatterns.length; tp++) {
@@ -333,7 +346,9 @@ const DOM_EXTRACTION_JS = `
           var priceMatch = lines[i].match(/([\\d]+[,\\.][\\d]{2})/);
           if (priceMatch) {
             var totalVal = parseFloat(priceMatch[1].replace(',', '.'));
-            if (totalVal > 0 && totalVal > result.found_final_total) {
+            // Only use this total if it's close to our calculated sum (within 10%)
+            // This helps avoid picking up wrong totals
+            if (totalVal > 0 && Math.abs(totalVal - itemsSum) < itemsSum * 0.1) {
               result.found_final_total = totalVal;
             }
           }
