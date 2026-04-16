@@ -195,31 +195,57 @@ const DOM_EXTRACTION_JS = `
         // Skip if row starts with POS
         if (/^\s*POS/.test(fullRowText)) continue;
         
-        // Find description - SKIP cells that are just units of measurement
+        // Find description - Column 1 is usually the description (after row number in column 0)
         var description = '';
         var actualDescIndex = -1;
         var unitFound = '';
         
-        // Look in first few columns for the description
-        // Column 0 is usually row number, Column 1 is usually description
-        for (var di = 0; di < Math.min(cells.length, 5); di++) {
-          var cellText = cells[di] ? cells[di].innerText.trim() : '';
-          
-          // Skip if this is just a unit of measurement
-          if (isUnitOfMeasurement(cellText)) {
-            unitFound = cellText;
-            continue;
-          }
-          
-          // Check if it's a valid description
-          if (isValidDescription(cellText)) {
-            description = cellText;
-            actualDescIndex = di;
-            break;
+        // In Epsilon Digital tables:
+        // Column 0 = Α/Α (row number)
+        // Column 1 = Περιγραφή Είδους (DESCRIPTION)
+        // Column 2 = Ποσότητα
+        // Column 3 = Μονάδα Μέτρησης
+        
+        // First, try column 1 specifically
+        if (cells.length > 1) {
+          var col1Text = cells[1] ? cells[1].innerText.trim() : '';
+          if (col1Text && col1Text.length > 2 && !isUnitOfMeasurement(col1Text)) {
+            // Check if it's valid or at least contains Greek letters
+            if (/[Α-Ωα-ω]/.test(col1Text) && col1Text.length > 3) {
+              description = col1Text;
+              actualDescIndex = 1;
+            }
           }
         }
         
-        // If no description found, skip this row
+        // If column 1 didn't work, try column 2
+        if (!description && cells.length > 2) {
+          var col2Text = cells[2] ? cells[2].innerText.trim() : '';
+          if (col2Text && col2Text.length > 2 && !isUnitOfMeasurement(col2Text)) {
+            if (/[Α-Ωα-ω]/.test(col2Text) && col2Text.length > 3) {
+              description = col2Text;
+              actualDescIndex = 2;
+            }
+          }
+        }
+        
+        // Fallback: search through first 5 columns
+        if (!description) {
+          for (var di = 0; di < Math.min(cells.length, 5); di++) {
+            var cellText = cells[di] ? cells[di].innerText.trim() : '';
+            if (isUnitOfMeasurement(cellText)) {
+              unitFound = cellText;
+              continue;
+            }
+            if (isValidDescription(cellText)) {
+              description = cellText;
+              actualDescIndex = di;
+              break;
+            }
+          }
+        }
+        
+        // If still no description, skip this row
         if (!description) continue;
         
         // Also look for unit of measurement in the rest of the row
