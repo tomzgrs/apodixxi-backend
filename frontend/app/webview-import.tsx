@@ -195,53 +195,59 @@ const DOM_EXTRACTION_JS = `
         // Skip if row starts with POS
         if (/^\s*POS/.test(fullRowText)) continue;
         
-        // Find description - Column 1 is usually the description (after row number in column 0)
+        // Find description - Look for the longest text that looks like a product name
         var description = '';
         var actualDescIndex = -1;
         var unitFound = '';
         
-        // In Epsilon Digital tables:
-        // Column 0 = Α/Α (row number)
-        // Column 1 = Περιγραφή Είδους (DESCRIPTION)
-        // Column 2 = Ποσότητα
-        // Column 3 = Μονάδα Μέτρησης
+        // In Epsilon Digital tables, description is usually in column 1 or 2
+        // But sometimes cells might be structured differently
         
-        // First, try column 1 specifically
-        if (cells.length > 1) {
-          var col1Text = cells[1] ? cells[1].innerText.trim() : '';
-          if (col1Text && col1Text.length > 2 && !isUnitOfMeasurement(col1Text)) {
-            // Accept both Greek AND Latin letters (for brand names like LIPOSAN)
-            if (/[A-Za-zΑ-Ωα-ω]/.test(col1Text) && col1Text.length > 3) {
-              description = col1Text;
-              actualDescIndex = 1;
-            }
+        // Collect all candidate texts from first 5 columns
+        var candidates = [];
+        for (var di = 0; di < Math.min(cells.length, 5); di++) {
+          var cellText = cells[di] ? cells[di].innerText.trim() : '';
+          if (!cellText) continue;
+          
+          // Skip if it's a unit of measurement
+          if (isUnitOfMeasurement(cellText)) {
+            unitFound = cellText;
+            continue;
+          }
+          
+          // Skip if it's just a number (row number or quantity)
+          if (/^\d+[,\.]?\d*$/.test(cellText)) continue;
+          
+          // Skip if it's a percentage (VAT %)
+          if (/^\d+%$/.test(cellText)) continue;
+          
+          // Skip if it's a price format
+          if (/^\d+[,\.]\d{2}$/.test(cellText)) continue;
+          
+          // This could be a description candidate
+          if (cellText.length >= 3 && /[A-Za-zΑ-Ωα-ω]/.test(cellText)) {
+            candidates.push({ text: cellText, index: di });
           }
         }
         
-        // If column 1 didn't work, try column 2
-        if (!description && cells.length > 2) {
-          var col2Text = cells[2] ? cells[2].innerText.trim() : '';
-          if (col2Text && col2Text.length > 2 && !isUnitOfMeasurement(col2Text)) {
-            if (/[A-Za-zΑ-Ωα-ω]/.test(col2Text) && col2Text.length > 3) {
-              description = col2Text;
-              actualDescIndex = 2;
-            }
-          }
-        }
-        
-        // Fallback: search through first 5 columns
-        if (!description) {
-          for (var di = 0; di < Math.min(cells.length, 5); di++) {
-            var cellText = cells[di] ? cells[di].innerText.trim() : '';
-            if (isUnitOfMeasurement(cellText)) {
-              unitFound = cellText;
-              continue;
-            }
-            if (isValidDescription(cellText)) {
-              description = cellText;
-              actualDescIndex = di;
+        // Choose the best candidate - prefer longer texts as they're more likely to be descriptions
+        if (candidates.length > 0) {
+          // Sort by length (longest first)
+          candidates.sort(function(a, b) { return b.text.length - a.text.length; });
+          
+          // Take the longest one that passes validation
+          for (var ci = 0; ci < candidates.length; ci++) {
+            if (isValidDescription(candidates[ci].text)) {
+              description = candidates[ci].text;
+              actualDescIndex = candidates[ci].index;
               break;
             }
+          }
+          
+          // If no candidate passed strict validation, use the longest one anyway
+          if (!description && candidates.length > 0) {
+            description = candidates[0].text;
+            actualDescIndex = candidates[0].index;
           }
         }
         
