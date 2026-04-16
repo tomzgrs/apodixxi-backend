@@ -96,7 +96,15 @@ const DOM_EXTRACTION_JS = `
       if (t.length > 30 && /[=+\/]/.test(text) && /^[A-Za-z0-9+\/=]+$/.test(text)) return false;
       
       // Exclude strings that look like hashes/signatures (mostly alphanumeric, very long)
-      if (t.length > 40 && !/\s/.test(t)) return false;  // No spaces and very long = likely signature
+      if (t.length > 40 && !/\s/.test(t)) return false;
+      
+      // Exclude UNIT OF MEASUREMENT words - these are NOT product descriptions!
+      var unitWords = ['ΚΙΛΑ', 'ΚΙΛΆ', 'ΤΕΜΑΧΙΑ', 'ΤΕΜΆΧΙΑ', 'ΤΕΜ', 'ΛΙΤΡΑ', 'ΛΊΤΡΑ', 
+                       'ΓΡΑΜΜΑΡΙΑ', 'ΜΕΤΡΑ', 'KILOS', 'PIECES', 'LITERS', 'GRAMS',
+                       'KG', 'GR', 'LT', 'ML', 'PCS'];
+      for (var u = 0; u < unitWords.length; u++) {
+        if (t === unitWords[u]) return false;
+      }
       
       // Exclude keywords - payment methods, totals, headers
       var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 
@@ -104,7 +112,8 @@ const DOM_EXTRACTION_JS = `
                      'ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'Α/Α', 'ΜΜ',
                      'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 
                      'PAYMENT', 'ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ',
-                     'ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'ΠΛΗΡΩΜΗ'];
+                     'ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'ΠΛΗΡΩΜΗ',
+                     'ΜΟΝΑΔΑ ΜΕΤΡΗΣΗΣ', 'ΜΟΝΑΔΑ', 'ΜΕΤΡΗΣΗΣ'];
       for (var i = 0; i < excludes.length; i++) {
         if (t.includes(excludes[i]) || t === excludes[i]) return false;
       }
@@ -118,14 +127,9 @@ const DOM_EXTRACTION_JS = `
       // Must contain at least one Greek or Latin letter
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
       
-      // Must contain at least one space for product names (usually have multiple words)
-      // Exception: very short names (< 15 chars) may not have spaces
-      if (t.length > 15 && !/\s/.test(t) && !/[Α-Ω]/.test(t)) return false;
-      
-      // Exclude if it's mostly numbers/hex (likely a signature or code)
-      var letterCount = (t.match(/[A-ZΑ-Ω]/g) || []).length;
-      var digitCount = (t.match(/[0-9]/g) || []).length;
-      if (digitCount > letterCount * 3 && t.length > 30) return false;
+      // Product descriptions usually have more than one word or are longer
+      // Single short words like "Κιλά" should be excluded
+      if (t.length < 6 && !/\s/.test(t)) return false;
       
       return true;
     }
