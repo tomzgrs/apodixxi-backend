@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
+import { getStoreLogo } from '../../src/storeLogos';
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
@@ -158,6 +159,7 @@ export default function SettingsScreen() {
     },
     storeItemLast: { borderBottomWidth: 0 },
     storeDot: { width: 10, height: 10, borderRadius: 5, marginRight: Spacing.md },
+    storeLogoSmall: { width: 24, height: 24, borderRadius: 4, marginRight: Spacing.md },
     storeNameText: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.semibold, color: theme.text },
     storeMethod: { fontSize: Typography.xs, color: theme.textSecondary },
     
@@ -179,14 +181,19 @@ export default function SettingsScreen() {
   });
 
   const stores = [
-    { name: 'Σκλαβενίτης', method: 'Auto', color: '#E35205' },
-    { name: 'Μασούτης', method: 'Auto', color: '#00A651' },
-    { name: 'Jumbo', method: 'Auto', color: '#FFD700' },
-    { name: 'My Market', method: 'Auto', color: '#FF6600' },
-    { name: 'Lidl', method: 'Auto', color: '#0050AA' },
-    { name: 'ΑΒ Βασιλόπουλος', method: 'XML', color: '#005696' },
-    { name: 'Market In', method: 'XML', color: '#E30613' },
-    { name: 'Bazaar', method: 'XML', color: '#D4145A' },
+    { name: 'Σκλαβενίτης', method: 'Auto', color: '#E35205', key: 'ΣΚΛΑΒΕΝΙΤΗΣ' },
+    { name: 'Μασούτης', method: 'Auto', color: '#00A651', key: 'ΜΑΣΟΥΤΗΣ' },
+    { name: 'Jumbo', method: 'Auto', color: '#FFD700', key: 'JUMBO' },
+    { name: 'My Market', method: 'Auto', color: '#FF6600', key: 'MY MARKET' },
+    { name: 'Lidl', method: 'Auto', color: '#0050AA', key: 'LIDL' },
+    { name: 'ΑΒ Βασιλόπουλος', method: 'WebView', color: '#005696', key: 'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ' },
+    { name: 'Market In', method: 'WebView', color: '#E30613', key: 'MARKET IN' },
+    { name: 'Bazaar', method: 'WebView', color: '#D4145A', key: 'BAZAAR' },
+    { name: 'The Mart', method: 'Auto', color: '#FF0000', key: 'THE MART' },
+    { name: 'Kritikos', method: 'Auto', color: '#00529B', key: 'ΚΡΗΤΙΚΟΣ' },
+    { name: 'Galaxias', method: 'Auto', color: '#E4002B', key: 'ΓΑΛΑΞΙΑΣ' },
+    { name: 'SYN.KA', method: 'Auto', color: '#ED1C24', key: 'SYNKA' },
+    { name: 'Μουστάκας', method: 'Auto', color: '#E31837', key: 'ΜΟΥΣΤΑΚΑΣ' },
   ];
 
   return (
@@ -300,13 +307,20 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('supported_stores')}</Text>
           <View style={styles.storesGrid}>
-            {stores.map((store, i) => (
-              <View key={i} style={[styles.storeItem, i === stores.length - 1 && styles.storeItemLast]}>
-                <View style={[styles.storeDot, { backgroundColor: store.color }]} />
-                <Text style={styles.storeNameText}>{store.name}</Text>
-                <Text style={styles.storeMethod}>{store.method}</Text>
-              </View>
-            ))}
+            {stores.map((store, i) => {
+              const logoUrl = getStoreLogo(store.key);
+              return (
+                <View key={i} style={[styles.storeItem, i === stores.length - 1 && styles.storeItemLast]}>
+                  {logoUrl ? (
+                    <Image source={{ uri: logoUrl }} style={styles.storeLogoSmall} resizeMode="contain" />
+                  ) : (
+                    <View style={[styles.storeDot, { backgroundColor: store.color }]} />
+                  )}
+                  <Text style={styles.storeNameText}>{store.name}</Text>
+                  <Text style={styles.storeMethod}>{store.method}</Text>
+                </View>
+              );
+            })}
           </View>
         </View>
 

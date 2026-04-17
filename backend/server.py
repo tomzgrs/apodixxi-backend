@@ -1192,6 +1192,7 @@ async def get_analytics(device_id: str = Query(...), months: int = Query(default
     from collections import defaultdict
     monthly_data = defaultdict(float)
     store_totals = defaultdict(float)
+    current_month_store_totals = defaultdict(float)  # Store distribution for current month
     product_counts = defaultdict(lambda: {"count": 0, "total": 0.0, "description": ""})
     
     now = datetime.now(timezone.utc)
@@ -1226,6 +1227,9 @@ async def get_analytics(device_id: str = Query(...), months: int = Query(default
         
         if month_key:
             monthly_data[month_key] += total
+            # Track current month store distribution
+            if month_key == current_month_key:
+                current_month_store_totals[store] += total
         
         store_totals[store] += total
         
@@ -1312,9 +1316,37 @@ async def get_analytics(device_id: str = Query(...), months: int = Query(default
     else:
         trend = "neutral"
     
+    # Current month store distribution
+    sorted_current_month_stores = sorted(current_month_store_totals.items(), key=lambda x: x[1], reverse=True)
+    current_month_store_distribution = []
+    total_current_month_stores = sum(current_month_store_totals.values())
+    current_month_others_total = 0
+    
+    for i, (store, total) in enumerate(sorted_current_month_stores):
+        if i < 5:
+            percentage = (total / total_current_month_stores * 100) if total_current_month_stores > 0 else 0
+            current_month_store_distribution.append({
+                "name": store,
+                "amount": round(total, 2),
+                "percentage": round(percentage, 1),
+                "color": store_colors[i % len(store_colors)]
+            })
+        else:
+            current_month_others_total += total
+    
+    if current_month_others_total > 0:
+        percentage = (current_month_others_total / total_current_month_stores * 100) if total_current_month_stores > 0 else 0
+        current_month_store_distribution.append({
+            "name": "Άλλα",
+            "amount": round(current_month_others_total, 2),
+            "percentage": round(percentage, 1),
+            "color": "#94A3B8"
+        })
+    
     return {
         "monthly_spending": monthly_spending,
         "store_distribution": store_distribution,
+        "current_month_store_distribution": current_month_store_distribution,
         "top_products": top_products,
         "spending_trend": trend,
         "total_this_month": round(this_month_total, 2),

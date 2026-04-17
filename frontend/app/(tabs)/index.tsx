@@ -42,26 +42,12 @@ export default function DashboardScreen() {
 
   const onRefresh = () => { setRefreshing(true); loadData(); };
 
-  // Calculate current month's store distribution
-  const getCurrentMonthDistribution = () => {
-    if (!analytics || !analytics.monthly_spending || analytics.monthly_spending.length === 0) {
-      return analytics?.store_distribution || [];
-    }
-    
-    // Get the current month key
-    const now = new Date();
-    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    
-    // For now, return total distribution - we'd need a backend endpoint for monthly breakdown
-    // This is a simplified version
-    return analytics.store_distribution || [];
-  };
-
   const getStoreDistribution = () => {
     if (distributionMode === 'total') {
       return analytics?.store_distribution || [];
     } else {
-      return getCurrentMonthDistribution();
+      // Use current month distribution from backend
+      return analytics?.current_month_store_distribution || [];
     }
   };
 
