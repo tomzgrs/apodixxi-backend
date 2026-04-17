@@ -147,9 +147,10 @@ export default function CompareScreen() {
                 placeholder={lang === 'el' ? 'Αναζήτηση προϊόντος...' : 'Search product...'}
                 placeholderTextColor={theme.textMuted}
                 value={query}
-                onChangeText={setQuery}
+                onChangeText={(text) => setQuery(text.toUpperCase())}
                 onSubmitEditing={handleSearch}
                 returnKeyType="search"
+                autoCapitalize="characters"
               />
               {query.length > 0 && (
                 <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>

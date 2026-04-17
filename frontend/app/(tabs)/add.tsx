@@ -25,6 +25,13 @@ export default function AddReceiptScreen() {
   const [manualItems, setManualItems] = useState([{ description: '', quantity: '1', price: '' }]);
   const [manualTotal, setManualTotal] = useState('');
 
+  // Force uppercase for text inputs
+  const handleStoreNameChange = (text: string) => setStoreName(text.toUpperCase());
+  
+  const handleDescriptionChange = (index: number, text: string) => {
+    updateManualItem(index, 'description', text.toUpperCase());
+  };
+
   const handleUrlImport = async (forceImport: boolean = false) => {
     if (!url.trim()) return;
     setLoading(true);
@@ -367,7 +374,8 @@ export default function AddReceiptScreen() {
                 placeholder={t('enter_store_name')}
                 placeholderTextColor={theme.textMuted}
                 value={storeName}
-                onChangeText={setStoreName}
+                onChangeText={handleStoreNameChange}
+                autoCapitalize="characters"
               />
               <TextInput
                 testID="manual-date-input"
@@ -386,7 +394,8 @@ export default function AddReceiptScreen() {
                     placeholder={t('enter_description')}
                     placeholderTextColor={theme.textMuted}
                     value={item.description}
-                    onChangeText={(v) => updateManualItem(i, 'description', v)}
+                    onChangeText={(v) => handleDescriptionChange(i, v)}
+                    autoCapitalize="characters"
                   />
                   <TextInput
                     style={[styles.input, { width: 50 }]}

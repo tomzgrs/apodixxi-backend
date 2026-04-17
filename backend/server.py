@@ -1063,6 +1063,31 @@ async def get_receipts(device_id: str = Query(...), skip: int = 0, limit: int = 
     return {"receipts": sanitized_receipts, "total": total}
 
 
+# IMPORTANT: This must come BEFORE /receipts/{receipt_id} to avoid path conflict
+@api_router.get("/receipts/by-store")
+async def get_receipts_by_store(
+    device_id: str = Query(...),
+    store_name: str = Query(...),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500)
+):
+    """Get all receipts from a specific store."""
+    query = {
+        "device_id": device_id,
+        "store_name": {"$regex": f"^{store_name}$", "$options": "i"}
+    }
+    
+    total = await db.receipts.count_documents(query)
+    receipts = await db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    sanitized_receipts = [sanitize_receipt_data(r) for r in receipts]
+    
+    return {
+        "store_name": store_name,
+        "total": total,
+        "receipts": sanitized_receipts
+    }
+
+
 @api_router.get("/receipts/{receipt_id}")
 async def get_receipt(receipt_id: str):
     receipt = await db.receipts.find_one({"id": receipt_id}, {"_id": 0})
@@ -1374,30 +1399,6 @@ async def request_store_review(
     }
     await db.store_review_requests.insert_one(review_request)
     return {"success": True, "message": "Request submitted for review", "request_id": review_request["id"]}
-
-
-# Get receipts filtered by store
-@api_router.get("/receipts/by-store")
-async def get_receipts_by_store(
-    device_id: str = Query(...),
-    store_name: str = Query(...),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500)
-):
-    """Get all receipts from a specific store."""
-    query = {
-        "device_id": device_id,
-        "store_name": {"$regex": f"^{store_name}$", "$options": "i"}
-    }
-    
-    total = await db.receipts.count_documents(query)
-    receipts = await db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    return {
-        "store_name": store_name,
-        "total": total,
-        "receipts": receipts
-    }
 
 
 app.include_router(api_router)

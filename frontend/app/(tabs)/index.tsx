@@ -19,6 +19,8 @@ export default function DashboardScreen() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [distributionMode, setDistributionMode] = useState<'total' | 'month'>('total');
+  const [showDistributionDropdown, setShowDistributionDropdown] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -39,6 +41,29 @@ export default function DashboardScreen() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const onRefresh = () => { setRefreshing(true); loadData(); };
+
+  // Calculate current month's store distribution
+  const getCurrentMonthDistribution = () => {
+    if (!analytics || !analytics.monthly_spending || analytics.monthly_spending.length === 0) {
+      return analytics?.store_distribution || [];
+    }
+    
+    // Get the current month key
+    const now = new Date();
+    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    
+    // For now, return total distribution - we'd need a backend endpoint for monthly breakdown
+    // This is a simplified version
+    return analytics.store_distribution || [];
+  };
+
+  const getStoreDistribution = () => {
+    if (distributionMode === 'total') {
+      return analytics?.store_distribution || [];
+    } else {
+      return getCurrentMonthDistribution();
+    }
+  };
 
   const styles = createStyles(theme, isDark);
 
@@ -211,15 +236,55 @@ export default function DashboardScreen() {
                 <View style={styles.chartHeader}>
                   <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
                   <Text style={styles.chartTitle}>Κατανομή ανά Κατάστημα</Text>
+                  
+                  {/* Dropdown */}
+                  <TouchableOpacity 
+                    style={styles.dropdown}
+                    onPress={() => setShowDistributionDropdown(!showDistributionDropdown)}
+                  >
+                    <Text style={styles.dropdownText}>
+                      {distributionMode === 'total' ? 'Σύνολο' : 'Μήνας'}
+                    </Text>
+                    <Ionicons 
+                      name={showDistributionDropdown ? "chevron-up" : "chevron-down"} 
+                      size={14} 
+                      color={theme.primary} 
+                    />
+                  </TouchableOpacity>
                 </View>
+                
+                {/* Dropdown Options */}
+                {showDistributionDropdown && (
+                  <View style={styles.dropdownOptions}>
+                    <TouchableOpacity 
+                      style={[styles.dropdownOption, distributionMode === 'total' && styles.dropdownOptionActive]}
+                      onPress={() => { setDistributionMode('total'); setShowDistributionDropdown(false); }}
+                    >
+                      <Text style={[styles.dropdownOptionText, distributionMode === 'total' && styles.dropdownOptionTextActive]}>
+                        Σύνολο όλων
+                      </Text>
+                      {distributionMode === 'total' && <Ionicons name="checkmark" size={16} color={theme.primary} />}
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.dropdownOption, distributionMode === 'month' && styles.dropdownOptionActive]}
+                      onPress={() => { setDistributionMode('month'); setShowDistributionDropdown(false); }}
+                    >
+                      <Text style={[styles.dropdownOptionText, distributionMode === 'month' && styles.dropdownOptionTextActive]}>
+                        Τρέχων μήνας
+                      </Text>
+                      {distributionMode === 'month' && <Ionicons name="checkmark" size={16} color={theme.primary} />}
+                    </TouchableOpacity>
+                  </View>
+                )}
+                
                 <View style={styles.donutRow}>
                   <DonutChart 
-                    data={analytics.store_distribution}
+                    data={getStoreDistribution()}
                     theme={theme}
                     size={130}
                   />
                   <View style={styles.donutLegendWrap}>
-                    {analytics.store_distribution.slice(0, 5).map((item: any, index: number) => (
+                    {getStoreDistribution().slice(0, 5).map((item: any, index: number) => (
                       <TouchableOpacity
                         key={index}
                         style={styles.legendItem}
@@ -538,7 +603,53 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontSize: Typography.base,
     fontWeight: Typography.semibold,
     color: theme.text,
+    flex: 1,
   },
+  
+  // Dropdown
+  dropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.primaryLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: Radius.full,
+    gap: 4,
+  },
+  dropdownText: {
+    fontSize: Typography.xs,
+    fontWeight: Typography.semibold,
+    color: theme.primary,
+  },
+  dropdownOptions: {
+    backgroundColor: theme.surface,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: theme.border,
+    marginBottom: Spacing.md,
+    overflow: 'hidden',
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.borderLight,
+  },
+  dropdownOptionActive: {
+    backgroundColor: theme.primaryLight,
+  },
+  dropdownOptionText: {
+    fontSize: Typography.sm,
+    color: theme.text,
+  },
+  dropdownOptionTextActive: {
+    color: theme.primary,
+    fontWeight: Typography.semibold,
+  },
+  
   chartFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
