@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -155,6 +155,9 @@ STORE_VAT_MAPPING = {
     
     # THE MART
     "094021972": "THE MART",
+    
+    # ΜΟΥΣΤΑΚΑΣ (Toy Store)
+    "094150585": "ΜΟΥΣΤΑΚΑΣ",
 }
 
 # Keywords to detect store brand from name (for franchises with different VAT)
@@ -191,6 +194,8 @@ STORE_BRAND_KEYWORDS = {
     "MYMARKET": "MY MARKET",
     "THE MART": "THE MART",
     "THEMART": "THE MART",
+    "ΜΟΥΣΤΑΚΑΣ": "ΜΟΥΣΤΑΚΑΣ",
+    "MOUSTAKAS": "ΜΟΥΣΤΑΚΑΣ",
 }
 
 def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
@@ -1300,6 +1305,97 @@ async def export_data(device_id: str = Query(...)):
         "device_id": device_id,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "total_receipts": len(receipts),
+        "receipts": receipts
+    }
+
+
+# Admin endpoint to delete products by store name
+@api_router.delete("/admin/products/by-store")
+async def delete_products_by_store(store_name: str = Query(...)):
+    """Delete all products from a specific store."""
+    result = await db.products.delete_many({"store_name": {"$regex": store_name, "$options": "i"}})
+    return {"deleted_count": result.deleted_count, "store_name": store_name}
+
+
+# Admin endpoint to delete receipts by store name
+@api_router.delete("/admin/receipts/by-store")
+async def delete_receipts_by_store(store_name: str = Query(...), device_id: str = Query(...)):
+    """Delete all receipts from a specific store for a device."""
+    result = await db.receipts.delete_many({
+        "device_id": device_id,
+        "store_name": {"$regex": store_name, "$options": "i"}
+    })
+    return {"deleted_count": result.deleted_count, "store_name": store_name}
+
+
+# VAT validation endpoint
+@api_router.get("/stores/validate-vat")
+async def validate_vat(vat: str = Query(...)):
+    """Check if a VAT number is in our known stores list."""
+    is_known = vat in STORE_VAT_MAPPING
+    store_name = STORE_VAT_MAPPING.get(vat, None)
+    return {
+        "vat": vat,
+        "is_known": is_known,
+        "store_name": store_name
+    }
+
+
+# Get list of all supported stores
+@api_router.get("/stores/supported")
+async def get_supported_stores():
+    """Get list of all supported stores with their VAT numbers."""
+    stores = []
+    seen = set()
+    for vat, name in STORE_VAT_MAPPING.items():
+        if name not in seen:
+            stores.append({"name": name, "vat": vat})
+            seen.add(name)
+    return {"stores": sorted(stores, key=lambda x: x["name"])}
+
+
+# Endpoint to request store review
+@api_router.post("/stores/request-review")
+async def request_store_review(
+    vat: str = Body(...),
+    store_name: str = Body(""),
+    receipt_url: str = Body(""),
+    device_id: str = Body(...)
+):
+    """Submit a store for review to be added to the supported list."""
+    review_request = {
+        "id": str(uuid.uuid4()),
+        "vat": vat,
+        "store_name": store_name,
+        "receipt_url": receipt_url,
+        "device_id": device_id,
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.store_review_requests.insert_one(review_request)
+    return {"success": True, "message": "Request submitted for review", "request_id": review_request["id"]}
+
+
+# Get receipts filtered by store
+@api_router.get("/receipts/by-store")
+async def get_receipts_by_store(
+    device_id: str = Query(...),
+    store_name: str = Query(...),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500)
+):
+    """Get all receipts from a specific store."""
+    query = {
+        "device_id": device_id,
+        "store_name": {"$regex": f"^{store_name}$", "$options": "i"}
+    }
+    
+    total = await db.receipts.count_documents(query)
+    receipts = await db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    return {
+        "store_name": store_name,
+        "total": total,
         "receipts": receipts
     }
 

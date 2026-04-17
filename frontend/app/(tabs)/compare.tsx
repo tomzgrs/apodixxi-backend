@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Image, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Image, Modal, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from '../_layout';
@@ -36,6 +36,7 @@ export default function CompareScreen() {
   const [sortBy, setSortBy] = useState<SortOption>('price_asc');
   const [selectedProduct, setSelectedProduct] = useState<ProductResult | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const handleSearch = async () => {
     if (!query.trim() || query.trim().length < 2) return;
@@ -48,6 +49,23 @@ export default function CompareScreen() {
       console.log('Compare error:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleClear = () => {
+    setQuery('');
+    setResults(null);
+    setSearched(false);
+  };
+
+  const onRefresh = () => {
+    if (query.trim().length >= 2) {
+      setRefreshing(true);
+      handleSearch().finally(() => setRefreshing(false));
+    } else {
+      // Reset if no query
+      setResults(null);
+      setSearched(false);
     }
   };
 
@@ -102,7 +120,18 @@ export default function CompareScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+          contentContainerStyle={styles.scroll} 
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
+            />
+          }
+        >
           <Text style={styles.title}>{t('compare_prices')}</Text>
           <Text style={styles.subtitle}>
             {lang === 'el' ? 'Βρείτε τις καλύτερες τιμές για τα προϊόντα σας' : 'Find the best prices for your products'}
@@ -123,7 +152,7 @@ export default function CompareScreen() {
                 returnKeyType="search"
               />
               {query.length > 0 && (
-                <TouchableOpacity onPress={() => setQuery('')} style={styles.clearBtn}>
+                <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
                   <Ionicons name="close-circle" size={20} color={theme.textMuted} />
                 </TouchableOpacity>
               )}

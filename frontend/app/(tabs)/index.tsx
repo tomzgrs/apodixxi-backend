@@ -217,7 +217,19 @@ export default function DashboardScreen() {
                     size={130}
                   />
                   <View style={styles.donutLegendWrap}>
-                    <DonutLegend data={analytics.store_distribution} theme={theme} />
+                    {analytics.store_distribution.slice(0, 5).map((item: any, index: number) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.legendItem}
+                        onPress={() => router.push(`/store-receipts?store=${encodeURIComponent(item.name)}`)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                        <Text style={styles.legendName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.legendPercent}>{item.percentage.toFixed(0)}%</Text>
+                        <Ionicons name="chevron-forward" size={14} color={theme.textMuted} />
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 </View>
               </View>
@@ -255,7 +267,12 @@ export default function DashboardScreen() {
                 {stats.stores.slice(0, 4).map((store: any, i: number) => {
                   const logoUrl = getStoreLogo(store.name || '');
                   return (
-                    <View key={i} style={styles.storeRow}>
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.storeRow}
+                      onPress={() => router.push(`/store-receipts?store=${encodeURIComponent(store.name)}`)}
+                      activeOpacity={0.7}
+                    >
                       {logoUrl ? (
                         <Image 
                           source={{ uri: logoUrl }} 
@@ -271,8 +288,11 @@ export default function DashboardScreen() {
                         <Text style={styles.storeName} numberOfLines={1}>{store.name}</Text>
                         <Text style={styles.storeVisits}>{store.count} επισκέψεις</Text>
                       </View>
-                      <Text style={styles.storeTotal}>{formatPrice(store.total)}</Text>
-                    </View>
+                      <View style={styles.storeRight}>
+                        <Text style={styles.storeTotal}>{formatPrice(store.total)}</Text>
+                        <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+                      </View>
+                    </TouchableOpacity>
                   );
                 })}
               </View>
@@ -649,6 +669,36 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontSize: Typography.base, 
     fontWeight: Typography.bold, 
     color: theme.text 
+  },
+  storeRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  
+  // Legend Items
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: Spacing.sm,
+  },
+  legendName: {
+    flex: 1,
+    fontSize: Typography.sm,
+    fontWeight: Typography.medium,
+    color: theme.text,
+  },
+  legendPercent: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: theme.textSecondary,
+    marginRight: Spacing.xs,
   },
   
   // Receipt Card

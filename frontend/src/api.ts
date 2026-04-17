@@ -104,6 +104,28 @@ export const api = {
     return request(`/stats/analytics?device_id=${device_id}&months=${months}`);
   },
 
+  getReceiptsByStore: async (storeName: string, skip = 0, limit = 100) => {
+    const device_id = await getDeviceId();
+    return request(`/receipts/by-store?device_id=${device_id}&store_name=${encodeURIComponent(storeName)}&skip=${skip}&limit=${limit}`);
+  },
+
+  validateVat: async (vat: string) => {
+    return request(`/stores/validate-vat?vat=${vat}`);
+  },
+
+  getSupportedStores: async () => {
+    return request('/stores/supported');
+  },
+
+  requestStoreReview: async (vat: string, storeName: string, receiptUrl: string) => {
+    const device_id = await getDeviceId();
+    return request('/stores/request-review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vat, store_name: storeName, receipt_url: receiptUrl, device_id }),
+    });
+  },
+
   exportData: async () => {
     const device_id = await getDeviceId();
     return request(`/backup/export?device_id=${device_id}`);
