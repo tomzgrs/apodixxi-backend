@@ -188,11 +188,13 @@ export default function DashboardScreen() {
                 <View style={styles.chartHeader}>
                   <Ionicons name="bar-chart-outline" size={20} color={theme.primary} />
                   <Text style={styles.chartTitle}>Μηνιαίες Δαπάνες</Text>
+                  <Text style={styles.chartHint}>(πατήστε μήνα)</Text>
                 </View>
                 <BarChart 
-                  data={analytics.monthly_spending.map(function(m: any) { return { label: m.label, amount: m.amount }; })}
+                  data={analytics.monthly_spending.map(function(m: any) { return { label: m.label, amount: m.amount, month: m.month }; })}
                   theme={theme}
                   height={180}
+                  onBarPress={function(month) { router.push(`/month-receipts?month=${month}`); }}
                 />
                 {analytics.total_this_month > 0 && (
                   <View style={styles.chartFooter}>
@@ -525,6 +527,12 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     marginBottom: Spacing.sm,
+  },
+  chartHint: {
+    fontSize: Typography.xs,
+    color: theme.textMuted,
+    marginLeft: 'auto',
+    fontStyle: 'italic',
   },
   chartTitle: {
     fontSize: Typography.base,

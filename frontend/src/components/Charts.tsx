@@ -1,17 +1,18 @@
 import React from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import Svg, { Path, Circle, Line, Rect, G, Text as SvgText, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Typography, Spacing, Radius } from '../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface BarChartProps {
-  data: { label: string; amount: number }[];
+  data: { label: string; amount: number; month?: string }[];
   theme: any;
   height?: number;
+  onBarPress?: (month: string) => void;
 }
 
-export function BarChart({ data, theme, height = 180 }: BarChartProps) {
+export function BarChart({ data, theme, height = 180, onBarPress }: BarChartProps) {
   if (!data || data.length === 0) return null;
 
   const chartWidth = SCREEN_WIDTH - Spacing.base * 4;
@@ -89,6 +90,29 @@ export function BarChart({ data, theme, height = 180 }: BarChartProps) {
           );
         })}
       </Svg>
+      
+      {/* Touchable overlays for each bar */}
+      {onBarPress && (
+        <View style={[styles.touchableOverlay, { width: chartWidth, height }]}>
+          {data.map((item, index) => {
+            const x = 40 + index * (barWidth + 8);
+            return (
+              <TouchableOpacity
+                key={index}
+                style={{
+                  position: 'absolute',
+                  left: x,
+                  top: 0,
+                  width: barWidth,
+                  height: height - 20,
+                }}
+                onPress={() => item.month && onBarPress(item.month)}
+                activeOpacity={0.7}
+              />
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
@@ -220,6 +244,12 @@ const styles = StyleSheet.create({
   chartContainer: {
     alignItems: 'center',
     marginTop: Spacing.sm,
+    position: 'relative',
+  },
+  touchableOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
   donutContainer: {
     alignItems: 'center',

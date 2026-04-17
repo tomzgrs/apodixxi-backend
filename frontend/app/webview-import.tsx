@@ -476,8 +476,31 @@ export default function WebViewImportScreen() {
       <View style={styles.instructions}>
         <Text style={styles.instructionText}>
           {lang === 'el'
-            ? '1. Περιμένετε να φορτώσει η σελίδα\n2. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
-            : '1. Wait for the page to load\n2. Tap "Extract Data" when you see the products'}
+            ? '1. Περιμένετε να φορτώσει η σελίδα'
+            : '1. Wait for the page to load'}
+        </Text>
+        {(pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet')) && (
+          <View style={styles.pdfToggleInstruction}>
+            <Text style={styles.instructionText}>
+              {lang === 'el'
+                ? '2. Κλείστε τον μπλε διακόπτη PDF →'
+                : '2. Turn off the blue PDF toggle →'}
+            </Text>
+            <View style={styles.toggleExample}>
+              <View style={styles.toggleTrack}>
+                <View style={styles.toggleThumb} />
+              </View>
+            </View>
+          </View>
+        )}
+        <Text style={styles.instructionText}>
+          {lang === 'el'
+            ? (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet'))
+              ? '3. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
+              : '2. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
+            : (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet'))
+              ? '3. Tap "Extract Data" when you see the products'
+              : '2. Tap "Extract Data" when you see the products'}
         </Text>
       </View>
 
@@ -613,7 +636,11 @@ const styles = StyleSheet.create({
   backText: { fontSize: 28, color: COLORS.primary, fontWeight: '600' },
   topTitle: { flex: 1, fontSize: 16, fontWeight: '700', color: COLORS.textPrimary, textAlign: 'center' },
   instructions: { backgroundColor: '#FFF9E6', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0E6B8' },
-  instructionText: { fontSize: 13, color: '#8B7000', lineHeight: 20 },
+  instructionText: { fontSize: 13, color: '#8B7000', lineHeight: 22 },
+  pdfToggleInstruction: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
+  toggleExample: { marginLeft: 8 },
+  toggleTrack: { width: 36, height: 20, borderRadius: 10, backgroundColor: '#3B82F6', justifyContent: 'center', paddingHorizontal: 2 },
+  toggleThumb: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFFFFF', alignSelf: 'flex-end' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   noWebviewIcon: { fontSize: 48, marginBottom: 16 },
   noWebviewTitle: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary, textAlign: 'center', marginBottom: 8 },
