@@ -126,18 +126,7 @@ export default function DashboardScreen() {
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.primaryLight }]}>
-                  <Ionicons name="add-circle" size={24} color={theme.primary} />
-                </View>
-                <Text style={styles.quickActionText}>Προσθήκη</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.quickActionBtn}
-                onPress={() => router.push('/scanner')}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.quickActionIcon, { backgroundColor: theme.accentLight }]}>
-                  <Ionicons name="qr-code" size={24} color={theme.accent} />
+                  <Ionicons name="scan-outline" size={24} color={theme.primary} />
                 </View>
                 <Text style={styles.quickActionText}>Σάρωση</Text>
               </TouchableOpacity>
@@ -147,8 +136,8 @@ export default function DashboardScreen() {
                 onPress={() => router.push('/(tabs)/purchases')}
                 activeOpacity={0.7}
               >
-                <View style={[styles.quickActionIcon, { backgroundColor: theme.infoLight }]}>
-                  <Ionicons name="list" size={24} color={theme.info} />
+                <View style={[styles.quickActionIcon, { backgroundColor: theme.accentLight }]}>
+                  <Ionicons name="time-outline" size={24} color={theme.accent} />
                 </View>
                 <Text style={styles.quickActionText}>Ιστορικό</Text>
               </TouchableOpacity>
@@ -159,9 +148,20 @@ export default function DashboardScreen() {
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.warningLight }]}>
-                  <Ionicons name="analytics" size={24} color={theme.warning} />
+                  <Ionicons name="trending-up-outline" size={24} color={theme.warning} />
                 </View>
-                <Text style={styles.quickActionText}>Σύγκριση</Text>
+                <Text style={styles.quickActionText}>Ανάλυση</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.quickActionBtn}
+                onPress={() => router.push('/(tabs)/settings')}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: theme.infoLight }]}>
+                  <Ionicons name="search-outline" size={24} color={theme.info} />
+                </View>
+                <Text style={styles.quickActionText}>Αναζήτηση</Text>
               </TouchableOpacity>
             </View>
 

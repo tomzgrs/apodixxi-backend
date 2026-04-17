@@ -1,80 +1,106 @@
 import { Tabs } from 'expo-router';
-import { useContext } from 'react';
-import { StyleSheet, View, Text, Platform } from 'react-native';
+import React, { useContext } from 'react';
+import { StyleSheet, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from '../_layout';
-import { COLORS } from '../../src/constants';
+import { useTheme } from '../../src/ThemeContext';
+import { Radius } from '../../src/theme';
 
-function TabIcon({ name, focused }: { name: string; focused: boolean }) {
-  const icons: Record<string, string> = {
-    home: '🏠',
-    add: '➕',
-    purchases: '🛒',
-    compare: '⚖️',
-    settings: '⚙️',
+type IconName = 'home' | 'add' | 'purchases' | 'compare' | 'settings';
+
+function TabIcon({ name, focused }: { name: IconName; focused: boolean }) {
+  const { theme } = useTheme();
+  
+  // Modern icon mapping with outline/filled variants
+  const iconMap: Record<IconName, { outline: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }> = {
+    home: { outline: 'grid-outline', filled: 'grid' },
+    add: { outline: 'add-circle-outline', filled: 'add-circle' },
+    purchases: { outline: 'receipt-outline', filled: 'receipt' },
+    compare: { outline: 'bar-chart-outline', filled: 'bar-chart' },
+    settings: { outline: 'person-outline', filled: 'person' },
   };
+  
+  const iconConfig = iconMap[name];
+  const iconName = focused ? iconConfig.filled : iconConfig.outline;
+  const iconColor = focused ? theme.primary : theme.textMuted;
+  
   return (
-    <View style={[styles.iconWrap, focused && styles.iconWrapActive]}>
-      <Text style={[styles.iconText, focused && styles.iconTextActive]}>
-        {icons[name] || '•'}
-      </Text>
+    <View style={[
+      styles.iconWrap, 
+      focused && { backgroundColor: theme.primaryLight }
+    ]}>
+      <Ionicons name={iconName} size={22} color={iconColor} />
     </View>
   );
 }
 
 export default function TabLayout() {
   const { t } = useContext(I18nContext);
+  const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   
   // Calculate proper bottom padding for gesture bar
-  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 0);
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 0);
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          ...styles.tabBar,
-          height: 70 + bottomPadding,
-          paddingBottom: bottomPadding + 8,
+          backgroundColor: theme.tabBar,
+          borderTopColor: theme.tabBarBorder,
+          borderTopWidth: 1,
+          height: 65 + bottomPadding,
+          paddingBottom: bottomPadding + 4,
+          paddingTop: 8,
+          elevation: 0,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.05,
+          shadowRadius: 12,
         },
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textMuted,
-        tabBarLabelStyle: styles.tabLabel,
+        tabBarActiveTintColor: theme.tabActive,
+        tabBarInactiveTintColor: theme.tabInactive,
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '500',
+          marginTop: 2,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: t('dashboard'),
+          title: 'Αρχική',
           tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="add"
         options={{
-          title: t('add_receipt'),
+          title: 'Προσθήκη',
           tabBarIcon: ({ focused }) => <TabIcon name="add" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="purchases"
         options={{
-          title: t('purchases'),
+          title: 'Αγορές',
           tabBarIcon: ({ focused }) => <TabIcon name="purchases" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="compare"
         options={{
-          title: t('compare'),
+          title: 'Σύγκριση',
           tabBarIcon: ({ focused }) => <TabIcon name="compare" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: t('settings'),
+          title: 'Προφίλ',
           tabBarIcon: ({ focused }) => <TabIcon name="settings" focused={focused} />,
         }}
       />
@@ -83,36 +109,11 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: COLORS.surface,
-    borderTopColor: COLORS.border,
-    borderTopWidth: 1,
-    paddingTop: 8,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-  },
-  tabLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 2,
-  },
   iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: Radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  iconWrapActive: {
-    backgroundColor: COLORS.primaryLight,
-  },
-  iconText: {
-    fontSize: 22,
-  },
-  iconTextActive: {
-    fontSize: 26,
   },
 });

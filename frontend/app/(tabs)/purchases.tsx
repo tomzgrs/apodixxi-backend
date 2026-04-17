@@ -1,20 +1,26 @@
-import { useContext, useState, useCallback } from 'react';
+import React, { useContext, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, RefreshControl, ActivityIndicator, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from '../_layout';
-import { COLORS, getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
+import { useTheme } from '../../src/ThemeContext';
+import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
+import { Typography, Spacing, Radius } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
 
 export default function PurchasesScreen() {
   const { t } = useContext(I18nContext);
+  const { theme } = useTheme();
   const router = useRouter();
   const [receipts, setReceipts] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const styles = createStyles(theme);
 
   const loadReceipts = useCallback(async (searchQuery = '') => {
     try {
@@ -61,44 +67,76 @@ export default function PurchasesScreen() {
           </View>
         )}
         <View style={styles.receiptInfo}>
-          <Text style={styles.receiptStore} numberOfLines={1}>{item.store_name || 'Unknown'}</Text>
-          <Text style={styles.receiptMeta}>
-            {item.date} · {item.items?.length || 0} {t('items')} · {item.source_type}
-          </Text>
+          <Text style={styles.storeName} numberOfLines={1}>{item.store_name || 'Άγνωστο'}</Text>
+          <View style={styles.receiptMeta}>
+            <Ionicons name="calendar-outline" size={12} color={theme.textMuted} />
+            <Text style={styles.receiptDate}>{item.date}</Text>
+            <Text style={styles.receiptDot}>•</Text>
+            <Ionicons name="cart-outline" size={12} color={theme.textMuted} />
+            <Text style={styles.receiptItems}>{item.items?.length || 0} προϊόντα</Text>
+          </View>
         </View>
         <View style={styles.receiptRight}>
-          <Text style={styles.receiptTotal}>{formatPrice(item.total || 0)}</Text>
-          <Text style={styles.receiptArrow}>›</Text>
+          <Text style={styles.receiptTotal}>{formatPrice(item.total)}</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </View>
       </TouchableOpacity>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>{t('purchases')}</Text>
-        <Text style={styles.count}>{total} {t('receipts')}</Text>
+        <Text style={styles.title}>Οι Αγορές μου</Text>
+        <Text style={styles.subtitle}>{total} αποδείξεις</Text>
       </View>
 
-      <View style={styles.searchWrap}>
-        <TextInput
-          testID="search-input"
-          style={styles.searchInput}
-          placeholder={t('search_placeholder')}
-          placeholderTextColor={COLORS.textMuted}
-          value={search}
-          onChangeText={handleSearch}
-        />
+      {/* Search */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search-outline" size={20} color={theme.textMuted} />
+          <TextInput
+            testID="search-input"
+            style={styles.searchInput}
+            placeholder="Αναζήτηση καταστήματος ή προϊόντος..."
+            placeholderTextColor={theme.textMuted}
+            value={search}
+            onChangeText={handleSearch}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => handleSearch('')}>
+              <Ionicons name="close-circle" size={20} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+      {/* Content */}
+      {loading && !refreshing ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={theme.primary} />
+        </View>
       ) : receipts.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>📋</Text>
-          <Text style={styles.emptyTitle}>{search ? t('no_results') : t('no_receipts')}</Text>
-          <Text style={styles.emptyDesc}>{search ? t('try_different') : t('no_receipts_desc')}</Text>
+          <View style={styles.emptyIconContainer}>
+            <Ionicons name="receipt-outline" size={48} color={theme.primary} />
+          </View>
+          <Text style={styles.emptyTitle}>
+            {search ? 'Δεν βρέθηκαν αποτελέσματα' : 'Δεν υπάρχουν αποδείξεις'}
+          </Text>
+          <Text style={styles.emptyDesc}>
+            {search ? 'Δοκιμάστε διαφορετική αναζήτηση' : 'Προσθέστε την πρώτη σας απόδειξη'}
+          </Text>
+          {!search && (
+            <TouchableOpacity
+              style={styles.addBtn}
+              onPress={() => router.push('/(tabs)/add')}
+            >
+              <Ionicons name="add" size={20} color={theme.textInverse} />
+              <Text style={styles.addBtnText}>Προσθήκη</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <FlatList
@@ -106,35 +144,188 @@ export default function PurchasesScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderReceipt}
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh}
+              tintColor={theme.primary}
+              colors={[theme.primary]}
+            />
+          }
           showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingHorizontal: 20, paddingTop: 16 },
-  title: { fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.5 },
-  count: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '600' },
-  searchWrap: { paddingHorizontal: 20, paddingVertical: 12 },
-  searchInput: { backgroundColor: COLORS.surface, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: COLORS.textPrimary, borderWidth: 1, borderColor: COLORS.border },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 60 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary },
-  emptyDesc: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4 },
-  list: { paddingHorizontal: 20, paddingBottom: 40 },
-  receiptCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, padding: 16, borderRadius: 18, marginBottom: 10, borderWidth: 1, borderColor: COLORS.borderLight },
-  storeIcon: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  storeIconText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
-  storeLogo: { width: 46, height: 46, borderRadius: 10 },
-  receiptInfo: { flex: 1, marginLeft: 14 },
-  receiptStore: { fontSize: 16, fontWeight: '600', color: COLORS.textPrimary },
-  receiptMeta: { fontSize: 12, color: COLORS.textSecondary, marginTop: 3 },
-  receiptRight: { alignItems: 'flex-end' },
-  receiptTotal: { fontSize: 17, fontWeight: '700', color: COLORS.textPrimary },
-  receiptArrow: { fontSize: 20, color: COLORS.textMuted, marginTop: 2 },
+const createStyles = (theme: any) => StyleSheet.create({
+  container: { 
+    flex: 1, 
+    backgroundColor: theme.background 
+  },
+  
+  // Header
+  header: { 
+    paddingHorizontal: Spacing.base, 
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
+  },
+  title: { 
+    fontSize: Typography['2xl'], 
+    fontWeight: Typography.bold, 
+    color: theme.text,
+    letterSpacing: -0.5
+  },
+  subtitle: { 
+    fontSize: Typography.sm, 
+    color: theme.textSecondary,
+    marginTop: 2
+  },
+  
+  // Search
+  searchContainer: { 
+    paddingHorizontal: Spacing.base,
+    paddingBottom: Spacing.md,
+  },
+  searchBox: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: theme.surface, 
+    borderRadius: Radius.lg, 
+    paddingHorizontal: Spacing.md,
+    height: 48,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  searchInput: { 
+    flex: 1, 
+    marginLeft: Spacing.sm, 
+    fontSize: Typography.base, 
+    color: theme.text 
+  },
+  
+  // Content
+  center: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  list: { 
+    padding: Spacing.base,
+    paddingTop: 0,
+  },
+  separator: {
+    height: Spacing.sm,
+  },
+  
+  // Empty State
+  empty: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: Spacing.xl 
+  },
+  emptyIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: Radius.full,
+    backgroundColor: theme.primaryLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: Spacing.xl,
+  },
+  emptyTitle: { 
+    fontSize: Typography.lg, 
+    fontWeight: Typography.semibold, 
+    color: theme.text,
+    marginBottom: Spacing.sm,
+  },
+  emptyDesc: { 
+    fontSize: Typography.base, 
+    color: theme.textSecondary,
+    textAlign: 'center',
+    marginBottom: Spacing.xl,
+  },
+  addBtn: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.primary, 
+    paddingHorizontal: Spacing.xl, 
+    paddingVertical: Spacing.md, 
+    borderRadius: Radius.full,
+    gap: Spacing.sm,
+  },
+  addBtnText: { 
+    color: theme.textInverse, 
+    fontSize: Typography.base, 
+    fontWeight: Typography.semibold 
+  },
+  
+  // Receipt Card
+  receiptCard: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: theme.card, 
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: theme.cardBorder,
+  },
+  storeIcon: { 
+    width: 50, 
+    height: 50, 
+    borderRadius: Radius.md, 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  storeIconText: { 
+    color: '#FFF', 
+    fontSize: Typography.lg, 
+    fontWeight: Typography.bold 
+  },
+  storeLogo: { 
+    width: 50, 
+    height: 50, 
+    borderRadius: Radius.md 
+  },
+  receiptInfo: { 
+    flex: 1, 
+    marginLeft: Spacing.md 
+  },
+  storeName: { 
+    fontSize: Typography.base, 
+    fontWeight: Typography.semibold, 
+    color: theme.text,
+    marginBottom: 4,
+  },
+  receiptMeta: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    gap: 4,
+  },
+  receiptDate: { 
+    fontSize: Typography.xs, 
+    color: theme.textMuted,
+    marginLeft: 4,
+  },
+  receiptDot: {
+    color: theme.textMuted,
+    fontSize: Typography.xs,
+  },
+  receiptItems: { 
+    fontSize: Typography.xs, 
+    color: theme.textMuted,
+    marginLeft: 4,
+  },
+  receiptRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  receiptTotal: { 
+    fontSize: Typography.lg, 
+    fontWeight: Typography.bold, 
+    color: theme.text 
+  },
 });
