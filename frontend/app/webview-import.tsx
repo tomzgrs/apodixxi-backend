@@ -1,7 +1,8 @@
 import { useContext, useState, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from './_layout';
 import { COLORS } from '../src/constants';
 import { api } from '../src/api';
@@ -380,6 +381,61 @@ export default function WebViewImportScreen() {
   const [extracting, setExtracting] = useState(false);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [extracted, setExtracted] = useState(false);
+  
+  // VAT Validation states
+  const [showVatModal, setShowVatModal] = useState(false);
+  const [unknownVat, setUnknownVat] = useState('');
+  const [unknownStoreName, setUnknownStoreName] = useState('');
+  const [pendingExtractedData, setPendingExtractedData] = useState<any>(null);
+  const [sendingReview, setSendingReview] = useState(false);
+
+  // Handle sending receipt for review
+  const handleSendForReview = async () => {
+    setSendingReview(true);
+    try {
+      await api.requestStoreReview(unknownVat, unknownStoreName, pageUrl);
+      Alert.alert(
+        lang === 'el' ? 'Ευχαριστούμε!' : 'Thank you!',
+        lang === 'el' 
+          ? 'Η αίτηση σας στάλθηκε για έλεγχο. Θα προστεθεί σύντομα αν είναι έγκυρο κατάστημα.'
+          : 'Your request has been sent for review. The store will be added soon if valid.',
+        [{ text: 'OK', onPress: () => { setShowVatModal(false); router.back(); } }]
+      );
+    } catch (e) {
+      Alert.alert(lang === 'el' ? 'Σφάλμα' : 'Error', lang === 'el' ? 'Αποτυχία αποστολής' : 'Failed to send');
+    } finally {
+      setSendingReview(false);
+    }
+  };
+
+  // Proceed with import anyway (for known stores that weren't matched properly)
+  const handleProceedAnyway = async () => {
+    if (!pendingExtractedData) return;
+    setShowVatModal(false);
+    await saveExtractedData(pendingExtractedData);
+  };
+
+  // Save the extracted data to backend
+  const saveExtractedData = async (data: any) => {
+    try {
+      const deviceId = await api.getDeviceId();
+      const result = await api.importWebViewData({
+        device_id: deviceId,
+        url: pageUrl,
+        raw_text: data.raw_text || '',
+        items: data.items,
+        store_name: data.store_name || '',
+        found_final_total: data.found_final_total || 0,
+      });
+      Alert.alert(
+        lang === 'el' ? 'Επιτυχία!' : 'Success!',
+        lang === 'el' ? 'Η απόδειξη εισήχθη επιτυχώς!' : 'Receipt imported successfully!',
+        [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
+      );
+    } catch (e: any) {
+      Alert.alert(lang === 'el' ? 'Σφάλμα' : 'Error', e.message);
+    }
+  };
 
   const handleExtract = useCallback(() => {
     if (webviewRef.current && !extracting) {
@@ -420,21 +476,31 @@ export default function WebViewImportScreen() {
         console.log('Extracted data:', JSON.stringify(data, null, 2));
         
         if (data.items && data.items.length > 0) {
-          // Send to backend
-          const deviceId = await api.getDeviceId();
-          const result = await api.importWebViewData({
-            device_id: deviceId,
-            url: pageUrl,
-            raw_text: data.raw_text || '',
-            items: data.items,
-            store_name: data.store_name || '',
-            found_final_total: data.found_final_total || 0,
-          });
-          Alert.alert(
-            lang === 'el' ? 'Επιτυχία!' : 'Success!',
-            lang === 'el' ? 'Η απόδειξη εισήχθη επιτυχώς!' : 'Receipt imported successfully!',
-            [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
-          );
+          // Check if VAT is known
+          const vatNumber = data.store_vat || '';
+          
+          if (vatNumber && vatNumber.length === 9) {
+            // Validate VAT with backend
+            try {
+              const vatValidation = await api.validateVat(vatNumber);
+              
+              if (!vatValidation.is_known) {
+                // Unknown VAT - show modal to ask user
+                setUnknownVat(vatNumber);
+                setUnknownStoreName(data.store_name || '');
+                setPendingExtractedData(data);
+                setShowVatModal(true);
+                setExtracting(false);
+                return;
+              }
+            } catch (e) {
+              // If VAT validation fails, proceed anyway
+              console.log('VAT validation failed, proceeding:', e);
+            }
+          }
+          
+          // VAT is known or no VAT found - proceed with import
+          await saveExtractedData(data);
         } else {
           // No items - show raw text option
           Alert.alert(
@@ -625,6 +691,78 @@ export default function WebViewImportScreen() {
           </View>
         </View>
       )}
+
+      {/* VAT Validation Modal */}
+      <Modal
+        visible={showVatModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowVatModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <Ionicons name="alert-circle-outline" size={48} color="#F59E0B" />
+            </View>
+            
+            <Text style={styles.modalTitle}>
+              {lang === 'el' ? 'Άγνωστο Κατάστημα' : 'Unknown Store'}
+            </Text>
+            
+            <Text style={styles.modalMessage}>
+              {lang === 'el' 
+                ? `Το ΑΦΜ "${unknownVat}" δεν βρέθηκε στη λίστα υποστηριζόμενων καταστημάτων.`
+                : `VAT number "${unknownVat}" was not found in the supported stores list.`}
+            </Text>
+            
+            {unknownStoreName && (
+              <Text style={styles.modalStoreName}>
+                {lang === 'el' ? 'Κατάστημα: ' : 'Store: '}{unknownStoreName}
+              </Text>
+            )}
+            
+            <Text style={styles.modalQuestion}>
+              {lang === 'el' 
+                ? 'Θέλετε να στείλετε αυτήν την απόδειξη για έλεγχο ώστε να προστεθεί το κατάστημα;'
+                : 'Would you like to send this receipt for review so the store can be added?'}
+            </Text>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.modalBtnSecondary}
+                onPress={() => { setShowVatModal(false); router.back(); }}
+              >
+                <Text style={styles.modalBtnSecondaryText}>
+                  {lang === 'el' ? 'Όχι, Ακύρωση' : 'No, Cancel'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.modalBtnPrimary}
+                onPress={handleSendForReview}
+                disabled={sendingReview}
+              >
+                {sendingReview ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <Text style={styles.modalBtnPrimaryText}>
+                    {lang === 'el' ? 'Ναι, Αποστολή' : 'Yes, Send'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.modalProceedLink}
+              onPress={handleProceedAnyway}
+            >
+              <Text style={styles.modalProceedLinkText}>
+                {lang === 'el' ? 'Συνέχεια χωρίς αποστολή →' : 'Continue without sending →'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -654,4 +792,94 @@ const styles = StyleSheet.create({
   extractBtn: { backgroundColor: COLORS.primary, borderRadius: 50, paddingVertical: 16, alignItems: 'center' },
   extractBtnDisabled: { opacity: 0.5 },
   extractBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  
+  // VAT Modal Styles
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: { 
+    backgroundColor: '#FFFFFF', 
+    borderRadius: 20, 
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  modalIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FEF3C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  modalStoreName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: 12,
+  },
+  modalQuestion: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalBtnSecondary: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalBtnSecondaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  modalBtnPrimary: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalBtnPrimaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  modalProceedLink: {
+    paddingVertical: 8,
+  },
+  modalProceedLinkText: {
+    fontSize: 13,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
 });
