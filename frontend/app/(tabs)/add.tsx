@@ -1,16 +1,19 @@
-import { useContext, useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from '../_layout';
-import { COLORS } from '../../src/constants';
+import { useTheme } from '../../src/ThemeContext';
+import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 
 type Tab = 'url' | 'xml' | 'manual';
 
 export default function AddReceiptScreen() {
   const { t, lang } = useContext(I18nContext);
+  const { theme, isDark } = useTheme();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('url');
   const [url, setUrl] = useState('');
@@ -28,7 +31,6 @@ export default function AddReceiptScreen() {
     try {
       const result = await api.importFromUrl(url.trim(), forceImport);
       
-      // Check if duplicate receipt
       if (result.status === 'duplicate') {
         setLoading(false);
         Alert.alert(
@@ -37,25 +39,17 @@ export default function AddReceiptScreen() {
             ? `Αυτή η απόδειξη έχει ήδη εισαχθεί από ${result.existing_receipt.store_name} στις ${result.existing_receipt.date}. Θέλετε να την εισάγετε ξανά;`
             : `This receipt was already imported from ${result.existing_receipt.store_name} on ${result.existing_receipt.date}. Do you want to import it again?`,
           [
-            { 
-              text: lang === 'el' ? 'Προβολή υπάρχουσας' : 'View existing', 
-              onPress: () => router.push(`/receipt/${result.existing_receipt.id}`)
-            },
-            { 
-              text: lang === 'el' ? 'Εισαγωγή ξανά' : 'Import again',
-              onPress: () => handleUrlImport(true)
-            },
+            { text: lang === 'el' ? 'Προβολή υπάρχουσας' : 'View existing', onPress: () => router.push(`/receipt/${result.existing_receipt.id}`) },
+            { text: lang === 'el' ? 'Εισαγωγή ξανά' : 'Import again', onPress: () => handleUrlImport(true) },
             { text: lang === 'el' ? 'Άκυρο' : 'Cancel', style: 'cancel' }
           ]
         );
         return;
       }
       
-      // Check if WebView is required (Epsilon Digital stores)
       if (result.status === 'webview_required') {
         setLoading(false);
         setUrl('');
-        // Navigate to WebView screen
         router.push(`/webview-import?url=${encodeURIComponent(result.url)}`);
         return;
       }
@@ -146,6 +140,118 @@ export default function AddReceiptScreen() {
     }
   };
 
+  const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.background },
+    scroll: { padding: Spacing.lg, paddingBottom: Spacing['3xl'] },
+    title: { 
+      fontSize: Typography['2xl'], 
+      fontWeight: Typography.extrabold, 
+      color: theme.text, 
+      marginBottom: Spacing.lg,
+      letterSpacing: -0.5 
+    },
+    
+    // Scanner Button
+    scannerBtn: { 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      backgroundColor: theme.primary, 
+      borderRadius: Radius.xl, 
+      padding: Spacing.base, 
+      marginBottom: Spacing.lg,
+      ...Shadows.md,
+    },
+    scannerIcon: { 
+      width: 48, 
+      height: 48, 
+      borderRadius: Radius.md, 
+      backgroundColor: 'rgba(255,255,255,0.2)', 
+      alignItems: 'center', 
+      justifyContent: 'center' 
+    },
+    scannerTextWrap: { flex: 1, marginLeft: Spacing.md },
+    scannerTitle: { fontSize: Typography.lg, fontWeight: Typography.bold, color: theme.textInverse },
+    scannerDesc: { fontSize: Typography.xs, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+    scannerArrow: { marginRight: Spacing.xs },
+    
+    // Tabs
+    tabs: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
+    tab: { 
+      flex: 1, 
+      paddingVertical: Spacing.md, 
+      borderRadius: Radius.md, 
+      backgroundColor: theme.surface, 
+      alignItems: 'center', 
+      borderWidth: 1.5, 
+      borderColor: theme.border 
+    },
+    tabActive: { backgroundColor: theme.primary, borderColor: theme.primary },
+    tabText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: theme.textSecondary },
+    tabTextActive: { color: theme.textInverse },
+    
+    // Card
+    card: { 
+      backgroundColor: theme.surface, 
+      borderRadius: Radius.xl, 
+      padding: Spacing.lg, 
+      borderWidth: 1, 
+      borderColor: theme.cardBorder,
+      ...Shadows.sm,
+    },
+    hint: { fontSize: Typography.sm, color: theme.textSecondary, marginBottom: Spacing.base, lineHeight: 20 },
+    
+    // Input
+    input: { 
+      backgroundColor: theme.background, 
+      borderRadius: Radius.md, 
+      paddingHorizontal: Spacing.base, 
+      paddingVertical: Spacing.md, 
+      fontSize: Typography.base, 
+      color: theme.text, 
+      borderWidth: 1, 
+      borderColor: theme.border, 
+      marginBottom: Spacing.md 
+    },
+    
+    // Buttons
+    primaryBtn: { 
+      backgroundColor: theme.primary, 
+      borderRadius: Radius.full, 
+      paddingVertical: Spacing.base, 
+      alignItems: 'center', 
+      marginTop: Spacing.sm,
+      ...Shadows.sm,
+    },
+    primaryBtnText: { color: theme.textInverse, fontSize: Typography.base, fontWeight: Typography.bold },
+    btnDisabled: { opacity: 0.5 },
+    
+    // Upload
+    uploadBtn: { 
+      borderWidth: 2, 
+      borderColor: theme.primary, 
+      borderStyle: 'dashed', 
+      borderRadius: Radius.xl, 
+      padding: Spacing['3xl'], 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      backgroundColor: isDark ? theme.primaryLight : 'rgba(13, 148, 136, 0.05)',
+    },
+    uploadText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: theme.primary, marginTop: Spacing.sm },
+    
+    // Supported Stores
+    supportedStores: { marginTop: Spacing.xl, paddingTop: Spacing.base, borderTopWidth: 1, borderTopColor: theme.borderLight },
+    supportedTitle: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: theme.textSecondary, marginBottom: Spacing.sm },
+    supportedItem: { fontSize: Typography.sm, color: theme.text, paddingVertical: 4 },
+    
+    // Manual Entry
+    manualItemRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start' },
+    addItemBtn: { paddingVertical: Spacing.md, alignItems: 'center' },
+    addItemText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: theme.primary },
+    manualTotal: { fontSize: Typography.lg, fontWeight: Typography.bold, color: theme.text, textAlign: 'right', marginVertical: Spacing.sm },
+    removeBtn: { width: 36, height: 48, alignItems: 'center', justifyContent: 'center' },
+    removeBtnText: { fontSize: 18, color: theme.error, fontWeight: Typography.bold },
+  });
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -159,14 +265,17 @@ export default function AddReceiptScreen() {
             onPress={() => router.push('/scanner')}
             activeOpacity={0.8}
           >
-            <Text style={styles.scannerIcon}>📷</Text>
+            <View style={styles.scannerIcon}>
+              <Ionicons name="qr-code" size={26} color={theme.textInverse} />
+            </View>
             <View style={styles.scannerTextWrap}>
               <Text style={styles.scannerTitle}>{t('scan_qr')}</Text>
               <Text style={styles.scannerDesc}>{t('scan_qr_desc')}</Text>
             </View>
-            <Text style={styles.scannerArrow}>›</Text>
+            <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.6)" style={styles.scannerArrow} />
           </TouchableOpacity>
 
+          {/* Tabs */}
           <View style={styles.tabs}>
             {(['url', 'xml', 'manual'] as Tab[]).map((tab) => (
               <TouchableOpacity
@@ -183,6 +292,7 @@ export default function AddReceiptScreen() {
             ))}
           </View>
 
+          {/* URL Tab */}
           {activeTab === 'url' && (
             <View style={styles.card}>
               <Text style={styles.hint}>{t('url_hint')}</Text>
@@ -190,7 +300,7 @@ export default function AddReceiptScreen() {
                 testID="url-input"
                 style={styles.input}
                 placeholder={t('url_placeholder')}
-                placeholderTextColor={COLORS.textMuted}
+                placeholderTextColor={theme.textMuted}
                 value={url}
                 onChangeText={setUrl}
                 autoCapitalize="none"
@@ -204,22 +314,23 @@ export default function AddReceiptScreen() {
                 disabled={!url.trim() || loading}
                 activeOpacity={0.8}
               >
-                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{t('import_btn')}</Text>}
+                {loading ? <ActivityIndicator color={theme.textInverse} /> : <Text style={styles.primaryBtnText}>{t('import_btn')}</Text>}
               </TouchableOpacity>
 
               <View style={styles.supportedStores}>
                 <Text style={styles.supportedTitle}>{t('supported_stores')} ({t('auto_import')}):</Text>
                 {['Σκλαβενίτης', 'Μασούτης', 'Jumbo', 'My Market', 'Lidl'].map(s => (
-                  <Text key={s} style={styles.supportedItem}>✅ {s}</Text>
+                  <Text key={s} style={styles.supportedItem}>✓ {s}</Text>
                 ))}
                 <Text style={[styles.supportedTitle, { marginTop: 12 }]}>{lang === 'el' ? 'Με WebView (ανοίγει στην εφαρμογή):' : 'With WebView (opens in app):'}</Text>
                 {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
-                  <Text key={s} style={styles.supportedItem}>🌐 {s}</Text>
+                  <Text key={s} style={styles.supportedItem}>⎔ {s}</Text>
                 ))}
               </View>
             </View>
           )}
 
+          {/* XML Tab */}
           {activeTab === 'xml' && (
             <View style={styles.card}>
               <Text style={styles.hint}>{t('xml_hint')}</Text>
@@ -230,9 +341,9 @@ export default function AddReceiptScreen() {
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                {loading ? <ActivityIndicator color={COLORS.primary} /> : (
+                {loading ? <ActivityIndicator color={theme.primary} /> : (
                   <>
-                    <Text style={styles.uploadIcon}>📄</Text>
+                    <Ionicons name="document-text-outline" size={44} color={theme.primary} />
                     <Text style={styles.uploadText}>{t('upload_xml')}</Text>
                   </>
                 )}
@@ -241,19 +352,20 @@ export default function AddReceiptScreen() {
               <View style={styles.supportedStores}>
                 <Text style={styles.supportedTitle}>{t('supported_stores')} ({t('xml_upload')}):</Text>
                 {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
-                  <Text key={s} style={styles.supportedItem}>📄 {s}</Text>
+                  <Text key={s} style={styles.supportedItem}>⎙ {s}</Text>
                 ))}
               </View>
             </View>
           )}
 
+          {/* Manual Tab */}
           {activeTab === 'manual' && (
             <View style={styles.card}>
               <TextInput
                 testID="manual-store-input"
                 style={styles.input}
                 placeholder={t('enter_store_name')}
-                placeholderTextColor={COLORS.textMuted}
+                placeholderTextColor={theme.textMuted}
                 value={storeName}
                 onChangeText={setStoreName}
               />
@@ -261,7 +373,7 @@ export default function AddReceiptScreen() {
                 testID="manual-date-input"
                 style={styles.input}
                 placeholder={t('enter_date')}
-                placeholderTextColor={COLORS.textMuted}
+                placeholderTextColor={theme.textMuted}
                 value={dateStr}
                 onChangeText={setDateStr}
               />
@@ -272,14 +384,14 @@ export default function AddReceiptScreen() {
                     testID={`manual-item-desc-${i}`}
                     style={[styles.input, { flex: 2 }]}
                     placeholder={t('enter_description')}
-                    placeholderTextColor={COLORS.textMuted}
+                    placeholderTextColor={theme.textMuted}
                     value={item.description}
                     onChangeText={(v) => updateManualItem(i, 'description', v)}
                   />
                   <TextInput
                     style={[styles.input, { width: 50 }]}
                     placeholder={t('enter_quantity')}
-                    placeholderTextColor={COLORS.textMuted}
+                    placeholderTextColor={theme.textMuted}
                     value={item.quantity}
                     onChangeText={(v) => updateManualItem(i, 'quantity', v)}
                     keyboardType="numeric"
@@ -287,7 +399,7 @@ export default function AddReceiptScreen() {
                   <TextInput
                     style={[styles.input, { width: 70 }]}
                     placeholder={t('enter_price')}
-                    placeholderTextColor={COLORS.textMuted}
+                    placeholderTextColor={theme.textMuted}
                     value={item.price}
                     onChangeText={(v) => updateManualItem(i, 'price', v)}
                     keyboardType="numeric"
@@ -315,7 +427,7 @@ export default function AddReceiptScreen() {
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{t('save_receipt')}</Text>}
+                {loading ? <ActivityIndicator color={theme.textInverse} /> : <Text style={styles.primaryBtnText}>{t('save_receipt')}</Text>}
               </TouchableOpacity>
             </View>
           )}
@@ -324,38 +436,3 @@ export default function AddReceiptScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  scroll: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 20, letterSpacing: -0.5 },
-  tabs: { flexDirection: 'row', gap: 8, marginBottom: 20 },
-  tab: { flex: 1, paddingVertical: 12, borderRadius: 14, backgroundColor: COLORS.surface, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
-  tabActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  tabText: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
-  tabTextActive: { color: '#FFF' },
-  card: { backgroundColor: COLORS.surface, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: COLORS.borderLight },
-  hint: { fontSize: 13, color: COLORS.textSecondary, marginBottom: 16, lineHeight: 20 },
-  input: { backgroundColor: COLORS.background, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, color: COLORS.textPrimary, borderWidth: 1, borderColor: COLORS.border, marginBottom: 12 },
-  primaryBtn: { backgroundColor: COLORS.primary, borderRadius: 50, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
-  primaryBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
-  btnDisabled: { opacity: 0.5 },
-  uploadBtn: { borderWidth: 2, borderColor: COLORS.primary, borderStyle: 'dashed', borderRadius: 20, padding: 40, alignItems: 'center', justifyContent: 'center' },
-  uploadIcon: { fontSize: 40, marginBottom: 8 },
-  uploadText: { fontSize: 16, fontWeight: '600', color: COLORS.primary },
-  supportedStores: { marginTop: 24, paddingTop: 16, borderTopWidth: 1, borderTopColor: COLORS.borderLight },
-  supportedTitle: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary, marginBottom: 8 },
-  supportedItem: { fontSize: 14, color: COLORS.textPrimary, paddingVertical: 4 },
-  manualItemRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  addItemBtn: { paddingVertical: 12, alignItems: 'center' },
-  addItemText: { fontSize: 15, fontWeight: '600', color: COLORS.primary },
-  manualTotal: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary, textAlign: 'right', marginVertical: 8 },
-  removeBtn: { width: 36, height: 48, alignItems: 'center', justifyContent: 'center' },
-  removeBtnText: { fontSize: 18, color: COLORS.error, fontWeight: '700' },
-  scannerBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.primary, borderRadius: 20, padding: 18, marginBottom: 20 },
-  scannerIcon: { fontSize: 28 },
-  scannerTextWrap: { flex: 1, marginLeft: 14 },
-  scannerTitle: { fontSize: 17, fontWeight: '700', color: '#FFF' },
-  scannerDesc: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  scannerArrow: { fontSize: 24, color: 'rgba(255,255,255,0.6)' },
-});

@@ -1,13 +1,16 @@
-import { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from '../_layout';
-import { COLORS } from '../../src/constants';
+import { useTheme } from '../../src/ThemeContext';
+import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
+  const { theme, isDark, mode, setMode, toggleTheme } = useTheme();
   const [deviceId, setDeviceId] = useState('');
   const [autoBackup, setAutoBackup] = useState(true);
 
@@ -38,11 +41,160 @@ export default function SettingsScreen() {
     }
   };
 
+  const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.background },
+    scroll: { padding: Spacing.lg, paddingBottom: Spacing['3xl'] },
+    title: { 
+      fontSize: Typography['2xl'], 
+      fontWeight: Typography.extrabold, 
+      color: theme.text, 
+      marginBottom: Spacing.xl,
+      letterSpacing: -0.5 
+    },
+    
+    // Section
+    section: { marginBottom: Spacing.xl },
+    sectionTitle: { 
+      fontSize: Typography.xs, 
+      fontWeight: Typography.bold, 
+      color: theme.textMuted, 
+      textTransform: 'uppercase', 
+      letterSpacing: 1.2, 
+      marginBottom: Spacing.md,
+      marginLeft: Spacing.xs,
+    },
+    
+    // Language selector
+    langRow: { flexDirection: 'row', gap: Spacing.md },
+    langBtn: { 
+      flex: 1, 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      backgroundColor: theme.surface, 
+      padding: Spacing.base, 
+      borderRadius: Radius.lg, 
+      borderWidth: 2, 
+      borderColor: theme.border, 
+      gap: Spacing.sm,
+      ...Shadows.sm,
+    },
+    langBtnActive: { borderColor: theme.primary, backgroundColor: theme.primaryLight },
+    langFlag: { fontSize: 24 },
+    langText: { fontSize: Typography.base, fontWeight: Typography.semibold, color: theme.textSecondary },
+    langTextActive: { color: theme.primary },
+    
+    // Theme selector
+    themeRow: { flexDirection: 'row', gap: Spacing.sm },
+    themeBtn: { 
+      flex: 1, 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      backgroundColor: theme.surface, 
+      paddingVertical: Spacing.md, 
+      borderRadius: Radius.md, 
+      borderWidth: 2, 
+      borderColor: theme.border,
+      gap: Spacing.xs,
+    },
+    themeBtnActive: { borderColor: theme.primary, backgroundColor: theme.primaryLight },
+    themeText: { fontSize: Typography.xs, fontWeight: Typography.medium, color: theme.textSecondary },
+    themeTextActive: { color: theme.primary },
+    
+    // Settings row
+    settingRow: { 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      backgroundColor: theme.surface, 
+      padding: Spacing.base, 
+      borderRadius: Radius.lg, 
+      borderWidth: 1, 
+      borderColor: theme.cardBorder, 
+      marginBottom: Spacing.sm,
+      ...Shadows.sm,
+    },
+    settingLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: theme.text },
+    settingDesc: { fontSize: Typography.xs, color: theme.textSecondary, marginTop: 2 },
+    
+    // Action button
+    actionBtn: { 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      backgroundColor: theme.surface, 
+      padding: Spacing.base, 
+      borderRadius: Radius.lg, 
+      borderWidth: 1, 
+      borderColor: theme.cardBorder,
+      ...Shadows.sm,
+    },
+    actionIconWrap: { 
+      width: 40, 
+      height: 40, 
+      borderRadius: Radius.md, 
+      backgroundColor: theme.primaryLight, 
+      alignItems: 'center', 
+      justifyContent: 'center' 
+    },
+    actionInfo: { flex: 1, marginLeft: Spacing.md },
+    actionLabel: { fontSize: Typography.base, fontWeight: Typography.semibold, color: theme.text },
+    actionDesc: { fontSize: Typography.xs, color: theme.textSecondary, marginTop: 2 },
+    
+    // Stores grid
+    storesGrid: { 
+      backgroundColor: theme.surface, 
+      borderRadius: Radius.lg, 
+      padding: Spacing.base, 
+      borderWidth: 1, 
+      borderColor: theme.cardBorder,
+      ...Shadows.sm,
+    },
+    storeItem: { 
+      flexDirection: 'row', 
+      alignItems: 'center', 
+      paddingVertical: Spacing.sm, 
+      borderBottomWidth: 1, 
+      borderBottomColor: theme.borderLight 
+    },
+    storeItemLast: { borderBottomWidth: 0 },
+    storeDot: { width: 10, height: 10, borderRadius: 5, marginRight: Spacing.md },
+    storeNameText: { flex: 1, fontSize: Typography.sm, fontWeight: Typography.semibold, color: theme.text },
+    storeMethod: { fontSize: Typography.xs, color: theme.textSecondary },
+    
+    // About card
+    aboutCard: { 
+      backgroundColor: theme.surface, 
+      borderRadius: Radius.lg, 
+      padding: Spacing.lg, 
+      borderWidth: 1, 
+      borderColor: theme.cardBorder, 
+      alignItems: 'center',
+      ...Shadows.sm,
+    },
+    aboutAppName: { fontSize: Typography.xl, fontWeight: Typography.extrabold, color: theme.primary },
+    aboutVersion: { fontSize: Typography.sm, color: theme.textSecondary, marginTop: Spacing.xs },
+    aboutRow: { flexDirection: 'row', marginTop: Spacing.md, gap: Spacing.sm },
+    aboutLabel: { fontSize: Typography.xs, color: theme.textSecondary, fontWeight: Typography.semibold },
+    aboutValue: { fontSize: Typography.xs, color: theme.textMuted, flex: 1 },
+  });
+
+  const stores = [
+    { name: 'Σκλαβενίτης', method: 'Auto', color: '#E35205' },
+    { name: 'Μασούτης', method: 'Auto', color: '#00A651' },
+    { name: 'Jumbo', method: 'Auto', color: '#FFD700' },
+    { name: 'My Market', method: 'Auto', color: '#FF6600' },
+    { name: 'Lidl', method: 'Auto', color: '#0050AA' },
+    { name: 'ΑΒ Βασιλόπουλος', method: 'XML', color: '#005696' },
+    { name: 'Market In', method: 'XML', color: '#E30613' },
+    { name: 'Bazaar', method: 'XML', color: '#D4145A' },
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>{t('settings')}</Text>
 
+        {/* Language Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('language')}</Text>
           <View style={styles.langRow}>
@@ -67,6 +219,47 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Theme Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{lang === 'el' ? 'Θέμα Εμφάνισης' : 'Appearance'}</Text>
+          <View style={styles.themeRow}>
+            <TouchableOpacity
+              testID="theme-light-btn"
+              style={[styles.themeBtn, mode === 'light' && styles.themeBtnActive]}
+              onPress={() => setMode('light')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="sunny" size={22} color={mode === 'light' ? theme.primary : theme.textMuted} />
+              <Text style={[styles.themeText, mode === 'light' && styles.themeTextActive]}>
+                {lang === 'el' ? 'Φωτεινό' : 'Light'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="theme-dark-btn"
+              style={[styles.themeBtn, mode === 'dark' && styles.themeBtnActive]}
+              onPress={() => setMode('dark')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="moon" size={22} color={mode === 'dark' ? theme.primary : theme.textMuted} />
+              <Text style={[styles.themeText, mode === 'dark' && styles.themeTextActive]}>
+                {lang === 'el' ? 'Σκοτεινό' : 'Dark'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="theme-system-btn"
+              style={[styles.themeBtn, mode === 'system' && styles.themeBtnActive]}
+              onPress={() => setMode('system')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="phone-portrait-outline" size={22} color={mode === 'system' ? theme.primary : theme.textMuted} />
+              <Text style={[styles.themeText, mode === 'system' && styles.themeTextActive]}>
+                {lang === 'el' ? 'Σύστημα' : 'System'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Backup Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('backup')}</Text>
           <View style={styles.settingRow}>
@@ -80,8 +273,8 @@ export default function SettingsScreen() {
               testID="auto-backup-switch"
               value={autoBackup}
               onValueChange={toggleAutoBackup}
-              trackColor={{ false: COLORS.border, true: COLORS.primaryLight }}
-              thumbColor={autoBackup ? COLORS.primary : COLORS.textMuted}
+              trackColor={{ false: theme.border, true: theme.primaryLight }}
+              thumbColor={autoBackup ? theme.primary : theme.textMuted}
             />
           </View>
           <TouchableOpacity
@@ -90,31 +283,25 @@ export default function SettingsScreen() {
             onPress={handleExport}
             activeOpacity={0.7}
           >
-            <Text style={styles.actionIcon}>📦</Text>
+            <View style={styles.actionIconWrap}>
+              <Ionicons name="cloud-download-outline" size={22} color={theme.primary} />
+            </View>
             <View style={styles.actionInfo}>
               <Text style={styles.actionLabel}>{t('export_data')}</Text>
               <Text style={styles.actionDesc}>
                 {lang === 'el' ? 'Εξαγωγή όλων των δεδομένων σε JSON' : 'Export all data as JSON'}
               </Text>
             </View>
-            <Text style={styles.actionArrow}>›</Text>
+            <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
           </TouchableOpacity>
         </View>
 
+        {/* Supported Stores */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('supported_stores')}</Text>
           <View style={styles.storesGrid}>
-            {[
-              { name: 'Σκλαβενίτης', method: '✅ Auto', color: '#E35205' },
-              { name: 'Μασούτης', method: '✅ Auto', color: '#00A651' },
-              { name: 'Jumbo', method: '✅ Auto', color: '#FFD700' },
-              { name: 'My Market', method: '✅ Auto', color: '#FF6600' },
-              { name: 'Lidl', method: '✅ Auto', color: '#0050AA' },
-              { name: 'ΑΒ Βασιλόπουλος', method: '📄 XML', color: '#005696' },
-              { name: 'Market In', method: '📄 XML', color: '#E30613' },
-              { name: 'Bazaar', method: '📄 XML', color: '#D4145A' },
-            ].map((store, i) => (
-              <View key={i} style={styles.storeItem}>
+            {stores.map((store, i) => (
+              <View key={i} style={[styles.storeItem, i === stores.length - 1 && styles.storeItemLast]}>
                 <View style={[styles.storeDot, { backgroundColor: store.color }]} />
                 <Text style={styles.storeNameText}>{store.name}</Text>
                 <Text style={styles.storeMethod}>{store.method}</Text>
@@ -123,10 +310,12 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* About */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('about')}</Text>
           <View style={styles.aboutCard}>
-            <Text style={styles.aboutAppName}>🛒 GroceryTracker</Text>
+            <Ionicons name="cart" size={36} color={theme.primary} />
+            <Text style={styles.aboutAppName}>GroceryTracker</Text>
             <Text style={styles.aboutVersion}>{t('version')} 1.0.0</Text>
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>{t('device_id')}:</Text>
@@ -138,37 +327,3 @@ export default function SettingsScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  scroll: { padding: 20, paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 24, letterSpacing: -0.5 },
-  section: { marginBottom: 28 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 },
-  langRow: { flexDirection: 'row', gap: 12 },
-  langBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.surface, padding: 16, borderRadius: 16, borderWidth: 2, borderColor: COLORS.border, gap: 10 },
-  langBtnActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryLight },
-  langFlag: { fontSize: 24 },
-  langText: { fontSize: 15, fontWeight: '600', color: COLORS.textSecondary },
-  langTextActive: { color: COLORS.primary },
-  settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.surface, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: COLORS.borderLight, marginBottom: 10 },
-  settingLabel: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
-  settingDesc: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: COLORS.borderLight },
-  actionIcon: { fontSize: 24 },
-  actionInfo: { flex: 1, marginLeft: 12 },
-  actionLabel: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
-  actionDesc: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
-  actionArrow: { fontSize: 22, color: COLORS.textMuted },
-  storesGrid: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: COLORS.borderLight },
-  storeItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight },
-  storeDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
-  storeNameText: { flex: 1, fontSize: 14, fontWeight: '600', color: COLORS.textPrimary },
-  storeMethod: { fontSize: 12, color: COLORS.textSecondary },
-  aboutCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: COLORS.borderLight, alignItems: 'center' },
-  aboutAppName: { fontSize: 20, fontWeight: '800', color: COLORS.primary },
-  aboutVersion: { fontSize: 13, color: COLORS.textSecondary, marginTop: 4 },
-  aboutRow: { flexDirection: 'row', marginTop: 12, gap: 8 },
-  aboutLabel: { fontSize: 12, color: COLORS.textSecondary, fontWeight: '600' },
-  aboutValue: { fontSize: 12, color: COLORS.textMuted, flex: 1 },
-});
