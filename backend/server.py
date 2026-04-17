@@ -1137,6 +1137,162 @@ async def get_stats(device_id: str = Query(...)):
     }
 
 
+@api_router.get("/stats/analytics")
+async def get_analytics(device_id: str = Query(...), months: int = Query(default=6, ge=1, le=12)):
+    """Get spending analytics: monthly breakdown and store distribution."""
+    
+    # Get all receipts for this device
+    receipts = await db.receipts.find(
+        {"device_id": device_id}, 
+        {"_id": 0, "date": 1, "total": 1, "store_name": 1, "items": 1, "created_at": 1}
+    ).to_list(10000)
+    
+    if not receipts:
+        return {
+            "monthly_spending": [],
+            "store_distribution": [],
+            "top_products": [],
+            "spending_trend": "neutral",
+            "total_this_month": 0,
+            "total_last_month": 0,
+            "change_percent": 0
+        }
+    
+    # Parse dates and organize by month
+    from collections import defaultdict
+    monthly_data = defaultdict(float)
+    store_totals = defaultdict(float)
+    product_counts = defaultdict(lambda: {"count": 0, "total": 0.0, "description": ""})
+    
+    now = datetime.now(timezone.utc)
+    current_month_key = now.strftime("%Y-%m")
+    last_month = (now.replace(day=1) - __import__('datetime').timedelta(days=1))
+    last_month_key = last_month.strftime("%Y-%m")
+    
+    for receipt in receipts:
+        total = safe_float(receipt.get("total", 0))
+        store = receipt.get("store_name", "Unknown")
+        
+        # Try to parse date from receipt
+        date_str = receipt.get("date", "") or receipt.get("created_at", "")
+        month_key = None
+        
+        if date_str:
+            # Try different date formats
+            for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"]:
+                try:
+                    parsed = datetime.strptime(date_str[:10], fmt)
+                    month_key = parsed.strftime("%Y-%m")
+                    break
+                except (ValueError, TypeError):
+                    continue
+            
+            # Try ISO format for created_at
+            if not month_key and "T" in date_str:
+                try:
+                    month_key = date_str[:7]  # YYYY-MM
+                except:
+                    pass
+        
+        if month_key:
+            monthly_data[month_key] += total
+        
+        store_totals[store] += total
+        
+        # Count products
+        for item in receipt.get("items", []):
+            desc = item.get("description", "")
+            if desc:
+                product_counts[desc]["count"] += 1
+                product_counts[desc]["total"] += safe_float(item.get("total_value", 0))
+                product_counts[desc]["description"] = desc
+    
+    # Generate last N months for chart
+    month_labels_gr = {
+        "01": "Ιαν", "02": "Φεβ", "03": "Μαρ", "04": "Απρ",
+        "05": "Μάι", "06": "Ιουν", "07": "Ιουλ", "08": "Αυγ",
+        "09": "Σεπ", "10": "Οκτ", "11": "Νοε", "12": "Δεκ"
+    }
+    
+    monthly_spending = []
+    for i in range(months - 1, -1, -1):
+        target_date = now.replace(day=1)
+        for _ in range(i):
+            target_date = (target_date - __import__('datetime').timedelta(days=1)).replace(day=1)
+        
+        month_key = target_date.strftime("%Y-%m")
+        month_num = target_date.strftime("%m")
+        month_label = month_labels_gr.get(month_num, month_num)
+        
+        monthly_spending.append({
+            "month": month_key,
+            "label": month_label,
+            "amount": round(monthly_data.get(month_key, 0), 2)
+        })
+    
+    # Store distribution (top 5 + others)
+    sorted_stores = sorted(store_totals.items(), key=lambda x: x[1], reverse=True)
+    store_colors = ["#0D9488", "#6366F1", "#F59E0B", "#EF4444", "#10B981", "#8B5CF6", "#EC4899", "#3B82F6"]
+    
+    store_distribution = []
+    total_all_stores = sum(store_totals.values())
+    others_total = 0
+    
+    for i, (store, total) in enumerate(sorted_stores):
+        if i < 5:
+            percentage = (total / total_all_stores * 100) if total_all_stores > 0 else 0
+            store_distribution.append({
+                "name": store,
+                "amount": round(total, 2),
+                "percentage": round(percentage, 1),
+                "color": store_colors[i % len(store_colors)]
+            })
+        else:
+            others_total += total
+    
+    if others_total > 0:
+        percentage = (others_total / total_all_stores * 100) if total_all_stores > 0 else 0
+        store_distribution.append({
+            "name": "Άλλα",
+            "amount": round(others_total, 2),
+            "percentage": round(percentage, 1),
+            "color": "#94A3B8"
+        })
+    
+    # Top products
+    sorted_products = sorted(product_counts.values(), key=lambda x: x["count"], reverse=True)[:5]
+    top_products = [
+        {"description": p["description"], "count": p["count"], "total": round(p["total"], 2)}
+        for p in sorted_products
+    ]
+    
+    # Spending trend
+    this_month_total = monthly_data.get(current_month_key, 0)
+    last_month_total = monthly_data.get(last_month_key, 0)
+    
+    if last_month_total > 0:
+        change_percent = ((this_month_total - last_month_total) / last_month_total) * 100
+    else:
+        change_percent = 0
+    
+    if change_percent > 5:
+        trend = "up"
+    elif change_percent < -5:
+        trend = "down"
+    else:
+        trend = "neutral"
+    
+    return {
+        "monthly_spending": monthly_spending,
+        "store_distribution": store_distribution,
+        "top_products": top_products,
+        "spending_trend": trend,
+        "total_this_month": round(this_month_total, 2),
+        "total_last_month": round(last_month_total, 2),
+        "change_percent": round(change_percent, 1)
+    }
+
+
 @api_router.get("/backup/export")
 async def export_data(device_id: str = Query(...)):
     receipts = await db.receipts.find({"device_id": device_id}, {"_id": 0}).to_list(10000)

@@ -99,6 +99,11 @@ export const api = {
     return request(`/stats?device_id=${device_id}`);
   },
 
+  getAnalytics: async (months: number = 6) => {
+    const device_id = await getDeviceId();
+    return request(`/stats/analytics?device_id=${device_id}&months=${months}`);
+  },
+
   exportData: async () => {
     const device_id = await getDeviceId();
     return request(`/backup/export?device_id=${device_id}`);

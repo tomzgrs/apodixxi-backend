@@ -9,30 +9,36 @@ import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
+import { BarChart, DonutChart, DonutLegend, TrendIndicator } from '../../src/components/Charts';
 
 export default function DashboardScreen() {
-  const { t } = useContext(I18nContext);
+  const { t, lang } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
   const router = useRouter();
   const [stats, setStats] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadStats = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      const data = await api.getStats();
-      setStats(data);
+      const [statsData, analyticsData] = await Promise.all([
+        api.getStats(),
+        api.getAnalytics(6)
+      ]);
+      setStats(statsData);
+      setAnalytics(analyticsData);
     } catch (e) {
-      console.log('Stats error:', e);
+      console.log('Dashboard load error:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  const onRefresh = () => { setRefreshing(true); loadStats(); };
+  const onRefresh = () => { setRefreshing(true); loadData(); };
 
   const styles = createStyles(theme, isDark);
 
@@ -98,8 +104,19 @@ export default function DashboardScreen() {
           <>
             {/* Main Stats Card */}
             <View style={styles.mainStatsCard}>
-              <Text style={styles.mainStatsLabel}>Συνολικές Δαπάνες</Text>
-              <Text style={styles.mainStatsValue}>{formatPrice(stats.total_spent)}</Text>
+              <View style={styles.mainStatsHeader}>
+                <View>
+                  <Text style={styles.mainStatsLabel}>Συνολικές Δαπάνες</Text>
+                  <Text style={styles.mainStatsValue}>{formatPrice(stats.total_spent)}</Text>
+                </View>
+                {analytics && (
+                  <TrendIndicator 
+                    trend={analytics.spending_trend} 
+                    changePercent={analytics.change_percent}
+                    theme={theme}
+                  />
+                )}
+              </View>
               <View style={styles.mainStatsRow}>
                 <View style={styles.mainStatItem}>
                   <Text style={styles.mainStatItemValue}>{stats.total_receipts}</Text>
@@ -148,14 +165,14 @@ export default function DashboardScreen() {
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.warningLight }]}>
-                  <Ionicons name="trending-up-outline" size={24} color={theme.warning} />
+                  <Ionicons name="pricetag-outline" size={24} color={theme.warning} />
                 </View>
-                <Text style={styles.quickActionText}>Ανάλυση</Text>
+                <Text style={styles.quickActionText}>Σύγκριση</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 style={styles.quickActionBtn}
-                onPress={() => router.push('/(tabs)/settings')}
+                onPress={() => router.push('/(tabs)/purchases')}
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.infoLight }]}>
@@ -164,6 +181,70 @@ export default function DashboardScreen() {
                 <Text style={styles.quickActionText}>Αναζήτηση</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Monthly Spending Chart */}
+            {analytics && analytics.monthly_spending && analytics.monthly_spending.length > 0 && (
+              <View style={styles.chartCard}>
+                <View style={styles.chartHeader}>
+                  <Ionicons name="bar-chart-outline" size={20} color={theme.primary} />
+                  <Text style={styles.chartTitle}>Μηνιαίες Δαπάνες</Text>
+                </View>
+                <BarChart 
+                  data={analytics.monthly_spending.map(function(m: any) { return { label: m.label, amount: m.amount }; })}
+                  theme={theme}
+                  height={180}
+                />
+                {analytics.total_this_month > 0 && (
+                  <View style={styles.chartFooter}>
+                    <Text style={styles.chartFooterLabel}>Τρέχων μήνας:</Text>
+                    <Text style={styles.chartFooterValue}>{formatPrice(analytics.total_this_month)}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Store Distribution */}
+            {analytics && analytics.store_distribution && analytics.store_distribution.length > 0 && (
+              <View style={styles.chartCard}>
+                <View style={styles.chartHeader}>
+                  <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
+                  <Text style={styles.chartTitle}>Κατανομή ανά Κατάστημα</Text>
+                </View>
+                <View style={styles.donutRow}>
+                  <DonutChart 
+                    data={analytics.store_distribution}
+                    theme={theme}
+                    size={130}
+                  />
+                  <View style={styles.donutLegendWrap}>
+                    <DonutLegend data={analytics.store_distribution} theme={theme} />
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* Top Products */}
+            {analytics && analytics.top_products && analytics.top_products.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Συχνότερα Προϊόντα</Text>
+                </View>
+                {analytics.top_products.slice(0, 4).map((product: any, i: number) => (
+                  <View key={i} style={styles.productRow}>
+                    <View style={[styles.productRank, { backgroundColor: i === 0 ? theme.warningLight : theme.borderLight }]}>
+                      <Text style={[styles.productRankText, { color: i === 0 ? theme.warning : theme.textSecondary }]}>
+                        {i + 1}
+                      </Text>
+                    </View>
+                    <View style={styles.productInfo}>
+                      <Text style={styles.productName} numberOfLines={1}>{product.description}</Text>
+                      <Text style={styles.productCount}>{product.count} αγορές</Text>
+                    </View>
+                    <Text style={styles.productTotal}>{formatPrice(product.total)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
 
             {/* Top Stores */}
             {stats.stores && stats.stores.length > 0 && (
@@ -342,6 +423,12 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     padding: Spacing.xl,
     marginBottom: Spacing.lg,
   },
+  mainStatsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: Spacing.md,
+  },
   mainStatsLabel: {
     fontSize: Typography.sm,
     color: 'rgba(255,255,255,0.8)',
@@ -351,7 +438,6 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontSize: Typography['4xl'],
     fontWeight: Typography.extrabold,
     color: '#FFFFFF',
-    marginBottom: Spacing.lg,
   },
   mainStatsRow: {
     flexDirection: 'row',
@@ -359,6 +445,7 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: Radius.lg,
     padding: Spacing.md,
+    marginTop: Spacing.sm,
   },
   mainStatItem: {
     flex: 1,
@@ -403,6 +490,56 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontWeight: Typography.medium,
   },
   
+  // Chart Card
+  chartCard: {
+    backgroundColor: theme.card,
+    borderRadius: Radius.xl,
+    padding: Spacing.base,
+    marginBottom: Spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.cardBorder,
+    ...Shadows.sm,
+  },
+  chartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  chartTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: theme.text,
+  },
+  chartFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: theme.borderLight,
+  },
+  chartFooterLabel: {
+    fontSize: Typography.sm,
+    color: theme.textSecondary,
+  },
+  chartFooterValue: {
+    fontSize: Typography.lg,
+    fontWeight: Typography.bold,
+    color: theme.primary,
+  },
+  donutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+  },
+  donutLegendWrap: {
+    flex: 1,
+    marginLeft: Spacing.lg,
+  },
+  
   // Section
   section: { 
     marginTop: Spacing.md 
@@ -422,6 +559,48 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontSize: Typography.sm, 
     color: theme.primary, 
     fontWeight: Typography.semibold 
+  },
+  
+  // Product Row
+  productRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.card,
+    padding: Spacing.md,
+    borderRadius: Radius.lg,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.cardBorder,
+  },
+  productRank: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  productRankText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+  },
+  productInfo: {
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+  productName: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: theme.text,
+  },
+  productCount: {
+    fontSize: Typography.xs,
+    color: theme.textSecondary,
+    marginTop: 2,
+  },
+  productTotal: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+    color: theme.text,
   },
   
   // Store Row
