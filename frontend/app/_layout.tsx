@@ -1,9 +1,10 @@
 import { Stack } from 'expo-router';
-import { useEffect, useState, createContext, useContext } from 'react';
+import React, { useEffect, useState, createContext, useContext } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { translations, Language, TranslationKey } from '../src/i18n';
 import { api } from '../src/api';
+import { ThemeProvider, useTheme } from '../src/ThemeContext';
 
 type I18nContextType = {
   lang: Language;
@@ -19,8 +20,9 @@ export const I18nContext = createContext<I18nContextType>({
 
 export const useI18n = () => useContext(I18nContext);
 
-export default function RootLayout() {
+function AppContent() {
   const [lang, setLangState] = useState<Language>('el');
+  const { isDark } = useTheme();
 
   useEffect(() => {
     (async () => {
@@ -40,12 +42,21 @@ export default function RootLayout() {
 
   return (
     <I18nContext.Provider value={{ lang, setLang, t }}>
-      <StatusBar style="dark" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="receipt/[id]" options={{ headerShown: false, presentation: 'card' }} />
         <Stack.Screen name="scanner" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="webview-import" options={{ headerShown: false, presentation: 'card' }} />
       </Stack>
     </I18nContext.Provider>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }
