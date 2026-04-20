@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,6 +9,9 @@ import re
 import uuid
 import aiohttp
 import math
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -1430,6 +1434,45 @@ async def request_store_review(
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.store_review_requests.insert_one(review_request)
+    
+    # Send email notification to admin (non-blocking)
+    try:
+        email_body = f"""
+        <h2 style="color: #0D9488;">Νέα Αίτηση Καταστήματος</h2>
+        <p>Υποβλήθηκε νέα αίτηση για προσθήκη καταστήματος:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; width: 120px;">Κατάστημα:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">{store_name or 'Δεν δόθηκε'}</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">ΑΦΜ:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">{vat}</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">URL Απόδειξης:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <a href="{receipt_url}" style="color: #0D9488;">{receipt_url or 'Δεν δόθηκε'}</a>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Device ID:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-size: 12px; color: #666;">{device_id}</td>
+            </tr>
+        </table>
+        <p style="margin-top: 20px;">
+            <a href="/admin" style="display: inline-block; padding: 12px 24px; background: #0D9488; color: white; text-decoration: none; border-radius: 8px; font-weight: 500;">
+                Διαχείριση Αιτήσεων
+            </a>
+        </p>
+        """
+        send_admin_notification(
+            subject=f"🏪 Νέα Αίτηση Καταστήματος: {store_name or vat}",
+            body=email_body
+        )
+    except Exception as e:
+        logger.error(f"Failed to send notification email: {e}")
+    
     return {"success": True, "message": "Request submitted for review", "request_id": review_request["id"]}
 
 
@@ -1563,6 +1606,511 @@ async def get_admin_stats(admin_key: str = Query(...)):
         "approved_stores": approved_stores,
         "top_stores": [{"name": s["_id"], "count": s["count"]} for s in top_stores]
     }
+
+
+# ============ EMAIL NOTIFICATIONS ============
+
+# Email settings from environment
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "noreply@grocerytracker.app")
+
+def send_admin_notification(subject: str, body: str):
+    """Send email notification to admin. Non-blocking, logs errors."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        logger.info(f"Email notification skipped (SMTP not configured): {subject}")
+        return False
+    
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = SMTP_FROM
+        msg['To'] = ADMIN_EMAIL
+        
+        # HTML email body
+        html_body = f"""
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h1 style="color: #0D9488; margin: 0;">🛒 GroceryTracker</h1>
+                    <p style="color: #666; margin: 5px 0 0;">Admin Notification</p>
+                </div>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                {body}
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="color: #999; font-size: 12px; text-align: center;">
+                    Αυτό το email στάλθηκε αυτόματα από το GroceryTracker Admin System.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(html_body, 'html'))
+        
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+        
+        logger.info(f"Email notification sent: {subject}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+        return False
+
+
+# ============ WEB ADMIN DASHBOARD ============
+
+ADMIN_DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GroceryTracker Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            min-height: 100vh;
+            color: #e2e8f0;
+        }
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .login-box {
+            background: #1e293b;
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            border: 1px solid #334155;
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-logo h1 { color: #0d9488; font-size: 28px; }
+        .login-logo p { color: #94a3b8; font-size: 14px; margin-top: 5px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; color: #94a3b8; margin-bottom: 8px; font-size: 14px; font-weight: 500; }
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            color: #e2e8f0;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus { outline: none; border-color: #0d9488; }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .login-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(13,148,136,0.3); }
+        
+        /* Dashboard */
+        .dashboard { display: none; padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #334155;
+        }
+        .header h1 { color: #0d9488; font-size: 24px; }
+        .logout-btn {
+            padding: 10px 20px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        .stat-card .icon { font-size: 24px; margin-bottom: 10px; }
+        .stat-card .value { font-size: 32px; font-weight: 700; color: #f8fafc; }
+        .stat-card .label { color: #94a3b8; font-size: 14px; margin-top: 5px; }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .tab {
+            padding: 10px 20px;
+            background: #334155;
+            border: none;
+            border-radius: 8px;
+            color: #94a3b8;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .tab.active { background: #0d9488; color: white; }
+        .tab:hover { background: #475569; }
+        .tab.active:hover { background: #0d9488; }
+        
+        /* Reviews */
+        .reviews-list { display: flex; flex-direction: column; gap: 12px; }
+        .review-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        .review-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-approved { background: #d1fae5; color: #065f46; }
+        .status-rejected { background: #fee2e2; color: #991b1b; }
+        .review-store { font-size: 18px; font-weight: 600; color: #f8fafc; }
+        .review-vat { color: #94a3b8; font-size: 14px; margin-top: 4px; }
+        .review-date { color: #64748b; font-size: 12px; margin-top: 4px; }
+        .review-url { margin-top: 10px; }
+        .review-url a { color: #0d9488; text-decoration: none; font-size: 14px; }
+        .review-url a:hover { text-decoration: underline; }
+        .review-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .btn-approve {
+            flex: 1;
+            padding: 10px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-reject {
+            flex: 1;
+            padding: 10px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-delete {
+            padding: 10px;
+            background: #475569;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #64748b;
+        }
+        .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+        
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #94a3b8;
+        }
+        
+        /* Responsive */
+        @media (max-width: 600px) {
+            .header { flex-direction: column; gap: 16px; text-align: center; }
+            .review-actions { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-container" id="loginScreen">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>🛒 GroceryTracker</h1>
+                <p>Admin Dashboard</p>
+            </div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Κωδικός Admin</label>
+                    <input type="password" id="adminPassword" placeholder="Εισάγετε τον κωδικό..." required>
+                </div>
+                <button type="submit" class="login-btn">Σύνδεση</button>
+            </form>
+            <p id="loginError" style="color: #ef4444; text-align: center; margin-top: 16px; display: none;">Λάθος κωδικός</p>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard" id="dashboard">
+        <div class="header">
+            <h1>🛒 GroceryTracker Admin</h1>
+            <button class="logout-btn" onclick="logout()">Αποσύνδεση</button>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="icon">📱</div>
+                <div class="value" id="statDevices">-</div>
+                <div class="label">Συσκευές</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🧾</div>
+                <div class="value" id="statReceipts">-</div>
+                <div class="label">Αποδείξεις</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">📦</div>
+                <div class="value" id="statProducts">-</div>
+                <div class="label">Προϊόντα</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">⏳</div>
+                <div class="value" id="statPending">-</div>
+                <div class="label">Εκκρεμείς Αιτήσεις</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-status="pending" onclick="setFilter('pending', this)">Εκκρεμείς</button>
+            <button class="tab" data-status="approved" onclick="setFilter('approved', this)">Εγκεκριμένα</button>
+            <button class="tab" data-status="rejected" onclick="setFilter('rejected', this)">Απορριφθέντα</button>
+            <button class="tab" data-status="all" onclick="setFilter('all', this)">Όλα</button>
+        </div>
+
+        <!-- Reviews List -->
+        <div class="reviews-list" id="reviewsList">
+            <div class="loading">Φόρτωση...</div>
+        </div>
+    </div>
+
+    <script>
+        let adminKey = '';
+        let currentFilter = 'pending';
+        const API_BASE = '/api';
+
+        // Login
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('adminPassword').value;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/stats?admin_key=${encodeURIComponent(password)}`);
+                if (res.status === 403) {
+                    document.getElementById('loginError').style.display = 'block';
+                    return;
+                }
+                adminKey = password;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                loadDashboard();
+            } catch (err) {
+                document.getElementById('loginError').style.display = 'block';
+            }
+        });
+
+        function logout() {
+            adminKey = '';
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('adminPassword').value = '';
+            document.getElementById('loginError').style.display = 'none';
+        }
+
+        async function loadDashboard() {
+            await Promise.all([loadStats(), loadReviews()]);
+        }
+
+        async function loadStats() {
+            try {
+                const res = await fetch(`${API_BASE}/admin/stats?admin_key=${encodeURIComponent(adminKey)}`);
+                const data = await res.json();
+                document.getElementById('statDevices').textContent = data.total_devices;
+                document.getElementById('statReceipts').textContent = data.total_receipts;
+                document.getElementById('statProducts').textContent = data.total_products;
+                document.getElementById('statPending').textContent = data.pending_reviews;
+            } catch (err) {
+                console.error('Failed to load stats:', err);
+            }
+        }
+
+        async function loadReviews() {
+            const container = document.getElementById('reviewsList');
+            container.innerHTML = '<div class="loading">Φόρτωση...</div>';
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/store-reviews?admin_key=${encodeURIComponent(adminKey)}&status=${currentFilter}`);
+                const data = await res.json();
+                
+                if (data.reviews.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="icon">✅</div>
+                            <p>Δεν υπάρχουν αιτήσεις</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = data.reviews.map(review => `
+                    <div class="review-card" id="review-${review.id}">
+                        <div class="review-header">
+                            <div>
+                                <div class="review-store">${review.store_name || 'Άγνωστο Κατάστημα'}</div>
+                                <div class="review-vat">ΑΦΜ: ${review.vat}</div>
+                                <div class="review-date">${new Date(review.created_at).toLocaleDateString('el-GR', { 
+                                    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                                })}</div>
+                            </div>
+                            <span class="status-badge status-${review.status}">
+                                ${review.status === 'pending' ? 'Εκκρεμεί' : 
+                                  review.status === 'approved' ? 'Εγκρίθηκε' : 'Απορρίφθηκε'}
+                            </span>
+                        </div>
+                        ${review.receipt_url ? `
+                            <div class="review-url">
+                                <a href="${review.receipt_url}" target="_blank">🔗 Άνοιγμα απόδειξης</a>
+                            </div>
+                        ` : ''}
+                        ${review.status === 'pending' ? `
+                            <div class="review-actions">
+                                <button class="btn-approve" onclick="approveReview('${review.id}', '${(review.store_name || '').replace(/'/g, "\\'")}')">✅ Έγκριση</button>
+                                <button class="btn-reject" onclick="rejectReview('${review.id}')">❌ Απόρριψη</button>
+                                <button class="btn-delete" onclick="deleteReview('${review.id}')">🗑️</button>
+                            </div>
+                        ` : `
+                            <div class="review-actions">
+                                <button class="btn-delete" onclick="deleteReview('${review.id}')">🗑️ Διαγραφή</button>
+                            </div>
+                        `}
+                    </div>
+                `).join('');
+            } catch (err) {
+                container.innerHTML = '<div class="empty-state"><p>Σφάλμα φόρτωσης</p></div>';
+            }
+        }
+
+        function setFilter(status, btn) {
+            currentFilter = status;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            loadReviews();
+        }
+
+        async function approveReview(id, storeName) {
+            if (!confirm(`Θέλετε να εγκρίνετε το κατάστημα "${storeName}";`)) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/store-reviews/${id}/approve?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    alert('Το κατάστημα εγκρίθηκε!');
+                    loadDashboard();
+                }
+            } catch (err) {
+                alert('Σφάλμα κατά την έγκριση');
+            }
+        }
+
+        async function rejectReview(id) {
+            if (!confirm('Θέλετε να απορρίψετε αυτήν την αίτηση;')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/store-reviews/${id}/reject?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'Rejected by admin' })
+                });
+                if (res.ok) {
+                    alert('Η αίτηση απορρίφθηκε');
+                    loadDashboard();
+                }
+            } catch (err) {
+                alert('Σφάλμα κατά την απόρριψη');
+            }
+        }
+
+        async function deleteReview(id) {
+            if (!confirm('Θέλετε να διαγράψετε αυτήν την αίτηση;')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/store-reviews/${id}?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    document.getElementById(`review-${id}`)?.remove();
+                    loadStats();
+                }
+            } catch (err) {
+                alert('Σφάλμα κατά τη διαγραφή');
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serve the Web Admin Dashboard."""
+    return ADMIN_DASHBOARD_HTML
 
 
 app.include_router(api_router)
