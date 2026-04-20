@@ -844,7 +844,7 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
 
 @api_router.get("/")
 async def root():
-    return {"message": "GroceryTracker API", "version": "1.0.0"}
+    return {"message": "apodixxi API", "version": "1.0.0"}
 
 @api_router.post("/devices/register")
 async def register_device(input: DeviceRegister):
@@ -1636,14 +1636,14 @@ def send_admin_notification(subject: str, body: str):
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px;">
             <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                 <div style="text-align: center; margin-bottom: 20px;">
-                    <h1 style="color: #0D9488; margin: 0;">🛒 GroceryTracker</h1>
+                    <h1 style="color: #0D9488; margin: 0;">🧾 apodixxi</h1>
                     <p style="color: #666; margin: 5px 0 0;">Admin Notification</p>
                 </div>
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                 {body}
                 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
                 <p style="color: #999; font-size: 12px; text-align: center;">
-                    Αυτό το email στάλθηκε αυτόματα από το GroceryTracker Admin System.
+                    Αυτό το email στάλθηκε αυτόματα από το apodixxi Admin System.
                 </p>
             </div>
         </body>
@@ -1673,7 +1673,7 @@ ADMIN_DASHBOARD_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GroceryTracker Admin</title>
+    <title>apodixxi Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1881,7 +1881,7 @@ ADMIN_DASHBOARD_HTML = """
     <div class="login-container" id="loginScreen">
         <div class="login-box">
             <div class="login-logo">
-                <h1>🛒 GroceryTracker</h1>
+                <h1>🧾 apodixxi</h1>
                 <p>Admin Dashboard</p>
             </div>
             <form id="loginForm">
@@ -1898,7 +1898,7 @@ ADMIN_DASHBOARD_HTML = """
     <!-- Dashboard -->
     <div class="dashboard" id="dashboard">
         <div class="header">
-            <h1>🛒 GroceryTracker Admin</h1>
+            <h1>🧾 apodixxi Admin</h1>
             <button class="logout-btn" onclick="logout()">Αποσύνδεση</button>
         </div>
 

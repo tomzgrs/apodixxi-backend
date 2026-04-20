@@ -1,6 +1,6 @@
 export const translations = {
   el: {
-    app_name: "GroceryTracker",
+    app_name: "apodixxi",
     dashboard: "Αρχική",
     add_receipt: "Προσθήκη",
     purchases: "Αγορές",
@@ -86,7 +86,7 @@ export const translations = {
     start_adding: "Ξεκινήστε προσθέτοντας αποδείξεις",
   },
   en: {
-    app_name: "GroceryTracker",
+    app_name: "apodixxi",
     dashboard: "Home",
     add_receipt: "Add",
     purchases: "Purchases",

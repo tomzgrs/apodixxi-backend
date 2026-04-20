@@ -1,7 +1,7 @@
-# Test Credentials for GroceryTracker
+# Test Credentials for apodixxi
 
 ## Admin Dashboard
-- **URL:** `/admin` (Web Dashboard - accessible via browser)
+- **URL:** `/api/admin-panel` (Web Dashboard - accessible via browser)
 - **Password:** `admin2024!`
 
 ## Email Notifications

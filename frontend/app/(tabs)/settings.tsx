@@ -329,7 +329,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>{t('about')}</Text>
           <View style={styles.aboutCard}>
             <Ionicons name="cart" size={36} color={theme.primary} />
-            <Text style={styles.aboutAppName}>GroceryTracker</Text>
+            <Text style={styles.aboutAppName}>apodixxi</Text>
             <Text style={styles.aboutVersion}>{t('version')} 1.0.0</Text>
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>{t('device_id')}:</Text>
