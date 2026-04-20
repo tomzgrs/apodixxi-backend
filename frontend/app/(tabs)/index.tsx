@@ -10,6 +10,7 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
 import { BarChart, DonutChart, DonutLegend, TrendIndicator } from '../../src/components/Charts';
+import { Recommendations } from '../../src/components/Recommendations';
 
 export default function DashboardScreen() {
   const { t, lang } = useContext(I18nContext);
@@ -21,9 +22,12 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [distributionMode, setDistributionMode] = useState<'total' | 'month'>('total');
   const [showDistributionDropdown, setShowDistributionDropdown] = useState(false);
+  const [deviceId, setDeviceId] = useState('');
 
   const loadData = useCallback(async () => {
     try {
+      const id = await api.getDeviceId();
+      setDeviceId(id);
       const [statsData, analyticsData] = await Promise.all([
         api.getStats(),
         api.getAnalytics(6)
@@ -192,6 +196,20 @@ export default function DashboardScreen() {
                 <Text style={styles.quickActionText}>Αναζήτηση</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Recommendations */}
+            {deviceId && (
+              <Recommendations 
+                deviceId={deviceId} 
+                location="dashboard"
+                limit={5}
+                onPress={(rec) => {
+                  if (rec.store_name) {
+                    router.push('/(tabs)/compare');
+                  }
+                }}
+              />
+            )}
 
             {/* Monthly Spending Chart */}
             {analytics && analytics.monthly_spending && analytics.monthly_spending.length > 0 && (

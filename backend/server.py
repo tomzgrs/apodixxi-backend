@@ -1913,6 +1913,325 @@ async def check_export_access(user: dict = Depends(get_current_user)):
 
 
 
+# ============ RECOMMENDATIONS SYSTEM ============
+
+class PromotionCreate(BaseModel):
+    title: str
+    description: str = ""
+    product_name: str = ""
+    price: Optional[float] = None
+    original_price: Optional[float] = None
+    store_name: str = ""
+    store_vat: str = ""
+    image_url: str = ""
+    barcode_code: str = ""
+    barcode_image_url: str = ""
+    target_categories: List[str] = []
+    target_stores: List[str] = []
+    target_all_users: bool = True
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    priority: int = 0  # Higher = shown first
+
+
+@api_router.get("/recommendations")
+async def get_recommendations(
+    device_id: str = Query(...),
+    limit: int = Query(5, ge=1, le=20),
+    location: str = Query("dashboard")  # dashboard, after_save, compare
+):
+    """Get personalized recommendations for a user."""
+    recommendations = []
+    
+    # 1. Get active admin promotions
+    now = datetime.now(timezone.utc).isoformat()
+    promotions = await db.promotions.find({
+        "is_active": True,
+        "$or": [
+            {"start_date": None},
+            {"start_date": {"$lte": now}}
+        ]
+    }).sort("priority", -1).limit(limit).to_list(limit)
+    
+    for promo in promotions:
+        # Check end date
+        if promo.get("end_date") and promo["end_date"] < now:
+            continue
+        
+        recommendations.append({
+            "id": promo["_id"],
+            "type": "promotion",
+            "title": promo.get("title", ""),
+            "description": promo.get("description", ""),
+            "product_name": promo.get("product_name", ""),
+            "price": promo.get("price"),
+            "original_price": promo.get("original_price"),
+            "store_name": promo.get("store_name", ""),
+            "image_url": promo.get("image_url", ""),
+            "barcode_code": promo.get("barcode_code", ""),
+            "barcode_image_url": promo.get("barcode_image_url", ""),
+            "is_sponsored": True
+        })
+    
+    # 2. Generate automatic recommendations based on purchase history
+    if len(recommendations) < limit:
+        # Get user's frequent products
+        pipeline = [
+            {"$match": {"device_id": device_id}},
+            {"$unwind": "$items"},
+            {"$group": {
+                "_id": {"$toUpper": "$items.description"},
+                "count": {"$sum": 1},
+                "avg_price": {"$avg": "$items.unit_price"},
+                "last_store": {"$last": "$store_name"},
+                "last_price": {"$last": "$items.unit_price"}
+            }},
+            {"$match": {"count": {"$gte": 2}}},  # Products bought at least twice
+            {"$sort": {"count": -1}},
+            {"$limit": 10}
+        ]
+        frequent_products = await db.receipts.aggregate(pipeline).to_list(10)
+        
+        # Find better prices for frequent products
+        for product in frequent_products:
+            if len(recommendations) >= limit:
+                break
+            
+            product_name = product["_id"]
+            last_price = product.get("last_price", 0)
+            last_store = product.get("last_store", "")
+            
+            # Search for this product in other receipts with lower price
+            better_price = await db.receipts.find_one({
+                "items.description": {"$regex": product_name[:20], "$options": "i"},
+                "store_name": {"$ne": last_store}
+            }, sort=[("items.unit_price", 1)])
+            
+            if better_price:
+                for item in better_price.get("items", []):
+                    if product_name[:15].upper() in item.get("description", "").upper():
+                        item_price = item.get("unit_price", 0)
+                        if item_price and item_price < last_price * 0.95:  # At least 5% cheaper
+                            savings = round(last_price - item_price, 2)
+                            recommendations.append({
+                                "id": f"auto_{product_name[:10]}",
+                                "type": "price_alert",
+                                "title": f"Εξοικονόμηση €{savings}!",
+                                "description": f"Το {product_name[:30]} είναι φθηνότερο στο {better_price.get('store_name', '')}",
+                                "product_name": product_name,
+                                "price": item_price,
+                                "original_price": last_price,
+                                "store_name": better_price.get("store_name", ""),
+                                "is_sponsored": False
+                            })
+                            break
+    
+    # 3. Add store-based recommendations
+    if len(recommendations) < limit and location == "dashboard":
+        # Get user's most visited store
+        store_pipeline = [
+            {"$match": {"device_id": device_id}},
+            {"$group": {"_id": "$store_name", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 1}
+        ]
+        top_store = await db.receipts.aggregate(store_pipeline).to_list(1)
+        
+        if top_store:
+            store_name = top_store[0]["_id"]
+            visit_count = top_store[0]["count"]
+            
+            recommendations.append({
+                "id": f"store_{store_name[:10]}",
+                "type": "insight",
+                "title": f"Τακτικός πελάτης {store_name}",
+                "description": f"Έχετε {visit_count} επισκέψεις. Δείτε τις τελευταίες προσφορές!",
+                "store_name": store_name,
+                "is_sponsored": False
+            })
+    
+    return {
+        "recommendations": recommendations[:limit],
+        "total": len(recommendations)
+    }
+
+
+@api_router.get("/recommendations/after-save")
+async def get_after_save_recommendations(
+    device_id: str = Query(...),
+    receipt_id: str = Query(...),
+    limit: int = Query(3)
+):
+    """Get recommendations after saving a receipt."""
+    recommendations = []
+    
+    # Get the saved receipt
+    receipt = await db.receipts.find_one({"id": receipt_id})
+    if not receipt:
+        return {"recommendations": [], "total": 0}
+    
+    store_name = receipt.get("store_name", "")
+    items = receipt.get("items", [])
+    
+    # Find items that could be cheaper elsewhere
+    for item in items[:5]:  # Check first 5 items
+        item_desc = item.get("description", "")
+        item_price = item.get("unit_price", 0)
+        
+        if not item_desc or not item_price:
+            continue
+        
+        # Search for cheaper alternatives
+        search_term = item_desc[:20].upper()
+        
+        pipeline = [
+            {"$unwind": "$items"},
+            {"$match": {
+                "store_name": {"$ne": store_name},
+                "items.description": {"$regex": search_term, "$options": "i"},
+                "items.unit_price": {"$lt": item_price * 0.9}  # At least 10% cheaper
+            }},
+            {"$sort": {"items.unit_price": 1}},
+            {"$limit": 1}
+        ]
+        
+        cheaper = await db.receipts.aggregate(pipeline).to_list(1)
+        
+        if cheaper and len(recommendations) < limit:
+            cheaper_item = cheaper[0]
+            cheaper_price = cheaper_item["items"]["unit_price"]
+            savings = round(item_price - cheaper_price, 2)
+            
+            recommendations.append({
+                "id": f"save_{item_desc[:10]}",
+                "type": "price_comparison",
+                "title": f"Ήξερες ότι...",
+                "description": f"Το \"{item_desc[:25]}\" είναι €{savings} φθηνότερο στο {cheaper_item.get('store_name', '')}",
+                "product_name": item_desc,
+                "price": cheaper_price,
+                "original_price": item_price,
+                "store_name": cheaper_item.get("store_name", ""),
+                "savings": savings,
+                "is_sponsored": False
+            })
+    
+    return {
+        "recommendations": recommendations,
+        "total": len(recommendations)
+    }
+
+
+# ============ ADMIN PROMOTIONS MANAGEMENT ============
+
+@api_router.post("/admin/promotions")
+async def create_promotion(
+    promo: PromotionCreate,
+    admin_key: str = Query(...)
+):
+    """Create a new promotion (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    promotion = {
+        "_id": str(uuid.uuid4()),
+        "title": promo.title,
+        "description": promo.description,
+        "product_name": promo.product_name,
+        "price": promo.price,
+        "original_price": promo.original_price,
+        "store_name": promo.store_name,
+        "store_vat": promo.store_vat,
+        "image_url": promo.image_url,
+        "barcode_code": promo.barcode_code,
+        "barcode_image_url": promo.barcode_image_url,
+        "target_categories": promo.target_categories,
+        "target_stores": promo.target_stores,
+        "target_all_users": promo.target_all_users,
+        "start_date": promo.start_date,
+        "end_date": promo.end_date,
+        "priority": promo.priority,
+        "is_active": True,
+        "views_count": 0,
+        "clicks_count": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.promotions.insert_one(promotion)
+    
+    return {"success": True, "promotion": promotion}
+
+
+@api_router.get("/admin/promotions")
+async def list_promotions(admin_key: str = Query(...)):
+    """List all promotions (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    promotions = await db.promotions.find().sort("created_at", -1).to_list(100)
+    return {"promotions": promotions}
+
+
+@api_router.patch("/admin/promotions/{promo_id}")
+async def update_promotion(
+    promo_id: str,
+    updates: dict = Body(...),
+    admin_key: str = Query(...)
+):
+    """Update a promotion (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    # Remove _id from updates if present
+    updates.pop("_id", None)
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    result = await db.promotions.update_one(
+        {"_id": promo_id},
+        {"$set": updates}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Promotion not found")
+    
+    return {"success": True}
+
+
+@api_router.delete("/admin/promotions/{promo_id}")
+async def delete_promotion(promo_id: str, admin_key: str = Query(...)):
+    """Delete a promotion (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    result = await db.promotions.delete_one({"_id": promo_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Promotion not found")
+    
+    return {"success": True}
+
+
+@api_router.post("/recommendations/{rec_id}/click")
+async def track_recommendation_click(rec_id: str):
+    """Track when a user clicks on a recommendation."""
+    await db.promotions.update_one(
+        {"_id": rec_id},
+        {"$inc": {"clicks_count": 1}}
+    )
+    return {"success": True}
+
+
+@api_router.post("/recommendations/{rec_id}/view")
+async def track_recommendation_view(rec_id: str):
+    """Track when a recommendation is viewed."""
+    await db.promotions.update_one(
+        {"_id": rec_id},
+        {"$inc": {"views_count": 1}}
+    )
+    return {"success": True}
+
+
+
+
 @api_router.post("/devices/register")
 async def register_device(input: DeviceRegister):
     existing = await db.devices.find_one({"device_id": input.device_id}, {"_id": 0})
@@ -3206,8 +3525,9 @@ ADMIN_DASHBOARD_HTML = """
 
         <!-- Main Navigation -->
         <div class="main-tabs">
-            <button class="main-tab active" onclick="showSection('reviews', this)">🏪 Αιτήσεις Καταστημάτων</button>
-            <button class="main-tab" onclick="showSection('promo', this)">🎫 Promo Codes</button>
+            <button class="main-tab active" onclick="showSection('reviews', this)">🏪 Αιτήσεις</button>
+            <button class="main-tab" onclick="showSection('promo', this)">🎫 Promo</button>
+            <button class="main-tab" onclick="showSection('promotions', this)">📢 Προσφορές</button>
             <button class="main-tab" onclick="showSection('users', this)">👥 Χρήστες</button>
         </div>
 
@@ -3281,6 +3601,79 @@ ADMIN_DASHBOARD_HTML = """
                 </tbody>
             </table>
         </div>
+
+        <!-- Promotions Section -->
+        <div class="section" id="promotionsSection">
+            <div class="promo-form">
+                <h3>📢 Δημιουργία Νέας Προσφοράς/Πρότασης</h3>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Τίτλος *</label>
+                        <input type="text" id="promoTitle" placeholder="π.χ. Προσφορά Εβδομάδας">
+                    </div>
+                    <div class="form-field">
+                        <label>Προϊόν</label>
+                        <input type="text" id="promoProduct" placeholder="π.χ. Coca-Cola 6x330ml">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Τιμή (€)</label>
+                        <input type="number" id="promoPrice" step="0.01" placeholder="3.99">
+                    </div>
+                    <div class="form-field">
+                        <label>Αρχική Τιμή (€)</label>
+                        <input type="number" id="promoOriginalPrice" step="0.01" placeholder="5.49">
+                    </div>
+                    <div class="form-field">
+                        <label>Κατάστημα</label>
+                        <input type="text" id="promoStore" placeholder="π.χ. ΣΚΛΑΒΕΝΙΤΗΣ">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field" style="flex: 2;">
+                        <label>Περιγραφή</label>
+                        <input type="text" id="promoDesc" placeholder="Περιγραφή της προσφοράς...">
+                    </div>
+                    <div class="form-field">
+                        <label>Barcode (προαιρετικό)</label>
+                        <input type="text" id="promoBarcode" placeholder="5449000000996">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Ημ/νία Έναρξης</label>
+                        <input type="date" id="promoStartDate">
+                    </div>
+                    <div class="form-field">
+                        <label>Ημ/νία Λήξης</label>
+                        <input type="date" id="promoEndDate">
+                    </div>
+                    <div class="form-field">
+                        <label>Προτεραιότητα</label>
+                        <input type="number" id="promoPriority" value="0" min="0">
+                    </div>
+                </div>
+                <button class="btn-create" onclick="createPromotion()">📢 Δημιουργία Προσφοράς</button>
+            </div>
+            
+            <table class="promo-table">
+                <thead>
+                    <tr>
+                        <th>Τίτλος</th>
+                        <th>Προϊόν</th>
+                        <th>Τιμή</th>
+                        <th>Κατάστημα</th>
+                        <th>Views/Clicks</th>
+                        <th>Κατάσταση</th>
+                        <th>Ενέργειες</th>
+                    </tr>
+                </thead>
+                <tbody id="promotionsTableBody">
+                    <tr><td colspan="7" class="loading">Φόρτωση...</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <script>
@@ -3327,6 +3720,7 @@ ADMIN_DASHBOARD_HTML = """
             // Load section data
             if (section === 'promo') loadPromoCodes();
             if (section === 'users') loadUsers();
+            if (section === 'promotions') loadPromotions();
         }
 
         async function loadDashboard() {
@@ -3629,6 +4023,124 @@ ADMIN_DASHBOARD_HTML = """
                 }
             } catch (err) {
                 alert('Σφάλμα υποβάθμισης');
+            }
+        }
+
+        // ============ PROMOTIONS ============
+
+        async function loadPromotions() {
+            const tbody = document.getElementById('promotionsTableBody');
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">Φόρτωση...</td></tr>';
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/promotions?admin_key=${encodeURIComponent(adminKey)}`);
+                const data = await res.json();
+                
+                if (!data.promotions || data.promotions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:40px;">Δεν υπάρχουν προσφορές</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.promotions.map(promo => `
+                    <tr>
+                        <td><strong>${promo.title}</strong></td>
+                        <td>${promo.product_name || '-'}</td>
+                        <td>
+                            ${promo.price ? `<span style="color:#0d9488; font-weight:bold;">€${promo.price}</span>` : '-'}
+                            ${promo.original_price ? `<span style="text-decoration:line-through; color:#94a3b8; margin-left:4px;">€${promo.original_price}</span>` : ''}
+                        </td>
+                        <td>${promo.store_name || '-'}</td>
+                        <td>${promo.views_count || 0} / ${promo.clicks_count || 0}</td>
+                        <td><span class="promo-active ${promo.is_active ? 'yes' : 'no'}">${promo.is_active ? 'Ενεργό' : 'Ανενεργό'}</span></td>
+                        <td>
+                            <button class="btn-toggle" onclick="togglePromotion('${promo._id}', ${!promo.is_active})">${promo.is_active ? '⏸️' : '▶️'}</button>
+                            <button class="btn-delete-promo" onclick="deletePromotion('${promo._id}')">🗑️</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#ef4444;">Σφάλμα φόρτωσης</td></tr>';
+            }
+        }
+
+        async function createPromotion() {
+            const title = document.getElementById('promoTitle').value.trim();
+            const product_name = document.getElementById('promoProduct').value.trim();
+            const price = parseFloat(document.getElementById('promoPrice').value) || null;
+            const original_price = parseFloat(document.getElementById('promoOriginalPrice').value) || null;
+            const store_name = document.getElementById('promoStore').value.trim();
+            const description = document.getElementById('promoDesc').value.trim();
+            const barcode_code = document.getElementById('promoBarcode').value.trim();
+            const start_date = document.getElementById('promoStartDate').value || null;
+            const end_date = document.getElementById('promoEndDate').value || null;
+            const priority = parseInt(document.getElementById('promoPriority').value) || 0;
+            
+            if (!title) {
+                alert('Παρακαλώ εισάγετε τίτλο');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/admin/promotions?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        title, product_name, price, original_price, store_name, 
+                        description, barcode_code, start_date, end_date, priority,
+                        target_all_users: true
+                    })
+                });
+                
+                if (res.ok) {
+                    alert(`Η προσφορά "${title}" δημιουργήθηκε!`);
+                    // Clear form
+                    document.getElementById('promoTitle').value = '';
+                    document.getElementById('promoProduct').value = '';
+                    document.getElementById('promoPrice').value = '';
+                    document.getElementById('promoOriginalPrice').value = '';
+                    document.getElementById('promoStore').value = '';
+                    document.getElementById('promoDesc').value = '';
+                    document.getElementById('promoBarcode').value = '';
+                    document.getElementById('promoStartDate').value = '';
+                    document.getElementById('promoEndDate').value = '';
+                    document.getElementById('promoPriority').value = '0';
+                    loadPromotions();
+                } else {
+                    const err = await res.json();
+                    alert(err.detail || 'Σφάλμα δημιουργίας');
+                }
+            } catch (err) {
+                alert('Σφάλμα δημιουργίας προσφοράς');
+            }
+        }
+
+        async function togglePromotion(promoId, newState) {
+            try {
+                const res = await fetch(`${API_BASE}/admin/promotions/${promoId}?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: newState })
+                });
+                if (res.ok) {
+                    loadPromotions();
+                }
+            } catch (err) {
+                alert('Σφάλμα ενημέρωσης');
+            }
+        }
+
+        async function deletePromotion(promoId) {
+            if (!confirm('Θέλετε να διαγράψετε αυτήν την προσφορά;')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/promotions/${promoId}?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    loadPromotions();
+                }
+            } catch (err) {
+                alert('Σφάλμα διαγραφής');
             }
         }
     </script>
