@@ -1628,6 +1628,84 @@ async def delete_promo_code(code: str, admin_key: str = Query(...)):
     
     return {"success": True, "message": "Promo code deleted"}
 
+
+@api_router.patch("/admin/promo-codes/{code}/toggle")
+async def toggle_promo_code(code: str, is_active: bool = Query(...), admin_key: str = Query(...)):
+    """Toggle a promo code active/inactive (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    result = await db.promo_codes.update_one(
+        {"code": code.upper()},
+        {"$set": {"is_active": is_active}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Promo code not found")
+    
+    return {"success": True, "is_active": is_active}
+
+
+@api_router.get("/admin/users")
+async def list_users(admin_key: str = Query(...), skip: int = 0, limit: int = 100):
+    """List all registered users (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    users = await db.users.find().sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    return {"users": users}
+
+
+@api_router.post("/admin/users/{user_id}/upgrade")
+async def upgrade_user(user_id: str, days: int = Body(..., embed=True), admin_key: str = Query(...)):
+    """Upgrade a user to premium (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    user = await db.users.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Calculate new expiration
+    current_expires = user.get("subscription_expires_at")
+    if current_expires:
+        base_date = datetime.fromisoformat(current_expires.replace("Z", "+00:00"))
+        if base_date < datetime.now(timezone.utc):
+            base_date = datetime.now(timezone.utc)
+    else:
+        base_date = datetime.now(timezone.utc)
+    
+    new_expires = base_date + timedelta(days=days)
+    
+    await db.users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "account_type": "paid",
+            "subscription_expires_at": new_expires.isoformat()
+        }}
+    )
+    
+    return {"success": True, "subscription_expires_at": new_expires.isoformat()}
+
+
+@api_router.post("/admin/users/{user_id}/downgrade")
+async def downgrade_user(user_id: str, admin_key: str = Query(...)):
+    """Downgrade a user to free (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    result = await db.users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "account_type": "free",
+            "subscription_expires_at": None
+        }}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"success": True}
+
 @api_router.post("/devices/register")
 async def register_device(input: DeviceRegister):
     existing = await db.devices.find_one({"device_id": input.device_id}, {"_id": 0})
@@ -2371,6 +2449,9 @@ async def get_admin_stats(admin_key: str = Query(...)):
     total_products = await db.products.count_documents({})
     pending_reviews = await db.store_review_requests.count_documents({"status": "pending"})
     approved_stores = await db.approved_stores.count_documents({})
+    total_users = await db.users.count_documents({})
+    total_promo_codes = await db.promo_codes.count_documents({})
+    paid_users = await db.users.count_documents({"account_type": "paid"})
     
     # Get top stores by receipt count
     pipeline = [
@@ -2386,6 +2467,9 @@ async def get_admin_stats(admin_key: str = Query(...)):
         "total_products": total_products,
         "pending_reviews": pending_reviews,
         "approved_stores": approved_stores,
+        "total_users": total_users,
+        "total_promo_codes": total_promo_codes,
+        "paid_users": paid_users,
         "top_stores": [{"name": s["_id"], "count": s["count"]} for s in top_stores]
     }
 
@@ -2656,6 +2740,201 @@ ADMIN_DASHBOARD_HTML = """
             .header { flex-direction: column; gap: 16px; text-align: center; }
             .review-actions { flex-direction: column; }
         }
+        
+        /* Main Navigation Tabs */
+        .main-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 16px;
+        }
+        .main-tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: #94a3b8;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 15px;
+            transition: all 0.2s;
+        }
+        .main-tab.active { background: #0d9488; color: white; }
+        .main-tab:hover:not(.active) { background: #334155; }
+        
+        /* Section containers */
+        .section { display: none; }
+        .section.active { display: block; }
+        
+        /* Promo Codes */
+        .promo-form {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #334155;
+            margin-bottom: 24px;
+        }
+        .promo-form h3 {
+            color: #f8fafc;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .form-field {
+            display: flex;
+            flex-direction: column;
+        }
+        .form-field label {
+            color: #94a3b8;
+            font-size: 13px;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        .form-field input {
+            padding: 12px;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+        .form-field input:focus {
+            outline: none;
+            border-color: #0d9488;
+        }
+        .btn-create {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        .btn-create:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(13,148,136,0.3);
+        }
+        
+        /* Promo table */
+        .promo-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }
+        .promo-table th {
+            background: #0f172a;
+            color: #94a3b8;
+            font-weight: 600;
+            font-size: 13px;
+            text-align: left;
+            padding: 14px 16px;
+            border-bottom: 1px solid #334155;
+        }
+        .promo-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid #334155;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+        .promo-table tr:last-child td {
+            border-bottom: none;
+        }
+        .promo-table tr:hover {
+            background: rgba(13,148,136,0.05);
+        }
+        .promo-code {
+            font-family: monospace;
+            background: #0f172a;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+            color: #0d9488;
+        }
+        .promo-active {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .promo-active.yes { background: #d1fae5; color: #065f46; }
+        .promo-active.no { background: #fee2e2; color: #991b1b; }
+        .btn-delete-promo {
+            padding: 6px 12px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-toggle {
+            padding: 6px 12px;
+            background: #475569;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 8px;
+        }
+        
+        /* Users section */
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }
+        .users-table th {
+            background: #0f172a;
+            color: #94a3b8;
+            font-weight: 600;
+            font-size: 13px;
+            text-align: left;
+            padding: 14px 16px;
+            border-bottom: 1px solid #334155;
+        }
+        .users-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid #334155;
+            color: #e2e8f0;
+            font-size: 14px;
+        }
+        .users-table tr:last-child td { border-bottom: none; }
+        .users-table tr:hover { background: rgba(13,148,136,0.05); }
+        .user-type {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .user-type.free { background: #334155; color: #94a3b8; }
+        .user-type.paid { background: #fef3c7; color: #92400e; }
+        .btn-upgrade {
+            padding: 6px 12px;
+            background: #0d9488;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -2702,29 +2981,105 @@ ADMIN_DASHBOARD_HTML = """
                 <div class="label">Προϊόντα</div>
             </div>
             <div class="stat-card">
+                <div class="icon">👥</div>
+                <div class="value" id="statUsers">-</div>
+                <div class="label">Χρήστες</div>
+            </div>
+            <div class="stat-card">
                 <div class="icon">⏳</div>
                 <div class="value" id="statPending">-</div>
-                <div class="label">Εκκρεμείς Αιτήσεις</div>
+                <div class="label">Εκκρεμείς</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🎫</div>
+                <div class="value" id="statPromoCodes">-</div>
+                <div class="label">Promo Codes</div>
             </div>
         </div>
 
-        <!-- Tabs -->
-        <div class="tabs">
-            <button class="tab active" data-status="pending" onclick="setFilter('pending', this)">Εκκρεμείς</button>
-            <button class="tab" data-status="approved" onclick="setFilter('approved', this)">Εγκεκριμένα</button>
-            <button class="tab" data-status="rejected" onclick="setFilter('rejected', this)">Απορριφθέντα</button>
-            <button class="tab" data-status="all" onclick="setFilter('all', this)">Όλα</button>
+        <!-- Main Navigation -->
+        <div class="main-tabs">
+            <button class="main-tab active" onclick="showSection('reviews', this)">🏪 Αιτήσεις Καταστημάτων</button>
+            <button class="main-tab" onclick="showSection('promo', this)">🎫 Promo Codes</button>
+            <button class="main-tab" onclick="showSection('users', this)">👥 Χρήστες</button>
         </div>
 
-        <!-- Reviews List -->
-        <div class="reviews-list" id="reviewsList">
-            <div class="loading">Φόρτωση...</div>
+        <!-- Reviews Section -->
+        <div class="section active" id="reviewsSection">
+            <div class="tabs">
+                <button class="tab active" data-status="pending" onclick="setFilter('pending', this)">Εκκρεμείς</button>
+                <button class="tab" data-status="approved" onclick="setFilter('approved', this)">Εγκεκριμένα</button>
+                <button class="tab" data-status="rejected" onclick="setFilter('rejected', this)">Απορριφθέντα</button>
+                <button class="tab" data-status="all" onclick="setFilter('all', this)">Όλα</button>
+            </div>
+            <div class="reviews-list" id="reviewsList">
+                <div class="loading">Φόρτωση...</div>
+            </div>
+        </div>
+
+        <!-- Promo Codes Section -->
+        <div class="section" id="promoSection">
+            <div class="promo-form">
+                <h3>➕ Δημιουργία Νέου Promo Code</h3>
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Κωδικός</label>
+                        <input type="text" id="promoCode" placeholder="π.χ. APODIXXI2025" style="text-transform: uppercase;">
+                    </div>
+                    <div class="form-field">
+                        <label>Διάρκεια (ημέρες)</label>
+                        <input type="number" id="promoDuration" value="30" min="1">
+                    </div>
+                    <div class="form-field">
+                        <label>Μέγιστες χρήσεις (κενό = απεριόριστες)</label>
+                        <input type="number" id="promoMaxUses" placeholder="π.χ. 100">
+                    </div>
+                </div>
+                <button class="btn-create" onclick="createPromoCode()">🎫 Δημιουργία Κωδικού</button>
+            </div>
+            
+            <table class="promo-table">
+                <thead>
+                    <tr>
+                        <th>Κωδικός</th>
+                        <th>Διάρκεια</th>
+                        <th>Χρήσεις</th>
+                        <th>Κατάσταση</th>
+                        <th>Ημ/νία</th>
+                        <th>Ενέργειες</th>
+                    </tr>
+                </thead>
+                <tbody id="promoTableBody">
+                    <tr><td colspan="6" class="loading">Φόρτωση...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Users Section -->
+        <div class="section" id="usersSection">
+            <table class="users-table">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Όνομα</th>
+                        <th>Τηλέφωνο</th>
+                        <th>Τύπος</th>
+                        <th>Provider</th>
+                        <th>Λήξη Premium</th>
+                        <th>Ενέργειες</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <tr><td colspan="7" class="loading">Φόρτωση...</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script>
         let adminKey = '';
         let currentFilter = 'pending';
+        let currentSection = 'reviews';
         const API_BASE = '/api';
 
         // Login
@@ -2755,18 +3110,32 @@ ADMIN_DASHBOARD_HTML = """
             document.getElementById('loginError').style.display = 'none';
         }
 
+        function showSection(section, btn) {
+            currentSection = section;
+            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.getElementById(section + 'Section').classList.add('active');
+            
+            // Load section data
+            if (section === 'promo') loadPromoCodes();
+            if (section === 'users') loadUsers();
+        }
+
         async function loadDashboard() {
-            await Promise.all([loadStats(), loadReviews()]);
+            await Promise.all([loadStats(), loadReviews(), loadPromoCodes()]);
         }
 
         async function loadStats() {
             try {
                 const res = await fetch(`${API_BASE}/admin/stats?admin_key=${encodeURIComponent(adminKey)}`);
                 const data = await res.json();
-                document.getElementById('statDevices').textContent = data.total_devices;
-                document.getElementById('statReceipts').textContent = data.total_receipts;
-                document.getElementById('statProducts').textContent = data.total_products;
-                document.getElementById('statPending').textContent = data.pending_reviews;
+                document.getElementById('statDevices').textContent = data.total_devices || 0;
+                document.getElementById('statReceipts').textContent = data.total_receipts || 0;
+                document.getElementById('statProducts').textContent = data.total_products || 0;
+                document.getElementById('statPending').textContent = data.pending_reviews || 0;
+                document.getElementById('statUsers').textContent = data.total_users || 0;
+                document.getElementById('statPromoCodes').textContent = data.total_promo_codes || 0;
             } catch (err) {
                 console.error('Failed to load stats:', err);
             }
@@ -2830,7 +3199,7 @@ ADMIN_DASHBOARD_HTML = """
 
         function setFilter(status, btn) {
             currentFilter = status;
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
             btn.classList.add('active');
             loadReviews();
         }
@@ -2882,6 +3251,177 @@ ADMIN_DASHBOARD_HTML = """
                 }
             } catch (err) {
                 alert('Σφάλμα κατά τη διαγραφή');
+            }
+        }
+
+        // ============ PROMO CODES ============
+
+        async function loadPromoCodes() {
+            const tbody = document.getElementById('promoTableBody');
+            tbody.innerHTML = '<tr><td colspan="6" class="loading">Φόρτωση...</td></tr>';
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/promo-codes?admin_key=${encodeURIComponent(adminKey)}`);
+                const data = await res.json();
+                
+                if (!data.promo_codes || data.promo_codes.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#64748b; padding:40px;">Δεν υπάρχουν promo codes</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.promo_codes.map(code => `
+                    <tr>
+                        <td><span class="promo-code">${code.code}</span></td>
+                        <td>${code.duration_days} ημέρες</td>
+                        <td>${code.used_count || 0}${code.max_uses ? ' / ' + code.max_uses : ' / ∞'}</td>
+                        <td><span class="promo-active ${code.is_active ? 'yes' : 'no'}">${code.is_active ? 'Ενεργό' : 'Ανενεργό'}</span></td>
+                        <td>${new Date(code.created_at).toLocaleDateString('el-GR')}</td>
+                        <td>
+                            <button class="btn-toggle" onclick="togglePromoCode('${code.code}', ${!code.is_active})">${code.is_active ? '⏸️' : '▶️'}</button>
+                            <button class="btn-delete-promo" onclick="deletePromoCode('${code.code}')">🗑️</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#ef4444;">Σφάλμα φόρτωσης</td></tr>';
+            }
+        }
+
+        async function createPromoCode() {
+            const code = document.getElementById('promoCode').value.trim().toUpperCase();
+            const duration = parseInt(document.getElementById('promoDuration').value) || 30;
+            const maxUses = document.getElementById('promoMaxUses').value ? parseInt(document.getElementById('promoMaxUses').value) : null;
+            
+            if (!code) {
+                alert('Παρακαλώ εισάγετε κωδικό');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/admin/promo-codes?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        code: code, 
+                        duration_days: duration, 
+                        max_uses: maxUses 
+                    })
+                });
+                
+                if (res.ok) {
+                    alert(`Promo code "${code}" δημιουργήθηκε!`);
+                    document.getElementById('promoCode').value = '';
+                    document.getElementById('promoDuration').value = '30';
+                    document.getElementById('promoMaxUses').value = '';
+                    loadPromoCodes();
+                    loadStats();
+                } else {
+                    const err = await res.json();
+                    alert(err.detail || 'Σφάλμα δημιουργίας');
+                }
+            } catch (err) {
+                alert('Σφάλμα δημιουργίας promo code');
+            }
+        }
+
+        async function togglePromoCode(code, newState) {
+            try {
+                const res = await fetch(`${API_BASE}/admin/promo-codes/${code}/toggle?admin_key=${encodeURIComponent(adminKey)}&is_active=${newState}`, {
+                    method: 'PATCH'
+                });
+                if (res.ok) {
+                    loadPromoCodes();
+                }
+            } catch (err) {
+                alert('Σφάλμα ενημέρωσης');
+            }
+        }
+
+        async function deletePromoCode(code) {
+            if (!confirm(`Θέλετε να διαγράψετε το promo code "${code}";`)) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/promo-codes/${code}?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'DELETE'
+                });
+                if (res.ok) {
+                    loadPromoCodes();
+                    loadStats();
+                }
+            } catch (err) {
+                alert('Σφάλμα διαγραφής');
+            }
+        }
+
+        // ============ USERS ============
+
+        async function loadUsers() {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">Φόρτωση...</td></tr>';
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/users?admin_key=${encodeURIComponent(adminKey)}`);
+                const data = await res.json();
+                
+                if (!data.users || data.users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:40px;">Δεν υπάρχουν χρήστες</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.users.map(user => `
+                    <tr>
+                        <td>${user.email}</td>
+                        <td>${user.name || '-'}</td>
+                        <td>${user.phone || '-'}</td>
+                        <td><span class="user-type ${user.account_type}">${user.account_type === 'paid' ? '⭐ Premium' : 'Free'}</span></td>
+                        <td>${user.auth_provider || 'email'}</td>
+                        <td>${user.subscription_expires_at ? new Date(user.subscription_expires_at).toLocaleDateString('el-GR') : '-'}</td>
+                        <td>
+                            ${user.account_type === 'free' ? 
+                                `<button class="btn-upgrade" onclick="upgradeUser('${user._id}')">⬆️ Upgrade</button>` : 
+                                `<button class="btn-toggle" onclick="downgradeUser('${user._id}')">⬇️</button>`
+                            }
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#ef4444;">Σφάλμα φόρτωσης</td></tr>';
+            }
+        }
+
+        async function upgradeUser(userId) {
+            const days = prompt('Πόσες ημέρες Premium;', '30');
+            if (!days) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/users/${userId}/upgrade?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ days: parseInt(days) })
+                });
+                if (res.ok) {
+                    alert('Ο χρήστης αναβαθμίστηκε!');
+                    loadUsers();
+                    loadStats();
+                }
+            } catch (err) {
+                alert('Σφάλμα αναβάθμισης');
+            }
+        }
+
+        async function downgradeUser(userId) {
+            if (!confirm('Θέλετε να υποβαθμίσετε αυτόν τον χρήστη σε Free;')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/users/${userId}/downgrade?admin_key=${encodeURIComponent(adminKey)}`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    loadUsers();
+                    loadStats();
+                }
+            } catch (err) {
+                alert('Σφάλμα υποβάθμισης');
             }
         }
     </script>
