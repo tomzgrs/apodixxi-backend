@@ -1,10 +1,13 @@
 import React, { useContext, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, Image, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
+import { useAuth } from '../../src/AuthContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
@@ -12,8 +15,10 @@ import { getStoreLogo } from '../../src/storeLogos';
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
   const { theme, isDark, mode, setMode, toggleTheme } = useTheme();
+  const { user, accessToken, signOut } = useAuth();
   const [deviceId, setDeviceId] = useState('');
   const [autoBackup, setAutoBackup] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -30,16 +35,78 @@ export default function SettingsScreen() {
   };
 
   const handleExport = async () => {
-    try {
-      const data = await api.exportData();
-      Alert.alert(
-        t('success'),
-        `${t('export_data')}: ${data.total_receipts} ${t('receipts')}`,
-        [{ text: 'OK' }]
-      );
-    } catch (e: any) {
-      Alert.alert(t('error'), e.message);
+    if (!accessToken) {
+      Alert.alert('Σφάλμα', 'Παρακαλώ συνδεθείτε πρώτα');
+      return;
     }
+
+    // Check if user has export access
+    try {
+      const accessCheck = await api.checkExportAccess(accessToken);
+      
+      if (!accessCheck.can_export) {
+        Alert.alert(
+          'apodixxi+',
+          'Η εξαγωγή δεδομένων είναι διαθέσιμη μόνο για συνδρομητές apodixxi+.\n\nΑναβαθμίστε τώρα για να αποκτήσετε πρόσβαση!',
+          [
+            { text: 'Αργότερα', style: 'cancel' },
+            { text: 'Αναβάθμιση', onPress: () => Alert.alert('apodixxi+', 'Η δυνατότητα πληρωμής θα είναι σύντομα διαθέσιμη!') }
+          ]
+        );
+        return;
+      }
+
+      // User is paid - proceed with export
+      setIsExporting(true);
+      
+      const blob = await api.exportReceipts(accessToken);
+      
+      // Convert blob to base64
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const base64 = (reader.result as string).split(',')[1];
+          const filename = `apodixxi_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+          const fileUri = `${FileSystem.documentDirectory}${filename}`;
+          
+          await FileSystem.writeAsStringAsync(fileUri, base64, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(fileUri, {
+              mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              dialogTitle: 'Εξαγωγή Δεδομένων apodixxi',
+            });
+          } else {
+            Alert.alert('Επιτυχία', `Το αρχείο αποθηκεύτηκε: ${filename}`);
+          }
+        } catch (err: any) {
+          Alert.alert('Σφάλμα', 'Αποτυχία αποθήκευσης αρχείου');
+        }
+        setIsExporting(false);
+      };
+      reader.onerror = () => {
+        Alert.alert('Σφάλμα', 'Αποτυχία επεξεργασίας αρχείου');
+        setIsExporting(false);
+      };
+      reader.readAsDataURL(blob);
+      
+    } catch (e: any) {
+      setIsExporting(false);
+      Alert.alert('Σφάλμα', e.message || 'Αποτυχία εξαγωγής');
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Αποσύνδεση',
+      'Είστε σίγουροι ότι θέλετε να αποσυνδεθείτε;',
+      [
+        { text: 'Άκυρο', style: 'cancel' },
+        { text: 'Αποσύνδεση', style: 'destructive', onPress: signOut }
+      ]
+    );
   };
 
   const styles = StyleSheet.create({
@@ -178,6 +245,66 @@ export default function SettingsScreen() {
     aboutRow: { flexDirection: 'row', marginTop: Spacing.md, gap: Spacing.sm },
     aboutLabel: { fontSize: Typography.xs, color: theme.textSecondary, fontWeight: Typography.semibold },
     aboutValue: { fontSize: Typography.xs, color: theme.textMuted, flex: 1 },
+    
+    // Account card
+    accountCard: {
+      backgroundColor: theme.surface,
+      borderRadius: Radius.lg,
+      padding: Spacing.base,
+      borderWidth: 1,
+      borderColor: theme.cardBorder,
+      ...Shadows.sm,
+    },
+    accountInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: Spacing.md,
+    },
+    accountAvatar: {
+      width: 50,
+      height: 50,
+      borderRadius: 25,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    accountDetails: {
+      flex: 1,
+      marginLeft: Spacing.md,
+    },
+    accountEmail: {
+      fontSize: Typography.base,
+      fontWeight: Typography.semibold,
+      color: theme.text,
+    },
+    accountTypeRow: {
+      flexDirection: 'row',
+      marginTop: 4,
+    },
+    accountTypeBadge: {
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 2,
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    accountTypeText: {
+      fontSize: Typography.xs,
+      fontWeight: Typography.semibold,
+    },
+    logoutBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: Spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: theme.borderLight,
+    },
+    logoutText: {
+      fontSize: Typography.sm,
+      color: '#ef4444',
+      fontWeight: Typography.medium,
+      marginLeft: Spacing.xs,
+    },
   });
 
   const stores = [
@@ -200,6 +327,42 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>{t('settings')}</Text>
+
+        {/* Account Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{lang === 'el' ? 'Λογαριασμός' : 'Account'}</Text>
+          <View style={styles.accountCard}>
+            <View style={styles.accountInfo}>
+              <View style={[styles.accountAvatar, { backgroundColor: theme.primaryLight }]}>
+                <Ionicons name="person" size={28} color={theme.primary} />
+              </View>
+              <View style={styles.accountDetails}>
+                <Text style={styles.accountEmail}>{user?.email || 'user@email.com'}</Text>
+                <View style={styles.accountTypeRow}>
+                  <View style={[
+                    styles.accountTypeBadge, 
+                    { backgroundColor: user?.account_type === 'paid' ? '#fef3c7' : theme.surface }
+                  ]}>
+                    <Text style={[
+                      styles.accountTypeText,
+                      { color: user?.account_type === 'paid' ? '#92400e' : theme.textSecondary }
+                    ]}>
+                      {user?.account_type === 'paid' ? '⭐ apodixxi+' : 'Free'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.logoutBtn}
+              onPress={handleLogout}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+              <Text style={styles.logoutText}>{lang === 'el' ? 'Αποσύνδεση' : 'Logout'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* Language Section */}
         <View style={styles.section}>
@@ -286,17 +449,22 @@ export default function SettingsScreen() {
           </View>
           <TouchableOpacity
             testID="export-btn"
-            style={styles.actionBtn}
+            style={[styles.actionBtn, isExporting && { opacity: 0.6 }]}
             onPress={handleExport}
             activeOpacity={0.7}
+            disabled={isExporting}
           >
             <View style={styles.actionIconWrap}>
-              <Ionicons name="cloud-download-outline" size={22} color={theme.primary} />
+              {isExporting ? (
+                <ActivityIndicator size="small" color={theme.primary} />
+              ) : (
+                <Ionicons name="download-outline" size={22} color={theme.primary} />
+              )}
             </View>
             <View style={styles.actionInfo}>
               <Text style={styles.actionLabel}>{t('export_data')}</Text>
               <Text style={styles.actionDesc}>
-                {lang === 'el' ? 'Εξαγωγή όλων των δεδομένων σε JSON' : 'Export all data as JSON'}
+                {lang === 'el' ? 'Εξαγωγή δεδομένων σε Excel (μόνο apodixxi+)' : 'Export data to Excel (apodixxi+ only)'}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />

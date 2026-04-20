@@ -144,4 +144,34 @@ export const api = {
       body: JSON.stringify(data),
     });
   },
+
+  // Export functions (requires auth token)
+  checkExportAccess: async (accessToken: string) => {
+    const url = `${API_BASE}/export/check-access`;
+    const res = await fetch(url, {
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Request failed' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  exportReceipts: async (accessToken: string): Promise<Blob> => {
+    const url = `${API_BASE}/export/receipts`;
+    const res = await fetch(url, {
+      headers: { 
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Export failed' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.blob();
+  },
 };

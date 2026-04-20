@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body, Depends, Header
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -12,6 +12,7 @@ import aiohttp
 import math
 import smtplib
 import httpx
+import io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -22,6 +23,9 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1705,6 +1709,209 @@ async def downgrade_user(user_id: str, admin_key: str = Query(...)):
         raise HTTPException(status_code=404, detail="User not found")
     
     return {"success": True}
+
+
+# ============ DATA EXPORT (PAID USERS ONLY) ============
+
+def check_user_is_paid(user: dict) -> bool:
+    """Check if user has active premium subscription."""
+    if user.get("account_type") != "paid":
+        return False
+    
+    # Check if subscription is still valid
+    expires_at = user.get("subscription_expires_at")
+    if expires_at:
+        try:
+            expires = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) > expires:
+                return False
+        except:
+            pass
+    
+    return True
+
+
+@api_router.get("/export/receipts")
+async def export_receipts_excel(user: dict = Depends(get_current_user)):
+    """Export user's receipts as Excel file (Paid users only)."""
+    
+    # Check if user is paid
+    if not check_user_is_paid(user):
+        raise HTTPException(
+            status_code=403, 
+            detail="Η εξαγωγή δεδομένων είναι διαθέσιμη μόνο για συνδρομητές apodixxi+"
+        )
+    
+    # Get user's receipts
+    user_email = user.get("email")
+    
+    # Get all receipts (in production, filter by user's devices/ownership)
+    receipts = await db.receipts.find().sort("date", -1).to_list(1000)
+    
+    if not receipts:
+        raise HTTPException(status_code=404, detail="Δεν βρέθηκαν αποδείξεις")
+    
+    # Create Excel workbook
+    wb = Workbook()
+    
+    # ===== Sheet 1: Receipts Summary =====
+    ws1 = wb.active
+    ws1.title = "Αποδείξεις"
+    
+    # Header styling
+    header_fill = PatternFill(start_color="0D9488", end_color="0D9488", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Headers
+    headers = ["Ημερομηνία", "Κατάστημα", "ΑΦΜ", "Αρ. Απόδειξης", "Σύνολο (€)", "Αριθμός Προϊόντων"]
+    for col, header in enumerate(headers, 1):
+        cell = ws1.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = border
+    
+    # Data rows
+    for row, receipt in enumerate(receipts, 2):
+        ws1.cell(row=row, column=1, value=receipt.get("date", "")).border = border
+        ws1.cell(row=row, column=2, value=receipt.get("store_name", "")).border = border
+        ws1.cell(row=row, column=3, value=receipt.get("store_vat", "")).border = border
+        ws1.cell(row=row, column=4, value=receipt.get("receipt_number", "")).border = border
+        total = receipt.get("total", 0)
+        ws1.cell(row=row, column=5, value=float(total) if total else 0).border = border
+        ws1.cell(row=row, column=5).number_format = '#,##0.00'
+        items_count = len(receipt.get("items", []))
+        ws1.cell(row=row, column=6, value=items_count).border = border
+    
+    # Adjust column widths
+    ws1.column_dimensions['A'].width = 15
+    ws1.column_dimensions['B'].width = 25
+    ws1.column_dimensions['C'].width = 15
+    ws1.column_dimensions['D'].width = 20
+    ws1.column_dimensions['E'].width = 12
+    ws1.column_dimensions['F'].width = 18
+    
+    # ===== Sheet 2: All Products =====
+    ws2 = wb.create_sheet("Προϊόντα")
+    
+    # Headers
+    product_headers = ["Ημερομηνία", "Κατάστημα", "Προϊόν", "Ποσότητα", "Τιμή Μονάδας (€)", "Σύνολο (€)"]
+    for col, header in enumerate(product_headers, 1):
+        cell = ws2.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = border
+    
+    # Data rows
+    row_num = 2
+    for receipt in receipts:
+        date = receipt.get("date", "")
+        store = receipt.get("store_name", "")
+        for item in receipt.get("items", []):
+            ws2.cell(row=row_num, column=1, value=date).border = border
+            ws2.cell(row=row_num, column=2, value=store).border = border
+            ws2.cell(row=row_num, column=3, value=item.get("description", "")).border = border
+            qty = item.get("quantity", 1)
+            ws2.cell(row=row_num, column=4, value=float(qty) if qty else 1).border = border
+            unit_price = item.get("unit_price", 0)
+            ws2.cell(row=row_num, column=5, value=float(unit_price) if unit_price else 0).border = border
+            ws2.cell(row=row_num, column=5).number_format = '#,##0.00'
+            total_price = item.get("total_price", 0)
+            ws2.cell(row=row_num, column=6, value=float(total_price) if total_price else 0).border = border
+            ws2.cell(row=row_num, column=6).number_format = '#,##0.00'
+            row_num += 1
+    
+    # Adjust column widths
+    ws2.column_dimensions['A'].width = 15
+    ws2.column_dimensions['B'].width = 25
+    ws2.column_dimensions['C'].width = 40
+    ws2.column_dimensions['D'].width = 12
+    ws2.column_dimensions['E'].width = 18
+    ws2.column_dimensions['F'].width = 12
+    
+    # ===== Sheet 3: Statistics =====
+    ws3 = wb.create_sheet("Στατιστικά")
+    
+    # Calculate stats
+    total_amount = sum(float(r.get("total", 0) or 0) for r in receipts)
+    total_items = sum(len(r.get("items", [])) for r in receipts)
+    
+    # Store breakdown
+    store_totals = {}
+    for r in receipts:
+        store = r.get("store_name", "Άγνωστο")
+        amount = float(r.get("total", 0) or 0)
+        if store in store_totals:
+            store_totals[store]["count"] += 1
+            store_totals[store]["amount"] += amount
+        else:
+            store_totals[store] = {"count": 1, "amount": amount}
+    
+    # Headers
+    ws3.cell(row=1, column=1, value="Συνολικά Στατιστικά").font = Font(bold=True, size=14)
+    ws3.cell(row=3, column=1, value="Σύνολο Αποδείξεων:")
+    ws3.cell(row=3, column=2, value=len(receipts))
+    ws3.cell(row=4, column=1, value="Σύνολο Προϊόντων:")
+    ws3.cell(row=4, column=2, value=total_items)
+    ws3.cell(row=5, column=1, value="Συνολικά Έξοδα:")
+    ws3.cell(row=5, column=2, value=total_amount).number_format = '#,##0.00 €'
+    
+    ws3.cell(row=7, column=1, value="Ανάλυση ανά Κατάστημα").font = Font(bold=True, size=12)
+    
+    stat_headers = ["Κατάστημα", "Αριθμός Αποδείξεων", "Σύνολο (€)"]
+    for col, header in enumerate(stat_headers, 1):
+        cell = ws3.cell(row=8, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.border = border
+    
+    row_num = 9
+    for store, data in sorted(store_totals.items(), key=lambda x: x[1]["amount"], reverse=True):
+        ws3.cell(row=row_num, column=1, value=store).border = border
+        ws3.cell(row=row_num, column=2, value=data["count"]).border = border
+        ws3.cell(row=row_num, column=3, value=data["amount"]).border = border
+        ws3.cell(row=row_num, column=3).number_format = '#,##0.00'
+        row_num += 1
+    
+    ws3.column_dimensions['A'].width = 30
+    ws3.column_dimensions['B'].width = 20
+    ws3.column_dimensions['C'].width = 15
+    
+    # Save to bytes buffer
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    # Generate filename with date
+    filename = f"apodixxi_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@api_router.get("/export/check-access")
+async def check_export_access(user: dict = Depends(get_current_user)):
+    """Check if user can access export feature."""
+    is_paid = check_user_is_paid(user)
+    
+    return {
+        "can_export": is_paid,
+        "account_type": user.get("account_type", "free"),
+        "subscription_expires_at": user.get("subscription_expires_at"),
+        "message": None if is_paid else "Η εξαγωγή δεδομένων είναι διαθέσιμη μόνο για συνδρομητές apodixxi+"
+    }
+
+
 
 @api_router.post("/devices/register")
 async def register_device(input: DeviceRegister):
