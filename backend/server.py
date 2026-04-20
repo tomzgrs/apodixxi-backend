@@ -1433,6 +1433,138 @@ async def request_store_review(
     return {"success": True, "message": "Request submitted for review", "request_id": review_request["id"]}
 
 
+# ============ ADMIN ENDPOINTS ============
+
+# Admin password - In production, this should be in environment variables
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2024!")
+
+@api_router.get("/admin/store-reviews")
+async def get_store_reviews(
+    admin_key: str = Query(...),
+    status: str = Query(default="pending")
+):
+    """Get all store review requests (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    query = {} if status == "all" else {"status": status}
+    reviews = await db.store_review_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    return {
+        "total": len(reviews),
+        "reviews": reviews
+    }
+
+
+@api_router.post("/admin/store-reviews/{review_id}/approve")
+async def approve_store_review(
+    review_id: str,
+    admin_key: str = Query(...)
+):
+    """Approve a store review request and add it to known stores (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    review = await db.store_review_requests.find_one({"id": review_id})
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    # Update the review status
+    await db.store_review_requests.update_one(
+        {"id": review_id},
+        {"$set": {
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    # Note: To actually add to STORE_VAT_MAPPING, you need to update the code
+    # For now, we'll save it to a separate collection
+    await db.approved_stores.update_one(
+        {"vat": review["vat"]},
+        {"$set": {
+            "vat": review["vat"],
+            "store_name": review["store_name"],
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    
+    return {"success": True, "message": f"Store {review['store_name']} approved"}
+
+
+@api_router.post("/admin/store-reviews/{review_id}/reject")
+async def reject_store_review(
+    review_id: str,
+    admin_key: str = Query(...),
+    reason: str = Body(default="")
+):
+    """Reject a store review request (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    review = await db.store_review_requests.find_one({"id": review_id})
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    await db.store_review_requests.update_one(
+        {"id": review_id},
+        {"$set": {
+            "status": "rejected",
+            "rejected_at": datetime.now(timezone.utc).isoformat(),
+            "rejection_reason": reason
+        }}
+    )
+    
+    return {"success": True, "message": "Review rejected"}
+
+
+@api_router.delete("/admin/store-reviews/{review_id}")
+async def delete_store_review(
+    review_id: str,
+    admin_key: str = Query(...)
+):
+    """Delete a store review request (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    result = await db.store_review_requests.delete_one({"id": review_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Review not found")
+    
+    return {"success": True, "message": "Review deleted"}
+
+
+@api_router.get("/admin/stats")
+async def get_admin_stats(admin_key: str = Query(...)):
+    """Get admin statistics (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    total_devices = await db.devices.count_documents({})
+    total_receipts = await db.receipts.count_documents({})
+    total_products = await db.products.count_documents({})
+    pending_reviews = await db.store_review_requests.count_documents({"status": "pending"})
+    approved_stores = await db.approved_stores.count_documents({})
+    
+    # Get top stores by receipt count
+    pipeline = [
+        {"$group": {"_id": "$store_name", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": 10}
+    ]
+    top_stores = await db.receipts.aggregate(pipeline).to_list(10)
+    
+    return {
+        "total_devices": total_devices,
+        "total_receipts": total_receipts,
+        "total_products": total_products,
+        "pending_reviews": pending_reviews,
+        "approved_stores": approved_stores,
+        "top_stores": [{"name": s["_id"], "count": s["count"]} for s in top_stores]
+    }
+
+
 app.include_router(api_router)
 
 app.add_middleware(
