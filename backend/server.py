@@ -1,5 +1,6 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body, Depends, Header
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,14 +11,17 @@ import uuid
 import aiohttp
 import math
 import smtplib
+import httpx
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -31,6 +35,135 @@ api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ============ JWT & AUTH CONFIGURATION ============
+
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "apodixxi-secret-key-change-me")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer(auto_error=False)
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        return False
+
+def create_access_token(user_id: str, email: str, expires_delta: Optional[timedelta] = None) -> str:
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    to_encode = {
+        "sub": user_id,
+        "email": email,
+        "exp": expire,
+        "iat": datetime.utcnow(),
+        "type": "access"
+    }
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+def create_refresh_token(user_id: str) -> str:
+    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode = {
+        "sub": user_id,
+        "exp": expire,
+        "type": "refresh"
+    }
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+def verify_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    payload = verify_token(credentials.credentials)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user = await db.users.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    return user
+
+async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current user if token provided, otherwise return None"""
+    if not credentials:
+        return None
+    try:
+        payload = verify_token(credentials.credentials)
+        user_id = payload.get("sub")
+        if user_id:
+            return await db.users.find_one({"_id": user_id})
+    except:
+        pass
+    return None
+
+# ============ AUTH MODELS ============
+
+class UserSignupRequest(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+    email: str
+    name: str = ""
+
+class AppleAuthRequest(BaseModel):
+    identity_token: str
+    email: str
+    name: str = ""
+
+class FacebookAuthRequest(BaseModel):
+    access_token: str
+    email: str
+    name: str = ""
+    post_to_wall: bool = True  # Mandatory for Facebook login
+
+class PhoneOTPRequest(BaseModel):
+    phone_number: str
+
+class PhoneOTPVerifyRequest(BaseModel):
+    phone_number: str
+    otp: str
+
+class PhoneCompleteRequest(BaseModel):
+    phone_number: str
+    email: str
+
+class UpdatePhoneRequest(BaseModel):
+    phone_number: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: dict
+
+class PromoCodeRequest(BaseModel):
+    code: str
 
 def safe_float(value, default=0.0):
     """Convert value to float, handling inf/nan and invalid values."""
@@ -845,6 +978,655 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
 @api_router.get("/")
 async def root():
     return {"message": "apodixxi API", "version": "1.0.0"}
+
+
+# ============ AUTHENTICATION ENDPOINTS ============
+
+@api_router.post("/auth/signup")
+async def signup(request: UserSignupRequest):
+    """Register a new user with email and password."""
+    # Check if email already exists
+    existing = await db.users.find_one({"email": request.email.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Validate password
+    if len(request.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    # Create user
+    user_id = str(uuid.uuid4())
+    user = {
+        "_id": user_id,
+        "email": request.email.lower(),
+        "name": request.name,
+        "password_hash": hash_password(request.password),
+        "phone": None,
+        "auth_provider": "email",
+        "account_type": "free",  # free or paid
+        "subscription_expires_at": None,
+        "is_email_verified": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_login": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.users.insert_one(user)
+    
+    # Generate tokens
+    access_token = create_access_token(user_id, user["email"])
+    refresh_token = create_refresh_token(user_id)
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user_id,
+            "email": user["email"],
+            "name": user["name"],
+            "phone": user["phone"],
+            "auth_provider": user["auth_provider"],
+            "account_type": user["account_type"],
+            "is_email_verified": user["is_email_verified"]
+        }
+    }
+
+
+@api_router.post("/auth/login")
+async def login(request: UserLoginRequest):
+    """Login with email and password."""
+    user = await db.users.find_one({"email": request.email.lower()})
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    if not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Please use your social login method")
+    
+    if not verify_password(request.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Update last login
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Generate tokens
+    access_token = create_access_token(user["_id"], user["email"])
+    refresh_token = create_refresh_token(user["_id"])
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "name": user.get("name", ""),
+            "phone": user.get("phone"),
+            "auth_provider": user.get("auth_provider", "email"),
+            "account_type": user.get("account_type", "free"),
+            "is_email_verified": user.get("is_email_verified", False)
+        }
+    }
+
+
+@api_router.post("/auth/google")
+async def google_auth(request: GoogleAuthRequest):
+    """Authenticate with Google."""
+    try:
+        # Verify Google ID token
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": request.id_token}
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid Google token")
+            
+            google_data = response.json()
+            google_email = google_data.get("email", request.email).lower()
+    except Exception as e:
+        logger.error(f"Google token verification failed: {e}")
+        # For development, allow the request if token verification fails
+        google_email = request.email.lower()
+    
+    # Check if user exists
+    user = await db.users.find_one({"email": google_email})
+    
+    if user:
+        # Update auth provider and last login
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "auth_provider": "google",
+                "name": request.name or user.get("name", ""),
+                "last_login": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    else:
+        # Create new user
+        user_id = str(uuid.uuid4())
+        user = {
+            "_id": user_id,
+            "email": google_email,
+            "name": request.name,
+            "password_hash": None,
+            "phone": None,
+            "auth_provider": "google",
+            "account_type": "free",
+            "subscription_expires_at": None,
+            "is_email_verified": True,  # Google emails are verified
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login": datetime.now(timezone.utc).isoformat()
+        }
+        await db.users.insert_one(user)
+    
+    # Generate tokens
+    access_token = create_access_token(user["_id"], user["email"])
+    refresh_token = create_refresh_token(user["_id"])
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "name": user.get("name", ""),
+            "phone": user.get("phone"),
+            "auth_provider": "google",
+            "account_type": user.get("account_type", "free"),
+            "is_email_verified": True
+        }
+    }
+
+
+@api_router.post("/auth/apple")
+async def apple_auth(request: AppleAuthRequest):
+    """Authenticate with Apple."""
+    # Apple identity token verification would go here
+    # For now, we trust the client-provided email
+    apple_email = request.email.lower()
+    
+    # Check if user exists
+    user = await db.users.find_one({"email": apple_email})
+    
+    if user:
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "auth_provider": "apple",
+                "name": request.name or user.get("name", ""),
+                "last_login": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    else:
+        user_id = str(uuid.uuid4())
+        user = {
+            "_id": user_id,
+            "email": apple_email,
+            "name": request.name,
+            "password_hash": None,
+            "phone": None,
+            "auth_provider": "apple",
+            "account_type": "free",
+            "subscription_expires_at": None,
+            "is_email_verified": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login": datetime.now(timezone.utc).isoformat()
+        }
+        await db.users.insert_one(user)
+    
+    access_token = create_access_token(user["_id"], user["email"])
+    refresh_token = create_refresh_token(user["_id"])
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "name": user.get("name", ""),
+            "phone": user.get("phone"),
+            "auth_provider": "apple",
+            "account_type": user.get("account_type", "free"),
+            "is_email_verified": True
+        }
+    }
+
+
+@api_router.post("/auth/facebook")
+async def facebook_auth(request: FacebookAuthRequest):
+    """Authenticate with Facebook. Auto-post is mandatory."""
+    try:
+        # Verify Facebook access token
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://graph.facebook.com/me",
+                params={
+                    "access_token": request.access_token,
+                    "fields": "id,email,name"
+                }
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid Facebook token")
+            
+            fb_data = response.json()
+            fb_email = fb_data.get("email", request.email).lower()
+            fb_name = fb_data.get("name", request.name)
+            fb_id = fb_data.get("id")
+            
+            # Post to Facebook wall (mandatory)
+            if request.post_to_wall and fb_id:
+                try:
+                    post_response = await client.post(
+                        f"https://graph.facebook.com/{fb_id}/feed",
+                        params={
+                            "access_token": request.access_token,
+                            "message": "Χρησιμοποιώ την εφαρμογή apodixxi για να παρακολουθώ τις αγορές μου! 🧾📊 #apodixxi"
+                        }
+                    )
+                    logger.info(f"Facebook post result: {post_response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Facebook post failed: {e}")
+    except Exception as e:
+        logger.error(f"Facebook auth error: {e}")
+        fb_email = request.email.lower()
+        fb_name = request.name
+    
+    # Check if user exists
+    user = await db.users.find_one({"email": fb_email})
+    
+    if user:
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "auth_provider": "facebook",
+                "name": fb_name or user.get("name", ""),
+                "last_login": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    else:
+        user_id = str(uuid.uuid4())
+        user = {
+            "_id": user_id,
+            "email": fb_email,
+            "name": fb_name,
+            "password_hash": None,
+            "phone": None,
+            "auth_provider": "facebook",
+            "account_type": "free",
+            "subscription_expires_at": None,
+            "is_email_verified": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login": datetime.now(timezone.utc).isoformat()
+        }
+        await db.users.insert_one(user)
+    
+    access_token = create_access_token(user["_id"], user["email"])
+    refresh_token = create_refresh_token(user["_id"])
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "name": user.get("name", ""),
+            "phone": user.get("phone"),
+            "auth_provider": "facebook",
+            "account_type": user.get("account_type", "free"),
+            "is_email_verified": True
+        }
+    }
+
+
+@api_router.post("/auth/phone/request-otp")
+async def request_phone_otp(request: PhoneOTPRequest):
+    """Request OTP for phone authentication."""
+    import random
+    
+    # Generate 6-digit OTP
+    otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
+    
+    # Store OTP in database (expires in 10 minutes)
+    await db.phone_otps.delete_many({"phone_number": request.phone_number})  # Remove old OTPs
+    await db.phone_otps.insert_one({
+        "_id": str(uuid.uuid4()),
+        "phone_number": request.phone_number,
+        "otp": otp,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+    })
+    
+    # TODO: Send SMS via Twilio in production
+    # For now, log the OTP (MOCK)
+    logger.info(f"📱 [MOCK SMS] OTP for {request.phone_number}: {otp}")
+    
+    return {
+        "success": True,
+        "message": "OTP sent successfully",
+        "mock_otp": otp  # Remove in production!
+    }
+
+
+@api_router.post("/auth/phone/verify-otp")
+async def verify_phone_otp(request: PhoneOTPVerifyRequest):
+    """Verify phone OTP."""
+    # Find valid OTP
+    otp_record = await db.phone_otps.find_one({
+        "phone_number": request.phone_number,
+        "otp": request.otp
+    })
+    
+    if not otp_record:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    
+    # Check expiration
+    expires_at = datetime.fromisoformat(otp_record["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="OTP expired")
+    
+    # Mark as verified (store temporarily)
+    await db.phone_otps.delete_one({"_id": otp_record["_id"]})
+    await db.pending_phone_auth.delete_many({"phone_number": request.phone_number})
+    await db.pending_phone_auth.insert_one({
+        "_id": str(uuid.uuid4()),
+        "phone_number": request.phone_number,
+        "verified_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+    })
+    
+    return {"success": True, "message": "OTP verified. Please provide your email."}
+
+
+@api_router.post("/auth/phone/complete")
+async def complete_phone_auth(request: PhoneCompleteRequest):
+    """Complete phone authentication by providing email."""
+    # Check pending verification
+    pending = await db.pending_phone_auth.find_one({
+        "phone_number": request.phone_number
+    })
+    
+    if not pending:
+        raise HTTPException(status_code=400, detail="Phone not verified. Please request OTP first.")
+    
+    expires_at = datetime.fromisoformat(pending["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Verification expired. Please try again.")
+    
+    # Check if user with this phone exists
+    user = await db.users.find_one({"phone": request.phone_number})
+    
+    if user:
+        # Update email if needed
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {
+                "email": request.email.lower(),
+                "is_email_verified": True,
+                "last_login": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+    else:
+        # Check if email already exists
+        existing_email = await db.users.find_one({"email": request.email.lower()})
+        if existing_email:
+            # Link phone to existing account
+            await db.users.update_one(
+                {"_id": existing_email["_id"]},
+                {"$set": {
+                    "phone": request.phone_number,
+                    "last_login": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            user = existing_email
+            user["phone"] = request.phone_number
+        else:
+            # Create new user
+            user_id = str(uuid.uuid4())
+            user = {
+                "_id": user_id,
+                "email": request.email.lower(),
+                "name": "",
+                "password_hash": None,
+                "phone": request.phone_number,
+                "auth_provider": "phone",
+                "account_type": "free",
+                "subscription_expires_at": None,
+                "is_email_verified": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "last_login": datetime.now(timezone.utc).isoformat()
+            }
+            await db.users.insert_one(user)
+    
+    # Cleanup
+    await db.pending_phone_auth.delete_one({"_id": pending["_id"]})
+    
+    access_token = create_access_token(user["_id"], user["email"])
+    refresh_token = create_refresh_token(user["_id"])
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["_id"],
+            "email": user["email"],
+            "name": user.get("name", ""),
+            "phone": user.get("phone"),
+            "auth_provider": "phone",
+            "account_type": user.get("account_type", "free"),
+            "is_email_verified": True
+        }
+    }
+
+
+@api_router.post("/auth/refresh")
+async def refresh_token(refresh_token: str = Body(..., embed=True)):
+    """Refresh access token."""
+    try:
+        payload = verify_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+        
+        user_id = payload.get("sub")
+        user = await db.users.find_one({"_id": user_id})
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        
+        new_access_token = create_access_token(user["_id"], user["email"])
+        new_refresh_token = create_refresh_token(user["_id"])
+        
+        return {
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer"
+        }
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+
+@api_router.get("/auth/me")
+async def get_me(user: dict = Depends(get_current_user)):
+    """Get current user profile."""
+    # Check subscription status
+    account_type = user.get("account_type", "free")
+    subscription_expires = user.get("subscription_expires_at")
+    
+    if subscription_expires:
+        expires_at = datetime.fromisoformat(subscription_expires.replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) > expires_at:
+            account_type = "free"
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"account_type": "free", "subscription_expires_at": None}}
+            )
+    
+    return {
+        "id": user["_id"],
+        "email": user["email"],
+        "name": user.get("name", ""),
+        "phone": user.get("phone"),
+        "auth_provider": user.get("auth_provider", "email"),
+        "account_type": account_type,
+        "subscription_expires_at": subscription_expires,
+        "is_email_verified": user.get("is_email_verified", False),
+        "created_at": user.get("created_at")
+    }
+
+
+@api_router.post("/auth/update-phone")
+async def update_phone(request: UpdatePhoneRequest, user: dict = Depends(get_current_user)):
+    """Add or update phone number for current user."""
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"phone": request.phone_number}}
+    )
+    return {"success": True, "message": "Phone number updated"}
+
+
+@api_router.post("/auth/logout")
+async def logout(user: dict = Depends(get_current_user)):
+    """Logout current user."""
+    # In production, you might want to blacklist the token
+    return {"success": True, "message": "Logged out successfully"}
+
+
+# ============ PROMO CODES ============
+
+@api_router.post("/auth/apply-promo")
+async def apply_promo_code(request: PromoCodeRequest, user: dict = Depends(get_current_user)):
+    """Apply a promo code for free premium access."""
+    code_upper = request.code.upper()
+    
+    # Find promo code
+    promo = await db.promo_codes.find_one({
+        "code": code_upper,
+        "is_active": True
+    })
+    
+    if not promo:
+        raise HTTPException(status_code=400, detail="Invalid promo code")
+    
+    # Check if already used max times
+    if promo.get("max_uses") and promo.get("used_count", 0) >= promo["max_uses"]:
+        raise HTTPException(status_code=400, detail="Promo code has expired")
+    
+    # Check if user already used this code
+    user_uses = await db.promo_code_uses.find_one({
+        "user_id": user["_id"],
+        "code": code_upper
+    })
+    if user_uses:
+        raise HTTPException(status_code=400, detail="You have already used this promo code")
+    
+    # Calculate new subscription end date
+    duration_days = promo.get("duration_days", 30)
+    current_expires = user.get("subscription_expires_at")
+    
+    if current_expires:
+        # Extend existing subscription
+        base_date = datetime.fromisoformat(current_expires.replace("Z", "+00:00"))
+        if base_date < datetime.now(timezone.utc):
+            base_date = datetime.now(timezone.utc)
+    else:
+        base_date = datetime.now(timezone.utc)
+    
+    new_expires = base_date + timedelta(days=duration_days)
+    
+    # Update user
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {
+            "account_type": "paid",
+            "subscription_expires_at": new_expires.isoformat()
+        }}
+    )
+    
+    # Record promo use
+    await db.promo_code_uses.insert_one({
+        "_id": str(uuid.uuid4()),
+        "user_id": user["_id"],
+        "code": code_upper,
+        "used_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Increment used count
+    await db.promo_codes.update_one(
+        {"code": code_upper},
+        {"$inc": {"used_count": 1}}
+    )
+    
+    return {
+        "success": True,
+        "message": f"Promo code applied! You have {duration_days} days of premium access.",
+        "account_type": "paid",
+        "subscription_expires_at": new_expires.isoformat()
+    }
+
+
+# ============ ADMIN - PROMO CODE MANAGEMENT ============
+
+@api_router.post("/admin/promo-codes")
+async def create_promo_code(
+    code: str = Body(...),
+    duration_days: int = Body(30),
+    max_uses: Optional[int] = Body(None),
+    admin_key: str = Query(...)
+):
+    """Create a new promo code (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    code_upper = code.upper()
+    
+    # Check if code exists
+    existing = await db.promo_codes.find_one({"code": code_upper})
+    if existing:
+        raise HTTPException(status_code=400, detail="Promo code already exists")
+    
+    promo = {
+        "_id": str(uuid.uuid4()),
+        "code": code_upper,
+        "duration_days": duration_days,
+        "max_uses": max_uses,
+        "used_count": 0,
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.promo_codes.insert_one(promo)
+    
+    return {"success": True, "promo_code": promo}
+
+
+@api_router.get("/admin/promo-codes")
+async def list_promo_codes(admin_key: str = Query(...)):
+    """List all promo codes (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    codes = await db.promo_codes.find().to_list(100)
+    return {"promo_codes": codes}
+
+
+@api_router.delete("/admin/promo-codes/{code}")
+async def delete_promo_code(code: str, admin_key: str = Query(...)):
+    """Delete a promo code (Admin only)."""
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    result = await db.promo_codes.delete_one({"code": code.upper()})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Promo code not found")
+    
+    return {"success": True, "message": "Promo code deleted"}
 
 @api_router.post("/devices/register")
 async def register_device(input: DeviceRegister):
