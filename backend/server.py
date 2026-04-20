@@ -2107,7 +2107,7 @@ ADMIN_DASHBOARD_HTML = """
 </html>
 """
 
-@app.get("/admin", response_class=HTMLResponse)
+@api_router.get("/admin-panel", response_class=HTMLResponse)
 async def admin_dashboard():
     """Serve the Web Admin Dashboard."""
     return ADMIN_DASHBOARD_HTML
