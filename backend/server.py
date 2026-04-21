@@ -4188,6 +4188,317 @@ async def admin_dashboard():
     return ADMIN_DASHBOARD_HTML
 
 
+# ============ AI INTEGRATION WITH GEMINI ============
+
+from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+class AIInsightRequest(BaseModel):
+    device_id: str
+    insight_type: str = "spending"  # spending, savings, recommendations
+
+class AIChatRequest(BaseModel):
+    device_id: str
+    message: str
+    session_id: Optional[str] = None
+
+class AIRecommendationRequest(BaseModel):
+    device_id: str
+    category: Optional[str] = None
+    limit: int = 5
+
+@api_router.post("/ai/insights")
+async def get_ai_insights(request: AIInsightRequest):
+    """Get AI-powered insights about user's shopping habits."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="AI service not configured")
+    
+    # Fetch user's receipt data
+    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(100)
+    
+    if not receipts:
+        return {"insight": "Δεν υπάρχουν αρκετά δεδομένα για ανάλυση. Σκανάρετε περισσότερες αποδείξεις!"}
+    
+    # Calculate statistics
+    total_spent = sum(r.get("total_amount", r.get("total", 0)) for r in receipts)
+    stores = {}
+    categories = {}
+    products = {}
+    
+    for receipt in receipts:
+        store = receipt.get("store_name", "Άγνωστο")
+        stores[store] = stores.get(store, 0) + receipt.get("total_amount", receipt.get("total", 0))
+        
+        for item in receipt.get("items", []):
+            cat = item.get("category", "Άλλο")
+            categories[cat] = categories.get(cat, 0) + item.get("total_price", 0)
+            
+            name = item.get("name", "")
+            if name:
+                products[name] = products.get(name, 0) + item.get("quantity", 1)
+    
+    # Prepare context for AI
+    top_stores = sorted(stores.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_products = sorted(products.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    context = f"""
+Στοιχεία χρήστη apodixxi:
+- Συνολικές αποδείξεις: {len(receipts)}
+- Συνολικά έξοδα: {total_spent:.2f}€
+- Top καταστήματα: {', '.join([f'{s[0]} ({s[1]:.2f}€)' for s in top_stores])}
+- Top κατηγορίες: {', '.join([f'{c[0]} ({c[1]:.2f}€)' for c in top_categories])}
+- Συχνά προϊόντα: {', '.join([f'{p[0]} (x{p[1]})' for p in top_products])}
+"""
+    
+    # Create AI prompt based on insight type
+    if request.insight_type == "spending":
+        prompt = f"""Με βάση τα παρακάτω δεδομένα αγορών, δώσε μια σύντομη ανάλυση (2-3 προτάσεις) για τα έξοδα του χρήστη στα ελληνικά:
+{context}
+
+Δώσε πρακτικές συμβουλές για εξοικονόμηση χρημάτων."""
+    
+    elif request.insight_type == "savings":
+        prompt = f"""Με βάση τα παρακάτω δεδομένα αγορών, προτείνε 3 συγκεκριμένους τρόπους εξοικονόμησης στα ελληνικά:
+{context}
+
+Να είσαι συγκεκριμένος με ποσά και καταστήματα."""
+    
+    else:  # recommendations
+        prompt = f"""Με βάση τα παρακάτω δεδομένα αγορών, προτείνε προϊόντα ή προσφορές που μπορεί να ενδιαφέρουν τον χρήστη στα ελληνικά:
+{context}
+
+Προτείνε 3-5 προϊόντα με βάση τις αγοραστικές του συνήθειες."""
+    
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"insights_{request.device_id}_{request.insight_type}",
+            system_message="Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων. Δίνεις σύντομες, πρακτικές συμβουλές στα ελληνικά."
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        user_message = UserMessage(text=prompt)
+        response = await chat.send_message(user_message)
+        
+        return {
+            "insight": response,
+            "stats": {
+                "total_receipts": len(receipts),
+                "total_spent": round(total_spent, 2),
+                "top_store": top_stores[0][0] if top_stores else None,
+                "top_category": top_categories[0][0] if top_categories else None
+            }
+        }
+    except Exception as e:
+        logger.error(f"AI insight error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+
+@api_router.post("/ai/chat")
+async def ai_chat(request: AIChatRequest):
+    """Chat with AI assistant about shopping habits."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="AI service not configured")
+    
+    # Fetch user's receipt data for context
+    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(50)
+    
+    # Build context
+    total_spent = sum(r.get("total_amount", r.get("total", 0)) for r in receipts)
+    recent_receipts = receipts[:5] if receipts else []
+    
+    context = f"""
+Πληροφορίες χρήστη:
+- Αριθμός αποδείξεων: {len(receipts)}
+- Συνολικά έξοδα: {total_spent:.2f}€
+- Πρόσφατες αγορές: {', '.join([r.get('store_name', 'Άγνωστο') for r in recent_receipts])}
+"""
+    
+    session_id = request.session_id or f"chat_{request.device_id}_{uuid.uuid4().hex[:8]}"
+    
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=session_id,
+            system_message=f"""Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
+Απαντάς πάντα στα ελληνικά, σύντομα και φιλικά.
+{context}
+Μπορείς να βοηθήσεις με ερωτήσεις σχετικά με:
+- Έξοδα και στατιστικά αγορών
+- Συμβουλές εξοικονόμησης
+- Σύγκριση τιμών μεταξύ καταστημάτων
+- Προτάσεις προϊόντων"""
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        user_message = UserMessage(text=request.message)
+        response = await chat.send_message(user_message)
+        
+        # Store chat message in database
+        await db.ai_chats.insert_one({
+            "device_id": request.device_id,
+            "session_id": session_id,
+            "user_message": request.message,
+            "ai_response": response,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {
+            "response": response,
+            "session_id": session_id
+        }
+    except Exception as e:
+        logger.error(f"AI chat error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+
+@api_router.post("/ai/smart-recommendations")
+async def get_ai_recommendations(request: AIRecommendationRequest):
+    """Get AI-powered product recommendations based on shopping history."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="AI service not configured")
+    
+    # Fetch user's purchase history
+    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(100)
+    
+    if not receipts:
+        return {"recommendations": [], "message": "Σκανάρετε αποδείξεις για εξατομικευμένες προτάσεις!"}
+    
+    # Analyze purchase patterns
+    products = {}
+    stores = set()
+    categories = {}
+    
+    for receipt in receipts:
+        stores.add(receipt.get("store_name", ""))
+        for item in receipt.get("items", []):
+            name = item.get("name", "")
+            cat = item.get("category", "Άλλο")
+            price = item.get("unit_price", 0)
+            
+            if name:
+                if name not in products:
+                    products[name] = {"count": 0, "total_spent": 0, "category": cat, "avg_price": 0}
+                products[name]["count"] += item.get("quantity", 1)
+                products[name]["total_spent"] += item.get("total_price", 0)
+    
+    top_products = sorted(products.items(), key=lambda x: x[1]["count"], reverse=True)[:15]
+    
+    category_filter = f"για την κατηγορία {request.category}" if request.category else ""
+    
+    prompt = f"""Με βάση το ιστορικό αγορών του χρήστη, προτείνε {request.limit} προϊόντα {category_filter} στα ελληνικά.
+
+Συχνά αγοραζόμενα προϊόντα:
+{chr(10).join([f'- {p[0]} (x{p[1]["count"]}, κατηγορία: {p[1]["category"]})' for p in top_products])}
+
+Καταστήματα που ψωνίζει: {', '.join(list(stores)[:5])}
+
+Απάντησε σε μορφή JSON array με objects που έχουν: title, description, reason, estimated_savings (προαιρετικό)
+Παράδειγμα: [{{"title": "Γάλα σε προσφορά", "description": "Αγοράζετε συχνά γάλα - δείτε προσφορές", "reason": "Βασισμένο στις αγορές σας"}}]"""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"recs_{request.device_id}",
+            system_message="Είσαι ένας έξυπνος βοηθός αγορών. Απαντάς ΜΟΝΟ με valid JSON, χωρίς markdown."
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        user_message = UserMessage(text=prompt)
+        response = await chat.send_message(user_message)
+        
+        # Try to parse JSON response
+        import json
+        try:
+            # Clean up response if it has markdown
+            clean_response = response.strip()
+            if clean_response.startswith("```"):
+                clean_response = clean_response.split("```")[1]
+                if clean_response.startswith("json"):
+                    clean_response = clean_response[4:]
+            recommendations = json.loads(clean_response)
+        except:
+            # If JSON parsing fails, return as text
+            recommendations = [{"title": "AI Προτάσεις", "description": response, "reason": "AI-generated"}]
+        
+        return {
+            "recommendations": recommendations[:request.limit],
+            "source": "ai",
+            "based_on_receipts": len(receipts)
+        }
+    except Exception as e:
+        logger.error(f"AI recommendations error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+
+@api_router.get("/ai/weekly-summary")
+async def get_weekly_summary(device_id: str):
+    """Get AI-generated weekly shopping summary."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="AI service not configured")
+    
+    # Get receipts from last 7 days
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    
+    receipts = await db.receipts.find({
+        "device_id": device_id,
+        "created_at": {"$gte": week_ago.isoformat()}
+    }).to_list(100)
+    
+    if not receipts:
+        # Try getting all receipts if none in last week
+        receipts = await db.receipts.find({"device_id": device_id}).to_list(20)
+    
+    if not receipts:
+        return {
+            "summary": "Δεν υπάρχουν αποδείξεις αυτή την εβδομάδα. Σκανάρετε τις αποδείξεις σας!",
+            "stats": {}
+        }
+    
+    total = sum(r.get("total_amount", r.get("total", 0)) for r in receipts)
+    stores = {}
+    items_count = 0
+    
+    for r in receipts:
+        store = r.get("store_name", "Άγνωστο")
+        stores[store] = stores.get(store, 0) + r.get("total_amount", r.get("total", 0))
+        items_count += len(r.get("items", []))
+    
+    prompt = f"""Δημιούργησε μια σύντομη εβδομαδιαία ανασκόπηση αγορών (3-4 προτάσεις) στα ελληνικά:
+
+- Συνολικά έξοδα: {total:.2f}€
+- Αριθμός αποδείξεων: {len(receipts)}
+- Αριθμός προϊόντων: {items_count}
+- Καταστήματα: {', '.join([f'{s} ({v:.2f}€)' for s, v in stores.items()])}
+
+Συμπεριέλαβε:
+1. Σύνοψη εξόδων
+2. Μια παρατήρηση για τις αγορές
+3. Μια συμβουλή εξοικονόμησης"""
+
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"weekly_{device_id}",
+            system_message="Είσαι φιλικός οικονομικός σύμβουλος. Δίνεις σύντομες, χρήσιμες συμβουλές στα ελληνικά."
+        ).with_model("gemini", "gemini-2.5-flash")
+        
+        user_message = UserMessage(text=prompt)
+        response = await chat.send_message(user_message)
+        
+        return {
+            "summary": response,
+            "stats": {
+                "total_spent": round(total, 2),
+                "receipts_count": len(receipts),
+                "items_count": items_count,
+                "stores": stores
+            }
+        }
+    except Exception as e:
+        logger.error(f"Weekly summary error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+
 app.include_router(api_router)
 
 app.add_middleware(
