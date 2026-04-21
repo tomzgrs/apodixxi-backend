@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
 import { BarChart, DonutChart, DonutLegend, TrendIndicator } from '../../src/components/Charts';
 import { Recommendations } from '../../src/components/Recommendations';
+import AIAssistant from '../../src/components/AIAssistant';
 
 export default function DashboardScreen() {
   const { t, lang } = useContext(I18nContext);
@@ -23,6 +24,7 @@ export default function DashboardScreen() {
   const [distributionMode, setDistributionMode] = useState<'total' | 'month'>('total');
   const [showDistributionDropdown, setShowDistributionDropdown] = useState(false);
   const [deviceId, setDeviceId] = useState('');
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -415,6 +417,30 @@ export default function DashboardScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* AI Assistant Floating Button */}
+      {deviceId && hasData && (
+        <TouchableOpacity
+          style={[styles.aiFloatingButton, { backgroundColor: theme.primary }]}
+          onPress={() => setShowAIAssistant(true)}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="sparkles" size={24} color="#fff" />
+        </TouchableOpacity>
+      )}
+
+      {/* AI Assistant Modal */}
+      <Modal
+        visible={showAIAssistant}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAIAssistant(false)}
+      >
+        <AIAssistant 
+          deviceId={deviceId} 
+          onClose={() => setShowAIAssistant(false)} 
+        />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -875,5 +901,20 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontSize: Typography.base, 
     fontWeight: Typography.bold, 
     color: theme.text 
+  },
+  aiFloatingButton: {
+    position: 'absolute',
+    bottom: 90,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
 });
