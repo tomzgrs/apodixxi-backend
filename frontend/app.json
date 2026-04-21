@@ -25,7 +25,10 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-2145791775687228~3322381104"
+      }
     },
     "web": {
       "bundler": "metro",
@@ -51,7 +54,13 @@
         }
       ],
       "expo-localization",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-2145791775687228~3322381104"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

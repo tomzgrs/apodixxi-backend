@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image, Modal, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,7 @@ import { getStoreLogo } from '../../src/storeLogos';
 import { BarChart, DonutChart, DonutLegend, TrendIndicator } from '../../src/components/Charts';
 import { Recommendations } from '../../src/components/Recommendations';
 import AIAssistant from '../../src/components/AIAssistant';
+import AdBanner from '../../src/components/AdBanner';
 
 export default function DashboardScreen() {
   const { t, lang } = useContext(I18nContext);
@@ -415,6 +416,13 @@ export default function DashboardScreen() {
               </View>
             )}
           </>
+        )}
+        
+        {/* AdBanner for Free Users */}
+        {Platform.OS !== 'web' && (
+          <View style={styles.adContainer}>
+            <AdBanner />
+          </View>
         )}
       </ScrollView>
 
@@ -916,5 +924,10 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  adContainer: {
+    alignItems: 'center',
+    marginVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
   },
 });
