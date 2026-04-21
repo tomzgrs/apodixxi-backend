@@ -24,7 +24,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, name: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (googleUserInfo: { email: string; name: string; googleId: string; picture?: string }) => Promise<void>;
-  signInWithApple: (identityToken: string, email: string, name: string) => Promise<void>;
+  signInWithApple: (appleUserInfo: { appleId: string; email: string; name: string; identityToken: string }) => Promise<void>;
   signInWithFacebook: (facebookUserInfo: { email: string; name: string; facebookId: string; picture?: string }) => Promise<void>;
   requestPhoneOTP: (phoneNumber: string) => Promise<string>;
   verifyPhoneOTP: (phoneNumber: string, otp: string) => Promise<void>;
@@ -206,13 +206,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const signInWithApple = useCallback(async (identityToken: string, email: string, name: string) => {
+  const signInWithApple = useCallback(async (appleUserInfo: { appleId: string; email: string; name: string; identityToken: string }) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/auth/apple`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identity_token: identityToken, email, name })
+        body: JSON.stringify({ 
+          apple_id: appleUserInfo.appleId,
+          identity_token: appleUserInfo.identityToken, 
+          email: appleUserInfo.email, 
+          name: appleUserInfo.name 
+        })
       });
 
       if (!response.ok) {

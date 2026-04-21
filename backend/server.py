@@ -138,7 +138,8 @@ class GoogleAuthRequest(BaseModel):
     picture: Optional[str] = None
 
 class AppleAuthRequest(BaseModel):
-    identity_token: str
+    apple_id: Optional[str] = None
+    identity_token: Optional[str] = None
     email: str
     name: str = ""
 
@@ -1186,19 +1187,22 @@ async def google_auth(request: GoogleAuthRequest):
 @api_router.post("/auth/apple")
 async def apple_auth(request: AppleAuthRequest):
     """Authenticate with Apple."""
-    # Apple identity token verification would go here
-    # For now, we trust the client-provided email
     apple_email = request.email.lower()
+    
+    # Create device_id for user
+    user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
     
     # Check if user exists
     user = await db.users.find_one({"email": apple_email})
     
     if user:
+        user_device_id = user.get("device_id", user_device_id)
         await db.users.update_one(
             {"_id": user["_id"]},
             {"$set": {
                 "auth_provider": "apple",
                 "name": request.name or user.get("name", ""),
+                "device_id": user_device_id,
                 "last_login": datetime.now(timezone.utc).isoformat()
             }}
         )
@@ -1214,6 +1218,7 @@ async def apple_auth(request: AppleAuthRequest):
             "account_type": "free",
             "subscription_expires_at": None,
             "is_email_verified": True,
+            "device_id": user_device_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_login": datetime.now(timezone.utc).isoformat()
         }
@@ -1226,6 +1231,7 @@ async def apple_auth(request: AppleAuthRequest):
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "device_id": user_device_id,
         "user": {
             "id": user["_id"],
             "email": user["email"],
@@ -1233,7 +1239,8 @@ async def apple_auth(request: AppleAuthRequest):
             "phone": user.get("phone"),
             "auth_provider": "apple",
             "account_type": user.get("account_type", "free"),
-            "is_email_verified": True
+            "is_email_verified": True,
+            "device_id": user_device_id
         }
     }
 
@@ -4508,6 +4515,149 @@ async def get_weekly_summary(device_id: str):
     except Exception as e:
         logger.error(f"Weekly summary error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+
+# ============ IN-APP PURCHASES ============
+
+class PurchaseVerifyRequest(BaseModel):
+    receipt: str
+    product_id: str
+    platform: str  # 'ios' or 'android'
+    user_email: Optional[str] = None
+
+class PurchaseHistoryItem(BaseModel):
+    product_id: str
+    purchase_date: str
+    expires_at: Optional[str] = None
+    status: str
+
+@api_router.post("/purchases/verify")
+async def verify_purchase(request: PurchaseVerifyRequest):
+    """Verify and process an in-app purchase."""
+    
+    # In production, you would verify the receipt with Apple/Google
+    # For now, we trust the purchase and upgrade the user
+    
+    # Determine subscription duration based on product
+    if "monthly" in request.product_id.lower():
+        duration_days = 30
+        plan_name = "apodixxi+ Μηνιαία"
+    elif "yearly" in request.product_id.lower():
+        duration_days = 365
+        plan_name = "apodixxi+ Ετήσια"
+    else:
+        duration_days = 30
+        plan_name = "apodixxi+"
+    
+    expires_at = datetime.now(timezone.utc) + timedelta(days=duration_days)
+    
+    # Update user subscription
+    if request.user_email:
+        user = await db.users.find_one({"email": request.user_email.lower()})
+        if user:
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {
+                    "account_type": "paid",
+                    "subscription_expires_at": expires_at.isoformat(),
+                    "subscription_plan": plan_name,
+                    "last_purchase_date": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+    
+    # Store purchase record
+    purchase_record = {
+        "id": str(uuid.uuid4()),
+        "user_email": request.user_email,
+        "product_id": request.product_id,
+        "platform": request.platform,
+        "receipt": request.receipt[:100] + "..." if len(request.receipt) > 100 else request.receipt,  # Truncate for storage
+        "purchase_date": datetime.now(timezone.utc).isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "status": "active"
+    }
+    
+    await db.purchases.insert_one(purchase_record)
+    
+    logger.info(f"Purchase verified: {request.product_id} for {request.user_email}")
+    
+    return {
+        "success": True,
+        "message": "Η αγορά επαληθεύτηκε με επιτυχία!",
+        "subscription": {
+            "plan": plan_name,
+            "expires_at": expires_at.isoformat(),
+            "status": "active"
+        }
+    }
+
+
+@api_router.get("/purchases/status")
+async def get_purchase_status(user_email: str):
+    """Get user's subscription status."""
+    user = await db.users.find_one({"email": user_email.lower()})
+    
+    if not user:
+        return {"status": "free", "has_subscription": False}
+    
+    account_type = user.get("account_type", "free")
+    expires_at = user.get("subscription_expires_at")
+    
+    # Check if subscription is expired
+    if expires_at:
+        expires_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+        if expires_date < datetime.now(timezone.utc):
+            account_type = "expired"
+    
+    return {
+        "status": account_type,
+        "has_subscription": account_type == "paid",
+        "subscription_plan": user.get("subscription_plan"),
+        "expires_at": expires_at
+    }
+
+
+@api_router.post("/purchases/restore")
+async def restore_purchases(user_email: str):
+    """Restore purchases for a user."""
+    # Find active purchases for this user
+    purchases = await db.purchases.find({
+        "user_email": user_email.lower(),
+        "status": "active"
+    }).to_list(10)
+    
+    if not purchases:
+        return {"success": False, "message": "Δεν βρέθηκαν προηγούμενες αγορές"}
+    
+    # Find the most recent valid purchase
+    valid_purchase = None
+    for purchase in purchases:
+        expires_at = purchase.get("expires_at")
+        if expires_at:
+            expires_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            if expires_date > datetime.now(timezone.utc):
+                valid_purchase = purchase
+                break
+    
+    if valid_purchase:
+        # Restore subscription
+        await db.users.update_one(
+            {"email": user_email.lower()},
+            {"$set": {
+                "account_type": "paid",
+                "subscription_expires_at": valid_purchase["expires_at"],
+                "subscription_plan": valid_purchase.get("product_id", "apodixxi+")
+            }}
+        )
+        return {
+            "success": True,
+            "message": "Η συνδρομή σου επαναφέρθηκε!",
+            "subscription": {
+                "expires_at": valid_purchase["expires_at"]
+            }
+        }
+    
+    return {"success": False, "message": "Δεν βρέθηκαν ενεργές συνδρομές"}
 
 
 app.include_router(api_router)

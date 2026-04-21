@@ -17,6 +17,7 @@ import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
 import * as Facebook from 'expo-auth-session/providers/facebook';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -28,7 +29,7 @@ const FACEBOOK_APP_ID = '1716931605974528';
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
 export default function LoginScreen() {
-  const { signUp, signIn, signInWithGoogle, signInWithFacebook, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
+  const { signUp, signIn, signInWithGoogle, signInWithFacebook, signInWithApple, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
   const { theme, isDark } = useTheme();
   
   const [mode, setMode] = useState<AuthMode>('login');
@@ -43,6 +44,17 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
   const [facebookLoading, setFacebookLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  const [isAppleAvailable, setIsAppleAvailable] = useState(false);
+
+  // Check if Apple Sign-In is available
+  useEffect(() => {
+    const checkAppleAvailability = async () => {
+      const available = await AppleAuthentication.isAvailableAsync();
+      setIsAppleAvailable(available);
+    };
+    checkAppleAvailability();
+  }, []);
 
   // Google Sign-In configuration
   const [request, response, promptAsync] = Google.useAuthRequest({
@@ -140,6 +152,42 @@ export default function LoginScreen() {
       setError(err.message || 'Αποτυχία σύνδεσης με Facebook');
     } finally {
       setFacebookLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    try {
+      setAppleLoading(true);
+      setError('');
+      
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      
+      // Get user details from credential
+      const appleEmail = credential.email || `${credential.user}@privaterelay.appleid.com`;
+      const appleName = credential.fullName 
+        ? `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim()
+        : '';
+      
+      // Sign in with our backend
+      await signInWithApple({
+        appleId: credential.user,
+        email: appleEmail,
+        name: appleName,
+        identityToken: credential.identityToken || '',
+      });
+    } catch (err: any) {
+      if (err.code === 'ERR_REQUEST_CANCELED') {
+        // User canceled the sign-in
+        return;
+      }
+      setError(err.message || 'Αποτυχία σύνδεσης με Apple');
+    } finally {
+      setAppleLoading(false);
     }
   };
 
@@ -530,10 +578,20 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {Platform.OS === 'ios' && (
-              <TouchableOpacity style={[styles.socialButton, { backgroundColor: '#000' }]}>
-                <Ionicons name="logo-apple" size={20} color="#fff" />
-                <Text style={styles.socialButtonText}>Apple</Text>
+            {Platform.OS === 'ios' && isAppleAvailable && (
+              <TouchableOpacity 
+                style={[styles.socialButton, { backgroundColor: '#000' }, appleLoading && styles.buttonDisabled]}
+                onPress={handleAppleSignIn}
+                disabled={appleLoading}
+              >
+                {appleLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-apple" size={20} color="#fff" />
+                    <Text style={styles.socialButtonText}>Apple</Text>
+                  </>
+                )}
               </TouchableOpacity>
             )}
 
