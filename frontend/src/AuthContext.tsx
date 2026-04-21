@@ -23,7 +23,7 @@ interface AuthContextType {
   accessToken: string | null;
   signUp: (email: string, password: string, name: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: (idToken: string, email: string, name: string) => Promise<void>;
+  signInWithGoogle: (googleUserInfo: { email: string; name: string; googleId: string; picture?: string }) => Promise<void>;
   signInWithApple: (identityToken: string, email: string, name: string) => Promise<void>;
   signInWithFacebook: (accessToken: string, email: string, name: string) => Promise<void>;
   requestPhoneOTP: (phoneNumber: string) => Promise<string>;
@@ -180,13 +180,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const signInWithGoogle = useCallback(async (idToken: string, email: string, name: string) => {
+  const signInWithGoogle = useCallback(async (googleUserInfo: { email: string; name: string; googleId: string; picture?: string }) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/auth/google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_token: idToken, email, name })
+        body: JSON.stringify({ 
+          google_id: googleUserInfo.googleId,
+          email: googleUserInfo.email, 
+          name: googleUserInfo.name,
+          picture: googleUserInfo.picture
+        })
       });
 
       if (!response.ok) {

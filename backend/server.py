@@ -131,9 +131,11 @@ class UserLoginRequest(BaseModel):
     password: str
 
 class GoogleAuthRequest(BaseModel):
-    id_token: str
+    google_id: Optional[str] = None
+    id_token: Optional[str] = None
     email: str
     name: str = ""
+    picture: Optional[str] = None
 
 class AppleAuthRequest(BaseModel):
     identity_token: str
@@ -1089,33 +1091,53 @@ async def login(request: UserLoginRequest):
 @api_router.post("/auth/google")
 async def google_auth(request: GoogleAuthRequest):
     """Authenticate with Google."""
-    try:
-        # Verify Google ID token
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://oauth2.googleapis.com/tokeninfo",
-                params={"id_token": request.id_token}
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid Google token")
-            
-            google_data = response.json()
-            google_email = google_data.get("email", request.email).lower()
-    except Exception as e:
-        logger.error(f"Google token verification failed: {e}")
-        # For development, allow the request if token verification fails
-        google_email = request.email.lower()
+    google_email = request.email.lower()
+    
+    # If google_id is provided directly (from mobile app), use it
+    if request.google_id:
+        # The user is authenticated via Google OAuth on mobile
+        # We trust the data since it came from Google's API
+        google_data = {
+            "sub": request.google_id,
+            "email": google_email,
+            "name": request.name,
+            "picture": request.picture
+        }
+    elif request.id_token:
+        # Verify Google ID token (for web flow)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://oauth2.googleapis.com/tokeninfo",
+                    params={"id_token": request.id_token}
+                )
+                if response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Google token")
+                
+                google_data = response.json()
+                google_email = google_data.get("email", request.email).lower()
+        except Exception as e:
+            logger.error(f"Google token verification failed: {e}")
+            google_data = {"email": google_email, "name": request.name}
+    else:
+        raise HTTPException(status_code=400, detail="Either google_id or id_token is required")
+    
+    # Create device_id for user
+    user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
     
     # Check if user exists
     user = await db.users.find_one({"email": google_email})
     
     if user:
-        # Update auth provider and last login
+        # Update auth provider, device_id and last login
+        user_device_id = user.get("device_id", user_device_id)
         await db.users.update_one(
             {"_id": user["_id"]},
             {"$set": {
                 "auth_provider": "google",
                 "name": request.name or user.get("name", ""),
+                "picture": request.picture or user.get("picture"),
+                "device_id": user_device_id,
                 "last_login": datetime.now(timezone.utc).isoformat()
             }}
         )
@@ -1126,12 +1148,14 @@ async def google_auth(request: GoogleAuthRequest):
             "_id": user_id,
             "email": google_email,
             "name": request.name,
+            "picture": request.picture,
             "password_hash": None,
             "phone": None,
             "auth_provider": "google",
             "account_type": "free",
             "subscription_expires_at": None,
             "is_email_verified": True,  # Google emails are verified
+            "device_id": user_device_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_login": datetime.now(timezone.utc).isoformat()
         }

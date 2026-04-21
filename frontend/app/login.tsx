@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,11 +15,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
+
+const GOOGLE_CLIENT_ID_WEB = '959501343848-ka5h4aev01j01mh0se6qan71nrj9h8at.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID_ANDROID = '959501343848-u4lqddkaqai02dbfn111ksmg03glun69.apps.googleusercontent.com';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
 export default function LoginScreen() {
-  const { signUp, signIn, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
+  const { signUp, signIn, signInWithGoogle, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
   const { theme, isDark } = useTheme();
   
   const [mode, setMode] = useState<AuthMode>('login');
@@ -32,6 +39,57 @@ export default function LoginScreen() {
   const [mockOtp, setMockOtp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Google Sign-In configuration
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    androidClientId: GOOGLE_CLIENT_ID_ANDROID,
+    webClientId: GOOGLE_CLIENT_ID_WEB,
+    scopes: ['profile', 'email'],
+  });
+
+  // Handle Google Sign-In response
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { authentication } = response;
+      if (authentication?.accessToken) {
+        handleGoogleSignIn(authentication.accessToken);
+      }
+    } else if (response?.type === 'error') {
+      setError('Αποτυχία σύνδεσης με Google');
+      setGoogleLoading(false);
+    }
+  }, [response]);
+
+  const handleGoogleSignIn = async (accessToken: string) => {
+    try {
+      setGoogleLoading(true);
+      setError('');
+      
+      // Get user info from Google
+      const userInfoResponse = await fetch('https://www.googleapis.com/userinfo/v2/me', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      if (!userInfoResponse.ok) {
+        throw new Error('Failed to get user info from Google');
+      }
+      
+      const userInfo = await userInfoResponse.json();
+      
+      // Sign in with our backend
+      await signInWithGoogle({
+        email: userInfo.email,
+        name: userInfo.name,
+        googleId: userInfo.id,
+        picture: userInfo.picture,
+      });
+    } catch (err: any) {
+      setError(err.message || 'Αποτυχία σύνδεσης με Google');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
 
   const validateEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -402,9 +460,22 @@ export default function LoginScreen() {
 
           {/* Social Buttons */}
           <View style={styles.socialButtons}>
-            <TouchableOpacity style={[styles.socialButton, { backgroundColor: '#4285F4' }]}>
-              <Ionicons name="logo-google" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Google</Text>
+            <TouchableOpacity 
+              style={[styles.socialButton, { backgroundColor: '#4285F4' }, (!request || googleLoading) && styles.buttonDisabled]}
+              onPress={() => {
+                setGoogleLoading(true);
+                promptAsync();
+              }}
+              disabled={!request || googleLoading}
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={20} color="#fff" />
+                  <Text style={styles.socialButtonText}>Google</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             {Platform.OS === 'ios' && (
