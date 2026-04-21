@@ -1050,10 +1050,18 @@ async def login(request: UserLoginRequest):
     if not verify_password(request.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Update last login
+    # Get or create device_id for user
+    user_device_id = user.get("device_id")
+    if not user_device_id:
+        user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
+    
+    # Update last login and device_id
     await db.users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {
+            "last_login": datetime.now(timezone.utc).isoformat(),
+            "device_id": user_device_id
+        }}
     )
     
     # Generate tokens
@@ -1064,6 +1072,7 @@ async def login(request: UserLoginRequest):
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "device_id": user_device_id,
         "user": {
             "id": user["_id"],
             "email": user["email"],
@@ -1071,7 +1080,8 @@ async def login(request: UserLoginRequest):
             "phone": user.get("phone"),
             "auth_provider": user.get("auth_provider", "email"),
             "account_type": user.get("account_type", "free"),
-            "is_email_verified": user.get("is_email_verified", False)
+            "is_email_verified": user.get("is_email_verified", False),
+            "device_id": user_device_id
         }
     }
 
