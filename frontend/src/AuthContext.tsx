@@ -25,7 +25,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signInWithGoogle: (googleUserInfo: { email: string; name: string; googleId: string; picture?: string }) => Promise<void>;
   signInWithApple: (identityToken: string, email: string, name: string) => Promise<void>;
-  signInWithFacebook: (accessToken: string, email: string, name: string) => Promise<void>;
+  signInWithFacebook: (facebookUserInfo: { email: string; name: string; facebookId: string; picture?: string }) => Promise<void>;
   requestPhoneOTP: (phoneNumber: string) => Promise<string>;
   verifyPhoneOTP: (phoneNumber: string, otp: string) => Promise<void>;
   completePhoneAuth: (phoneNumber: string, email: string) => Promise<void>;
@@ -227,17 +227,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const signInWithFacebook = useCallback(async (fbAccessToken: string, email: string, name: string) => {
+  const signInWithFacebook = useCallback(async (facebookUserInfo: { email: string; name: string; facebookId: string; picture?: string }) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/auth/facebook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          access_token: fbAccessToken, 
-          email, 
-          name,
-          post_to_wall: true  // Mandatory
+          facebook_id: facebookUserInfo.facebookId,
+          email: facebookUserInfo.email, 
+          name: facebookUserInfo.name,
+          picture: facebookUserInfo.picture
         })
       });
 

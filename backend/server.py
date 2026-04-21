@@ -143,10 +143,12 @@ class AppleAuthRequest(BaseModel):
     name: str = ""
 
 class FacebookAuthRequest(BaseModel):
-    access_token: str
+    facebook_id: Optional[str] = None
+    access_token: Optional[str] = None
     email: str
     name: str = ""
-    post_to_wall: bool = True  # Mandatory for Facebook login
+    picture: Optional[str] = None
+    post_to_wall: bool = False
 
 class PhoneOTPRequest(BaseModel):
     phone_number: str
@@ -1238,52 +1240,57 @@ async def apple_auth(request: AppleAuthRequest):
 
 @api_router.post("/auth/facebook")
 async def facebook_auth(request: FacebookAuthRequest):
-    """Authenticate with Facebook. Auto-post is mandatory."""
-    try:
-        # Verify Facebook access token
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://graph.facebook.com/me",
-                params={
-                    "access_token": request.access_token,
-                    "fields": "id,email,name"
-                }
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid Facebook token")
-            
-            fb_data = response.json()
-            fb_email = fb_data.get("email", request.email).lower()
-            fb_name = fb_data.get("name", request.name)
-            fb_id = fb_data.get("id")
-            
-            # Post to Facebook wall (mandatory)
-            if request.post_to_wall and fb_id:
-                try:
-                    post_response = await client.post(
-                        f"https://graph.facebook.com/{fb_id}/feed",
-                        params={
-                            "access_token": request.access_token,
-                            "message": "Χρησιμοποιώ την εφαρμογή apodixxi για να παρακολουθώ τις αγορές μου! 🧾📊 #apodixxi"
-                        }
-                    )
-                    logger.info(f"Facebook post result: {post_response.status_code}")
-                except Exception as e:
-                    logger.warning(f"Facebook post failed: {e}")
-    except Exception as e:
-        logger.error(f"Facebook auth error: {e}")
-        fb_email = request.email.lower()
-        fb_name = request.name
+    """Authenticate with Facebook."""
+    fb_email = request.email.lower()
+    fb_name = request.name
+    
+    # If facebook_id is provided directly (from mobile app), use it
+    if request.facebook_id:
+        # The user is authenticated via Facebook OAuth on mobile
+        fb_data = {
+            "id": request.facebook_id,
+            "email": fb_email,
+            "name": fb_name,
+            "picture": request.picture
+        }
+    elif request.access_token:
+        # Verify Facebook access token (for web flow)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://graph.facebook.com/me",
+                    params={
+                        "access_token": request.access_token,
+                        "fields": "id,email,name,picture"
+                    }
+                )
+                if response.status_code != 200:
+                    raise HTTPException(status_code=401, detail="Invalid Facebook token")
+                
+                fb_data = response.json()
+                fb_email = fb_data.get("email", request.email).lower()
+                fb_name = fb_data.get("name", request.name)
+        except Exception as e:
+            logger.error(f"Facebook token verification failed: {e}")
+            fb_data = {"email": fb_email, "name": fb_name}
+    else:
+        raise HTTPException(status_code=400, detail="Either facebook_id or access_token is required")
+    
+    # Create device_id for user
+    user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
     
     # Check if user exists
     user = await db.users.find_one({"email": fb_email})
     
     if user:
+        user_device_id = user.get("device_id", user_device_id)
         await db.users.update_one(
             {"_id": user["_id"]},
             {"$set": {
                 "auth_provider": "facebook",
                 "name": fb_name or user.get("name", ""),
+                "picture": request.picture or user.get("picture"),
+                "device_id": user_device_id,
                 "last_login": datetime.now(timezone.utc).isoformat()
             }}
         )
@@ -1293,12 +1300,14 @@ async def facebook_auth(request: FacebookAuthRequest):
             "_id": user_id,
             "email": fb_email,
             "name": fb_name,
+            "picture": request.picture,
             "password_hash": None,
             "phone": None,
             "auth_provider": "facebook",
             "account_type": "free",
             "subscription_expires_at": None,
-            "is_email_verified": True,
+            "is_email_verified": True,  # Facebook emails are verified
+            "device_id": user_device_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_login": datetime.now(timezone.utc).isoformat()
         }
@@ -1311,6 +1320,7 @@ async def facebook_auth(request: FacebookAuthRequest):
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "device_id": user_device_id,
         "user": {
             "id": user["_id"],
             "email": user["email"],
@@ -1318,7 +1328,8 @@ async def facebook_auth(request: FacebookAuthRequest):
             "phone": user.get("phone"),
             "auth_provider": "facebook",
             "account_type": user.get("account_type", "free"),
-            "is_email_verified": True
+            "is_email_verified": True,
+            "device_id": user_device_id
         }
     }
 

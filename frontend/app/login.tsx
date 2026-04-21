@@ -16,17 +16,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
+import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const GOOGLE_CLIENT_ID_WEB = '959501343848-ka5h4aev01j01mh0se6qan71nrj9h8at.apps.googleusercontent.com';
 const GOOGLE_CLIENT_ID_ANDROID = '959501343848-u4lqddkaqai02dbfn111ksmg03glun69.apps.googleusercontent.com';
+const FACEBOOK_APP_ID = '1716931605974528';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
 export default function LoginScreen() {
-  const { signUp, signIn, signInWithGoogle, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
+  const { signUp, signIn, signInWithGoogle, signInWithFacebook, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
   const { theme, isDark } = useTheme();
   
   const [mode, setMode] = useState<AuthMode>('login');
@@ -40,12 +42,19 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [facebookLoading, setFacebookLoading] = useState(false);
 
   // Google Sign-In configuration
   const [request, response, promptAsync] = Google.useAuthRequest({
     androidClientId: GOOGLE_CLIENT_ID_ANDROID,
     webClientId: GOOGLE_CLIENT_ID_WEB,
     scopes: ['profile', 'email'],
+  });
+
+  // Facebook Sign-In configuration
+  const [fbRequest, fbResponse, fbPromptAsync] = Facebook.useAuthRequest({
+    clientId: FACEBOOK_APP_ID,
+    scopes: ['public_profile', 'email'],
   });
 
   // Handle Google Sign-In response
@@ -60,6 +69,19 @@ export default function LoginScreen() {
       setGoogleLoading(false);
     }
   }, [response]);
+
+  // Handle Facebook Sign-In response
+  useEffect(() => {
+    if (fbResponse?.type === 'success') {
+      const { authentication } = fbResponse;
+      if (authentication?.accessToken) {
+        handleFacebookSignIn(authentication.accessToken);
+      }
+    } else if (fbResponse?.type === 'error') {
+      setError('Αποτυχία σύνδεσης με Facebook');
+      setFacebookLoading(false);
+    }
+  }, [fbResponse]);
 
   const handleGoogleSignIn = async (accessToken: string) => {
     try {
@@ -88,6 +110,36 @@ export default function LoginScreen() {
       setError(err.message || 'Αποτυχία σύνδεσης με Google');
     } finally {
       setGoogleLoading(false);
+    }
+  };
+
+  const handleFacebookSignIn = async (accessToken: string) => {
+    try {
+      setFacebookLoading(true);
+      setError('');
+      
+      // Get user info from Facebook
+      const userInfoResponse = await fetch(
+        `https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${accessToken}`
+      );
+      
+      if (!userInfoResponse.ok) {
+        throw new Error('Failed to get user info from Facebook');
+      }
+      
+      const userInfo = await userInfoResponse.json();
+      
+      // Sign in with our backend
+      await signInWithFacebook({
+        email: userInfo.email || `${userInfo.id}@facebook.com`,
+        name: userInfo.name,
+        facebookId: userInfo.id,
+        picture: userInfo.picture?.data?.url,
+      });
+    } catch (err: any) {
+      setError(err.message || 'Αποτυχία σύνδεσης με Facebook');
+    } finally {
+      setFacebookLoading(false);
     }
   };
 
@@ -485,9 +537,22 @@ export default function LoginScreen() {
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity style={[styles.socialButton, { backgroundColor: '#1877F2' }]}>
-              <Ionicons name="logo-facebook" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Facebook</Text>
+            <TouchableOpacity 
+              style={[styles.socialButton, { backgroundColor: '#1877F2' }, (!fbRequest || facebookLoading) && styles.buttonDisabled]}
+              onPress={() => {
+                setFacebookLoading(true);
+                fbPromptAsync();
+              }}
+              disabled={!fbRequest || facebookLoading}
+            >
+              {facebookLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="logo-facebook" size={20} color="#fff" />
+                  <Text style={styles.socialButtonText}>Facebook</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity 
