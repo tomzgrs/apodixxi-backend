@@ -17,8 +17,12 @@ import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
 import * as Facebook from 'expo-auth-session/providers/facebook';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
+
+// Apple Authentication - only import on iOS
+const AppleAuthentication = Platform.OS === 'ios' 
+  ? require('expo-apple-authentication') 
+  : null;
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -47,11 +51,15 @@ export default function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [isAppleAvailable, setIsAppleAvailable] = useState(false);
 
-  // Check if Apple Sign-In is available
+  // Check if Apple Sign-In is available (iOS only)
   useEffect(() => {
     const checkAppleAvailability = async () => {
-      const available = await AppleAuthentication.isAvailableAsync();
-      setIsAppleAvailable(available);
+      if (Platform.OS === 'ios' && AppleAuthentication) {
+        const available = await AppleAuthentication.isAvailableAsync();
+        setIsAppleAvailable(available);
+      } else {
+        setIsAppleAvailable(false);
+      }
     };
     checkAppleAvailability();
   }, []);
@@ -156,6 +164,11 @@ export default function LoginScreen() {
   };
 
   const handleAppleSignIn = async () => {
+    if (Platform.OS !== 'ios' || !AppleAuthentication) {
+      setError('Apple Sign-In διαθέσιμο μόνο σε iOS');
+      return;
+    }
+    
     try {
       setAppleLoading(true);
       setError('');
