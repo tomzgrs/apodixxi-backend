@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,9 @@ import {
   Alert,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as InAppPurchases from 'expo-in-app-purchases';
 import { useTheme } from '../ThemeContext';
 import { useAuth } from '../AuthContext';
 
@@ -59,123 +59,51 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
   const { user, refreshUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
-  const [products, setProducts] = useState<InAppPurchases.IAPItemDetails[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
 
-  useEffect(() => {
-    initializeIAP();
-    return () => {
-      InAppPurchases.disconnectAsync().catch(() => {});
-    };
-  }, []);
-
-  const initializeIAP = async () => {
-    try {
-      setLoading(true);
-      
-      // Connect to the store
-      await InAppPurchases.connectAsync();
-      setIsConnected(true);
-      
-      // Get available products
-      const { results } = await InAppPurchases.getProductsAsync(Object.values(PRODUCT_IDS));
-      if (results) {
-        setProducts(results);
-      }
-      
-      // Set up purchase listener
-      InAppPurchases.setPurchaseListener(async ({ responseCode, results, errorCode }) => {
-        if (responseCode === InAppPurchases.IAPResponseCode.OK && results) {
-          for (const purchase of results) {
-            if (!purchase.acknowledged) {
-              // Verify purchase with backend
-              await verifyPurchase(purchase);
-              
-              // Finish the transaction
-              await InAppPurchases.finishTransactionAsync(purchase, true);
-            }
-          }
-        } else if (responseCode === InAppPurchases.IAPResponseCode.USER_CANCELED) {
-          console.log('User cancelled purchase');
-        } else {
-          console.error('Purchase error:', errorCode);
-          Alert.alert('Σφάλμα', 'Η αγορά απέτυχε. Δοκίμασε ξανά.');
-        }
-        setPurchaseLoading(null);
-      });
-      
-    } catch (error) {
-      console.error('IAP initialization error:', error);
-      setIsConnected(false);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const verifyPurchase = async (purchase: InAppPurchases.InAppPurchase) => {
-    try {
-      const response = await fetch(`${API_URL}/api/purchases/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receipt: Platform.OS === 'ios' ? purchase.transactionReceipt : purchase.purchaseToken,
-          product_id: purchase.productId,
-          platform: Platform.OS,
-          user_email: user?.email,
-        }),
-      });
-      
-      if (response.ok) {
-        Alert.alert(
-          'Επιτυχία!', 
-          'Καλωσήρθες στο apodixxi+! Απολαμβάνεις τώρα όλες τις premium δυνατότητες.',
-          [{ text: 'Τέλεια!', onPress: () => {
-            refreshUser?.();
-            onPurchaseComplete?.();
-          }}]
-        );
-      }
-    } catch (error) {
-      console.error('Purchase verification error:', error);
-    }
-  };
-
+  // Note: In-App Purchases require react-native-iap package for production
+  // This is a placeholder UI until the proper IAP integration is implemented
   const handlePurchase = async (productId: string) => {
-    if (!isConnected) {
-      Alert.alert('Σφάλμα', 'Δεν είναι δυνατή η σύνδεση με το κατάστημα. Δοκίμασε ξανά.');
-      return;
-    }
+    setPurchaseLoading(productId);
     
-    try {
-      setPurchaseLoading(productId);
-      await InAppPurchases.purchaseItemAsync(productId);
-    } catch (error) {
-      console.error('Purchase error:', error);
-      Alert.alert('Σφάλμα', 'Η αγορά απέτυχε. Δοκίμασε ξανά.');
-      setPurchaseLoading(null);
-    }
+    // Simulate purchase flow - in production, this would use react-native-iap
+    Alert.alert(
+      'In-App Purchases',
+      'Οι αγορές μέσα στην εφαρμογή θα ενεργοποιηθούν σύντομα. Επικοινώνησε μαζί μας για να αναβαθμίσεις τον λογαριασμό σου.',
+      [
+        { text: 'Ακύρωση', style: 'cancel' },
+        { 
+          text: 'Επικοινωνία', 
+          onPress: () => Linking.openURL('mailto:support@apodixxi.app?subject=Premium%20Αναβάθμιση')
+        }
+      ]
+    );
+    
+    setPurchaseLoading(null);
   };
 
   const handleRestorePurchases = async () => {
+    setLoading(true);
+    
+    // Check purchase status with backend
     try {
-      setLoading(true);
-      const { results } = await InAppPurchases.getPurchaseHistoryAsync();
-      
-      if (results && results.length > 0) {
-        // Verify restored purchases with backend
-        for (const purchase of results) {
-          await verifyPurchase(purchase);
+      if (user?.email) {
+        const response = await fetch(`${API_URL}/api/purchases/status?user_email=${user.email}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.is_premium) {
+            Alert.alert('Επιτυχία', 'Οι αγορές σου επαναφέρθηκαν!');
+            refreshUser?.();
+            onPurchaseComplete?.();
+          } else {
+            Alert.alert('Πληροφορία', 'Δεν βρέθηκαν προηγούμενες αγορές.');
+          }
         }
-        Alert.alert('Επιτυχία', 'Οι αγορές σου επαναφέρθηκαν!');
-      } else {
-        Alert.alert('Πληροφορία', 'Δεν βρέθηκαν προηγούμενες αγορές.');
       }
     } catch (error) {
-      console.error('Restore error:', error);
       Alert.alert('Σφάλμα', 'Η επαναφορά αγορών απέτυχε.');
-    } finally {
-      setLoading(false);
     }
+    
+    setLoading(false);
   };
 
   const styles = createStyles(theme, isDark);
@@ -230,44 +158,55 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
           {loading ? (
             <ActivityIndicator size="large" color={theme.primary} />
           ) : (
-            SUBSCRIPTION_PLANS.map((plan) => {
-              const productInfo = products.find(p => p.productId === plan.id);
-              return (
-                <TouchableOpacity
-                  key={plan.id}
-                  style={[
-                    styles.planCard,
-                    plan.popular && styles.popularPlan,
-                  ]}
-                  onPress={() => handlePurchase(plan.id)}
-                  disabled={purchaseLoading !== null}
-                >
-                  {plan.popular && (
-                    <View style={styles.popularBadge}>
-                      <Text style={styles.popularBadgeText}>Δημοφιλές</Text>
-                    </View>
-                  )}
-                  <Text style={styles.planTitle}>{plan.title}</Text>
-                  <Text style={styles.planDescription}>{plan.description}</Text>
-                  <View style={styles.priceContainer}>
-                    <Text style={styles.planPrice}>
-                      {productInfo?.price || plan.price}
-                    </Text>
-                    <Text style={styles.planPeriod}>{plan.period}</Text>
+            SUBSCRIPTION_PLANS.map((plan) => (
+              <TouchableOpacity
+                key={plan.id}
+                style={[
+                  styles.planCard,
+                  plan.popular && styles.popularPlan,
+                ]}
+                onPress={() => handlePurchase(plan.id)}
+                disabled={purchaseLoading !== null}
+              >
+                {plan.popular && (
+                  <View style={styles.popularBadge}>
+                    <Text style={styles.popularBadgeText}>Δημοφιλές</Text>
                   </View>
-                  {purchaseLoading === plan.id ? (
-                    <ActivityIndicator color={plan.popular ? '#fff' : theme.primary} />
-                  ) : (
-                    <View style={[styles.purchaseButton, plan.popular && styles.popularButton]}>
-                      <Text style={[styles.purchaseButtonText, plan.popular && styles.popularButtonText]}>
-                        Επιλογή
-                      </Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })
+                )}
+                <Text style={[styles.planTitle, plan.popular && styles.popularText]}>
+                  {plan.title}
+                </Text>
+                <Text style={[styles.planDescription, plan.popular && styles.popularTextLight]}>
+                  {plan.description}
+                </Text>
+                <View style={styles.priceContainer}>
+                  <Text style={[styles.planPrice, plan.popular && styles.popularText]}>
+                    {plan.price}
+                  </Text>
+                  <Text style={[styles.planPeriod, plan.popular && styles.popularTextLight]}>
+                    {plan.period}
+                  </Text>
+                </View>
+                {purchaseLoading === plan.id ? (
+                  <ActivityIndicator color={plan.popular ? '#fff' : theme.primary} />
+                ) : (
+                  <View style={[styles.purchaseButton, plan.popular && styles.popularButton]}>
+                    <Text style={[styles.purchaseButtonText, plan.popular && styles.popularButtonText]}>
+                      Επιλογή
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))
           )}
+        </View>
+
+        {/* Coming Soon Notice */}
+        <View style={styles.noticeContainer}>
+          <Ionicons name="information-circle-outline" size={20} color={theme.textSecondary} />
+          <Text style={styles.noticeText}>
+            Οι αγορές μέσα στην εφαρμογή έρχονται σύντομα. Επικοινώνησε μαζί μας για premium πρόσβαση.
+          </Text>
         </View>
 
         {/* Restore Purchases */}
@@ -403,6 +342,12 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     color: theme.textSecondary,
     marginBottom: 12,
   },
+  popularText: {
+    color: '#fff',
+  },
+  popularTextLight: {
+    color: 'rgba(255,255,255,0.8)',
+  },
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -433,7 +378,22 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     color: '#fff',
   },
   popularButtonText: {
-    color: theme.primary,
+    color: '#0d9488',
+  },
+  noticeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5',
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: 13,
+    color: theme.textSecondary,
+    lineHeight: 18,
   },
   restoreButton: {
     alignItems: 'center',
