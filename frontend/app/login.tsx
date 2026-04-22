@@ -18,11 +18,7 @@ import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
 import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as WebBrowser from 'expo-web-browser';
-
-// Apple Authentication - only import on iOS
-const AppleAuthentication = Platform.OS === 'ios' 
-  ? require('expo-apple-authentication') 
-  : null;
+import AppleSignInButton from '../src/components/AppleSignInButton';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -49,20 +45,6 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [facebookLoading, setFacebookLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
-  const [isAppleAvailable, setIsAppleAvailable] = useState(false);
-
-  // Check if Apple Sign-In is available (iOS only)
-  useEffect(() => {
-    const checkAppleAvailability = async () => {
-      if (Platform.OS === 'ios' && AppleAuthentication) {
-        const available = await AppleAuthentication.isAvailableAsync();
-        setIsAppleAvailable(available);
-      } else {
-        setIsAppleAvailable(false);
-      }
-    };
-    checkAppleAvailability();
-  }, []);
 
   // Google Sign-In configuration
   const [request, response, promptAsync] = Google.useAuthRequest({
@@ -160,47 +142,6 @@ export default function LoginScreen() {
       setError(err.message || 'Αποτυχία σύνδεσης με Facebook');
     } finally {
       setFacebookLoading(false);
-    }
-  };
-
-  const handleAppleSignIn = async () => {
-    if (Platform.OS !== 'ios' || !AppleAuthentication) {
-      setError('Apple Sign-In διαθέσιμο μόνο σε iOS');
-      return;
-    }
-    
-    try {
-      setAppleLoading(true);
-      setError('');
-      
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      
-      // Get user details from credential
-      const appleEmail = credential.email || `${credential.user}@privaterelay.appleid.com`;
-      const appleName = credential.fullName 
-        ? `${credential.fullName.givenName || ''} ${credential.fullName.familyName || ''}`.trim()
-        : '';
-      
-      // Sign in with our backend
-      await signInWithApple({
-        appleId: credential.user,
-        email: appleEmail,
-        name: appleName,
-        identityToken: credential.identityToken || '',
-      });
-    } catch (err: any) {
-      if (err.code === 'ERR_REQUEST_CANCELED') {
-        // User canceled the sign-in
-        return;
-      }
-      setError(err.message || 'Αποτυχία σύνδεσης με Apple');
-    } finally {
-      setAppleLoading(false);
     }
   };
 
@@ -591,22 +532,12 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {Platform.OS === 'ios' && isAppleAvailable && (
-              <TouchableOpacity 
-                style={[styles.socialButton, { backgroundColor: '#000' }, appleLoading && styles.buttonDisabled]}
-                onPress={handleAppleSignIn}
-                disabled={appleLoading}
-              >
-                {appleLoading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="logo-apple" size={20} color="#fff" />
-                    <Text style={styles.socialButtonText}>Apple</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
+            <AppleSignInButton
+              onSignIn={signInWithApple}
+              isLoading={appleLoading}
+              setIsLoading={setAppleLoading}
+              setError={setError}
+            />
 
             <TouchableOpacity 
               style={[styles.socialButton, { backgroundColor: '#1877F2' }, (!fbRequest || facebookLoading) && styles.buttonDisabled]}
