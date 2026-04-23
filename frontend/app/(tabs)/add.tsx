@@ -9,7 +9,7 @@ import { useTheme } from '../../src/ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 
-type Tab = 'url' | 'xml' | 'manual';
+type Tab = 'url' | 'manual';
 
 export default function AddReceiptScreen() {
   const { t, lang } = useContext(I18nContext);
@@ -63,23 +63,6 @@ export default function AddReceiptScreen() {
       
       Alert.alert(t('success'), t('receipt_imported'), [
         { text: 'OK', onPress: () => { setUrl(''); router.push(`/receipt/${result.receipt.id}`); } }
-      ]);
-    } catch (e: any) {
-      Alert.alert(t('error'), e.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleXmlUpload = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({ type: ['text/xml', 'application/xml', '*/*'] });
-      if (result.canceled) return;
-      const file = result.assets[0];
-      setLoading(true);
-      const res = await api.importFromXml(file.uri, file.name);
-      Alert.alert(t('success'), t('receipt_imported'), [
-        { text: 'OK', onPress: () => router.push(`/receipt/${res.receipt.id}`) }
       ]);
     } catch (e: any) {
       Alert.alert(t('error'), e.message);
@@ -284,7 +267,7 @@ export default function AddReceiptScreen() {
 
           {/* Tabs */}
           <View style={styles.tabs}>
-            {(['url', 'xml', 'manual'] as Tab[]).map((tab) => (
+            {(['url', 'manual'] as Tab[]).map((tab) => (
               <TouchableOpacity
                 key={tab}
                 testID={`tab-${tab}`}
@@ -293,7 +276,7 @@ export default function AddReceiptScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                  {tab === 'url' ? t('paste_url') : tab === 'xml' ? t('upload_xml') : t('manual_entry')}
+                  {tab === 'url' ? t('paste_url') : t('manual_entry')}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -332,34 +315,6 @@ export default function AddReceiptScreen() {
                 <Text style={[styles.supportedTitle, { marginTop: 12 }]}>{lang === 'el' ? 'Με WebView (ανοίγει στην εφαρμογή):' : 'With WebView (opens in app):'}</Text>
                 {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
                   <Text key={s} style={styles.supportedItem}>⎔ {s}</Text>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* XML Tab */}
-          {activeTab === 'xml' && (
-            <View style={styles.card}>
-              <Text style={styles.hint}>{t('xml_hint')}</Text>
-              <TouchableOpacity
-                testID="upload-xml-btn"
-                style={styles.uploadBtn}
-                onPress={handleXmlUpload}
-                disabled={loading}
-                activeOpacity={0.8}
-              >
-                {loading ? <ActivityIndicator color={theme.primary} /> : (
-                  <>
-                    <Ionicons name="document-text-outline" size={44} color={theme.primary} />
-                    <Text style={styles.uploadText}>{t('upload_xml')}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <View style={styles.supportedStores}>
-                <Text style={styles.supportedTitle}>{t('supported_stores')} ({t('xml_upload')}):</Text>
-                {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
-                  <Text key={s} style={styles.supportedItem}>⎙ {s}</Text>
                 ))}
               </View>
             </View>
