@@ -45,7 +45,6 @@
           "androidAppId": "ca-app-pub-2145791775687228~3322381104"
         }
       ],
-      "react-native-iap",
       [
         "expo-camera",
         {
