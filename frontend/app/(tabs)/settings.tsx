@@ -59,38 +59,40 @@ export default function SettingsScreen() {
       // User is paid - proceed with export
       setIsExporting(true);
       
-      const blob = await api.exportReceipts(accessToken);
-      
-      // Convert blob to base64
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        try {
-          const base64 = (reader.result as string).split(',')[1];
-          const filename = `apodixxi_export_${new Date().toISOString().split('T')[0]}.xlsx`;
-          const fileUri = `${FileSystem.documentDirectory}${filename}`;
-          
-          await FileSystem.writeAsStringAsync(fileUri, base64, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(fileUri, {
-              mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-              dialogTitle: 'Εξαγωγή Δεδομένων apodixxi',
-            });
-          } else {
-            Alert.alert('Επιτυχία', `Το αρχείο αποθηκεύτηκε: ${filename}`);
+      try {
+        const filename = `apodixxi_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+        const fileUri = `${FileSystem.documentDirectory}${filename}`;
+        
+        // Download file directly using FileSystem
+        const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+        const downloadResult = await FileSystem.downloadAsync(
+          `${API_URL}/api/export/receipts`,
+          fileUri,
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
           }
-        } catch (err: any) {
-          Alert.alert('Σφάλμα', 'Αποτυχία αποθήκευσης αρχείου');
+        );
+
+        if (downloadResult.status !== 200) {
+          throw new Error('Αποτυχία λήψης αρχείου');
         }
-        setIsExporting(false);
-      };
-      reader.onerror = () => {
-        Alert.alert('Σφάλμα', 'Αποτυχία επεξεργασίας αρχείου');
-        setIsExporting(false);
-      };
-      reader.readAsDataURL(blob);
+
+        // Share the file
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(downloadResult.uri, {
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dialogTitle: 'Εξαγωγή Δεδομένων apodixxi',
+          });
+        } else {
+          Alert.alert('Επιτυχία', `Το αρχείο αποθηκεύτηκε: ${filename}`);
+        }
+      } catch (err: any) {
+        console.error('Export error:', err);
+        Alert.alert('Σφάλμα', err.message || 'Αποτυχία αποθήκευσης αρχείου');
+      }
+      setIsExporting(false);
       
     } catch (e: any) {
       setIsExporting(false);
