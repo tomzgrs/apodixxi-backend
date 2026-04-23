@@ -39,7 +39,6 @@ export default function LoginScreen() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
-  const [mockOtp, setMockOtp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -201,10 +200,9 @@ export default function LoginScreen() {
 
     try {
       const mockCode = await requestPhoneOTP(formattedPhone);
-      setMockOtp(mockCode);
       setPhone(formattedPhone);
       setMode('phone-otp');
-      Alert.alert('OTP Στάλθηκε', `Κωδικός: ${mockCode} (development only)`);
+      Alert.alert('OTP Στάλθηκε', 'Ένα SMS με κωδικό επαλήθευσης στάλθηκε στο τηλέφωνό σας.');
     } catch (err: any) {
       setError(err.message || 'Αποτυχία αποστολής OTP');
     }

@@ -158,6 +158,10 @@ class PhoneOTPVerifyRequest(BaseModel):
     phone_number: str
     otp: str
 
+class FirebasePhoneVerifyRequest(BaseModel):
+    phone_number: str
+    firebase_uid: str
+
 class PhoneCompleteRequest(BaseModel):
     phone_number: str
     email: str
@@ -1398,6 +1402,28 @@ async def verify_phone_otp(request: PhoneOTPVerifyRequest):
     })
     
     return {"success": True, "message": "OTP verified. Please provide your email."}
+
+
+@api_router.post("/auth/phone/verify-firebase")
+async def verify_firebase_phone(request: FirebasePhoneVerifyRequest):
+    """Verify phone authentication via Firebase.
+    
+    This endpoint is called after Firebase phone auth succeeds.
+    It marks the phone as verified in our system.
+    """
+    logger.info(f"🔥 Firebase phone verify: {request.phone_number} - UID: {request.firebase_uid}")
+    
+    # Store as verified (same as mock OTP flow)
+    await db.pending_phone_auth.delete_many({"phone_number": request.phone_number})
+    await db.pending_phone_auth.insert_one({
+        "_id": str(uuid.uuid4()),
+        "phone_number": request.phone_number,
+        "firebase_uid": request.firebase_uid,
+        "verified_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+    })
+    
+    return {"success": True, "message": "Phone verified via Firebase. Please provide your email."}
 
 
 @api_router.post("/auth/phone/complete")

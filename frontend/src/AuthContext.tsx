@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { sendPhoneOTP as firebaseSendOTP, verifyPhoneOTP as firebaseVerifyOTP, signOutFirebase } from './services/firebasePhoneAuth';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -258,32 +259,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // Phone number that was used for OTP (stored for verification)
+  const [pendingPhoneNumber, setPendingPhoneNumber] = useState<string>('');
+
   const requestPhoneOTP = useCallback(async (phoneNumber: string): Promise<string> => {
-    const response = await fetch(`${API_URL}/api/auth/phone/request-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone_number: phoneNumber })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to send OTP');
+    // Use Firebase for real SMS OTP
+    try {
+      await firebaseSendOTP(phoneNumber);
+      setPendingPhoneNumber(phoneNumber);
+      return ''; // No mock OTP - real SMS will be sent
+    } catch (error: any) {
+      console.error('[AuthContext] Firebase OTP error:', error);
+      throw error;
     }
-
-    const data = await response.json();
-    return data.mock_otp || ''; // Returns mock OTP for development
   }, []);
 
   const verifyPhoneOTP = useCallback(async (phoneNumber: string, otp: string) => {
-    const response = await fetch(`${API_URL}/api/auth/phone/verify-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone_number: phoneNumber, otp })
-    });
+    try {
+      // Verify OTP with Firebase
+      const firebaseUser = await firebaseVerifyOTP(otp);
+      
+      // Now verify with our backend
+      const response = await fetch(`${API_URL}/api/auth/phone/verify-firebase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          phone_number: phoneNumber,
+          firebase_uid: firebaseUser.uid 
+        })
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Invalid OTP');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Phone verification failed');
+      }
+    } catch (error: any) {
+      console.error('[AuthContext] Verify OTP error:', error);
+      throw error;
     }
   }, []);
 

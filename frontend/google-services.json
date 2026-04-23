@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "889769499922",
+    "project_id": "apodixxi-58736",
+    "storage_bucket": "apodixxi-58736.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:889769499922:android:14119b3a0b2f4b41bc27cb",
+        "android_client_info": {
+          "package_name": "com.apodixxi.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA5IS0_wB_CDpCmS11AlhSG9SxOweVuVzw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
