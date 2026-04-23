@@ -35,7 +35,11 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
+    "assetBundlePatterns": [
+      "assets/**/*"
+    ],
     "plugins": [
+      "./plugins/with-android-assets",
       "expo-router",
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
