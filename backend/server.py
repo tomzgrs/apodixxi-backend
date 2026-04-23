@@ -3058,11 +3058,31 @@ async def get_all_receipts(
     receipts_cursor = await db.receipts.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.receipts.count_documents(query)
     
-    # Convert ObjectId to string
+    # Build user lookup map (device_id -> user info)
+    device_ids = list(set(r.get("device_id") for r in receipts_cursor if r.get("device_id")))
+    users = await db.users.find({"device_id": {"$in": device_ids}}).to_list(1000)
+    user_map = {}
+    for u in users:
+        if u.get("device_id"):
+            user_map[u["device_id"]] = {
+                "email": u.get("email", ""),
+                "phone": u.get("phone", ""),
+                "name": u.get("name", ""),
+                "auth_provider": u.get("auth_provider", "unknown")
+            }
+    
+    # Convert ObjectId to string and add user info
     receipts = []
     for r in receipts_cursor:
         if "_id" in r:
             r["_id"] = str(r["_id"])
+        # Add user info
+        device_id = r.get("device_id", "")
+        user_info = user_map.get(device_id, {})
+        r["user_email"] = user_info.get("email", "")
+        r["user_phone"] = user_info.get("phone", "")
+        r["user_name"] = user_info.get("name", "")
+        r["auth_provider"] = user_info.get("auth_provider", "")
         receipts.append(r)
     
     return {
@@ -3102,8 +3122,8 @@ async def export_all_receipts_excel(
     ws_receipts = wb.active
     ws_receipts.title = "Αποδείξεις"
     
-    # Headers for receipts
-    receipt_headers = ["ID Απόδειξης", "Device ID", "Χρήστης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων"]
+    # Headers for receipts - UPDATED with more user details
+    receipt_headers = ["ID Απόδειξης", "Device ID", "Email Χρήστη", "Τηλέφωνο", "Τρόπος Σύνδεσης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων"]
     
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="0D9488", end_color="0D9488", fill_type="solid")
@@ -3121,30 +3141,48 @@ async def export_all_receipts_excel(
         cell.border = thin_border
         cell.alignment = Alignment(horizontal='center')
     
-    # Get user emails for device_ids
+    # Get full user info for device_ids
     device_user_map = {}
-    users = await db.users.find({}, {"device_id": 1, "email": 1}).to_list(10000)
+    users = await db.users.find({}, {"device_id": 1, "email": 1, "phone": 1, "auth_provider": 1, "name": 1}).to_list(10000)
     for user in users:
         if user.get("device_id"):
-            device_user_map[user["device_id"]] = user.get("email", "")
+            device_user_map[user["device_id"]] = {
+                "email": user.get("email", ""),
+                "phone": user.get("phone", ""),
+                "auth_provider": user.get("auth_provider", "unknown"),
+                "name": user.get("name", "")
+            }
+    
+    # Auth provider display names
+    auth_provider_names = {
+        "email": "Email/Password",
+        "google": "Google",
+        "facebook": "Facebook",
+        "apple": "Apple",
+        "phone": "Phone SMS",
+        "unknown": "Άγνωστο"
+    }
     
     for row, receipt in enumerate(receipts, 2):
         device_id = receipt.get("device_id", "")
-        user_email = device_user_map.get(device_id, "Ανώνυμος")
+        user_info = device_user_map.get(device_id, {})
         
-        ws_receipts.cell(row=row, column=1, value=receipt.get("id", receipt.get("_id", "")))
+        ws_receipts.cell(row=row, column=1, value=str(receipt.get("id", receipt.get("_id", ""))))
         ws_receipts.cell(row=row, column=2, value=device_id)
-        ws_receipts.cell(row=row, column=3, value=user_email)
-        ws_receipts.cell(row=row, column=4, value=receipt.get("store_name", ""))
-        ws_receipts.cell(row=row, column=5, value=receipt.get("store_vat", ""))
-        ws_receipts.cell(row=row, column=6, value=receipt.get("date", ""))
-        ws_receipts.cell(row=row, column=7, value=receipt.get("total", 0))
-        ws_receipts.cell(row=row, column=8, value=receipt.get("payment_method", ""))
-        ws_receipts.cell(row=row, column=9, value=len(receipt.get("items", [])))
+        ws_receipts.cell(row=row, column=3, value=user_info.get("email", "Ανώνυμος"))
+        ws_receipts.cell(row=row, column=4, value=user_info.get("phone", "-"))
+        ws_receipts.cell(row=row, column=5, value=auth_provider_names.get(user_info.get("auth_provider", "unknown"), "Άγνωστο"))
+        ws_receipts.cell(row=row, column=6, value=receipt.get("store_name", ""))
+        ws_receipts.cell(row=row, column=7, value=receipt.get("store_vat", ""))
+        ws_receipts.cell(row=row, column=8, value=receipt.get("date", ""))
+        ws_receipts.cell(row=row, column=9, value=receipt.get("total", 0))
+        ws_receipts.cell(row=row, column=10, value=receipt.get("payment_method", ""))
+        ws_receipts.cell(row=row, column=11, value=len(receipt.get("items", [])))
     
     # Adjust column widths for receipts sheet
-    for col in range(1, len(receipt_headers) + 1):
-        ws_receipts.column_dimensions[get_column_letter(col)].width = 18
+    col_widths_receipts = [22, 18, 30, 15, 18, 20, 15, 12, 12, 15, 12]
+    for col, width in enumerate(col_widths_receipts, 1):
+        ws_receipts.column_dimensions[get_column_letter(col)].width = width
     
     # Sheet 2: All Products
     ws_products = wb.create_sheet("Προϊόντα")
@@ -3841,7 +3879,7 @@ async def admin_dashboard():
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>ID</th><th>Χρήστης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th></tr></thead>
+                            <thead><tr><th>ID</th><th>Email</th><th>Τηλέφωνο</th><th>Τρόπος Σύνδεσης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th></tr></thead>
                             <tbody id="receiptsTable"></tbody>
                         </table>
                     </div>
@@ -4110,6 +4148,19 @@ async def admin_dashboard():
             return res;
         }
         
+        // Format auth provider for display
+        function formatAuthProvider(provider) {
+            const providers = {
+                'email': '📧 Email',
+                'google': '🔵 Google',
+                'facebook': '🔷 Facebook',
+                'apple': '🍎 Apple',
+                'phone': '📱 Phone',
+                'unknown': '❓ Unknown'
+            };
+            return providers[provider] || providers['unknown'];
+        }
+        
         async function loadOverview() {
             try {
                 const res = await apiCall('/admin/stats');
@@ -4165,7 +4216,9 @@ async def admin_dashboard():
                 document.getElementById('receiptsTable').innerHTML = data.receipts.map(r => `
                     <tr>
                         <td title="${r.id || r._id}">${(r.id || r._id || '').substring(0, 8)}...</td>
-                        <td title="${r.device_id}">${(r.device_id || '').substring(0, 12)}...</td>
+                        <td>${r.user_email || '-'}</td>
+                        <td>${r.user_phone || '-'}</td>
+                        <td><span class="badge badge-info">${formatAuthProvider(r.auth_provider)}</span></td>
                         <td>${r.store_name || '-'}</td>
                         <td>${r.date || '-'}</td>
                         <td><strong>€${(r.total || 0).toFixed(2)}</strong></td>
