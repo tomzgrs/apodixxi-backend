@@ -40,6 +40,12 @@
       "@react-native-firebase/app",
       "@react-native-firebase/auth",
       [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-2145791775687228~3322381104"
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Scan receipt QR codes to import purchases",

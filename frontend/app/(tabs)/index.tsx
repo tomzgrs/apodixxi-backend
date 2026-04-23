@@ -12,7 +12,7 @@ import { getStoreLogo } from '../../src/storeLogos';
 import { BarChart, DonutChart, DonutLegend, TrendIndicator } from '../../src/components/Charts';
 import { Recommendations } from '../../src/components/Recommendations';
 import AIAssistant from '../../src/components/AIAssistant';
-// import AdBanner from '../../src/components/AdBanner'; // Temporarily disabled
+import AdBanner from '../../src/components/AdBanner';
 
 export default function DashboardScreen() {
   const { t, lang } = useContext(I18nContext);
@@ -418,13 +418,8 @@ export default function DashboardScreen() {
           </>
         )}
         
-        {/* AdBanner for Free Users - Temporarily disabled
-        {Platform.OS !== 'web' && (
-          <View style={styles.adContainer}>
-            <AdBanner />
-          </View>
-        )}
-        */}
+        {/* AdBanner for Free Users */}
+        <AdBanner position="bottom" />
       </ScrollView>
 
       {/* AI Assistant Floating Button */}
