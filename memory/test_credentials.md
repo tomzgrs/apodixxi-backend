@@ -1,8 +1,16 @@
 # Test Credentials for apodixxi
 
-## Admin Dashboard
-- **URL:** `/api/admin-panel` (Web Dashboard - accessible via browser)
+## Admin Dashboard (NEW!)
+- **URL:** `/api/admin/dashboard` (Web Dashboard - accessible via browser)
+- **Username:** `admin`
 - **Password:** `admin2024!`
+
+### Admin Dashboard Features:
+- Επισκόπηση (Overview): Στατιστικά εφαρμογής
+- Αποδείξεις: Διαχείριση & Excel Export
+- Χρήστες: Λίστα χρηστών & αναβάθμιση σε Premium
+- Προωθήσεις: Promoted προϊόντα στις προτάσεις
+- Promo Codes: Κωδικοί για δωρεάν Premium
 
 ## Test User Account
 - **Email:** `test@example.com`
@@ -12,9 +20,9 @@
 - **Admin Email:** `admin@example.com` (configurable in backend/.env)
 - **SMTP:** Not configured yet (set SMTP_USER and SMTP_PASSWORD in backend/.env)
 
-## Phone OTP (Mock)
-- OTP codes are logged in backend console during development
-- Will be sent via SMS in production (Twilio/Firebase)
+## Phone OTP (Firebase)
+- Real SMS via Firebase Phone Auth
+- Configure in `/app/frontend/src/firebase.ts`
 
 ## App Users
 - Users must register/login before using the app
@@ -22,6 +30,7 @@
 
 ## .env Configuration (backend/.env)
 ```
+ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin2024!
 ADMIN_EMAIL=admin@example.com
 JWT_SECRET_KEY=apodixxi-super-secret-key-change-in-production-2024

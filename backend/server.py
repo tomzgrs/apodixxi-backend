@@ -1660,10 +1660,14 @@ async def create_promo_code(
     code: str = Body(...),
     duration_days: int = Body(30),
     max_uses: Optional[int] = Body(None),
-    admin_key: str = Query(...)
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
 ):
     """Create a new promo code (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     code_upper = code.upper()
@@ -1689,9 +1693,15 @@ async def create_promo_code(
 
 
 @api_router.get("/admin/promo-codes")
-async def list_promo_codes(admin_key: str = Query(...)):
+async def list_promo_codes(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
     """List all promo codes (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     codes = await db.promo_codes.find().to_list(100)
@@ -1699,9 +1709,16 @@ async def list_promo_codes(admin_key: str = Query(...)):
 
 
 @api_router.delete("/admin/promo-codes/{code}")
-async def delete_promo_code(code: str, admin_key: str = Query(...)):
+async def delete_promo_code(
+    code: str, 
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
     """Delete a promo code (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     result = await db.promo_codes.delete_one({"code": code.upper()})
@@ -1712,9 +1729,17 @@ async def delete_promo_code(code: str, admin_key: str = Query(...)):
 
 
 @api_router.patch("/admin/promo-codes/{code}/toggle")
-async def toggle_promo_code(code: str, is_active: bool = Query(...), admin_key: str = Query(...)):
+async def toggle_promo_code(
+    code: str, 
+    is_active: bool = Query(...), 
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
     """Toggle a promo code active/inactive (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     result = await db.promo_codes.update_one(
@@ -2204,10 +2229,14 @@ async def get_after_save_recommendations(
 @api_router.post("/admin/promotions")
 async def create_promotion(
     promo: PromotionCreate,
-    admin_key: str = Query(...)
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
 ):
     """Create a new promotion (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     promotion = {
@@ -2240,9 +2269,15 @@ async def create_promotion(
 
 
 @api_router.get("/admin/promotions")
-async def list_promotions(admin_key: str = Query(...)):
+async def list_promotions(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
     """List all promotions (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     promotions = await db.promotions.find().sort("created_at", -1).to_list(100)
@@ -2253,10 +2288,14 @@ async def list_promotions(admin_key: str = Query(...)):
 async def update_promotion(
     promo_id: str,
     updates: dict = Body(...),
-    admin_key: str = Query(...)
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
 ):
     """Update a promotion (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     # Remove _id from updates if present
@@ -2275,9 +2314,16 @@ async def update_promotion(
 
 
 @api_router.delete("/admin/promotions/{promo_id}")
-async def delete_promotion(promo_id: str, admin_key: str = Query(...)):
+async def delete_promotion(
+    promo_id: str, 
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
     """Delete a promotion (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     result = await db.promotions.delete_one({"_id": promo_id})
@@ -2942,8 +2988,1447 @@ async def request_store_review(
 
 # ============ ADMIN ENDPOINTS ============
 
-# Admin password - In production, this should be in environment variables
+# Admin credentials - In production, use secure environment variables
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin2024!")
+
+# ============ ADMIN AUTHENTICATION ============
+
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+@api_router.post("/admin/login")
+async def admin_login(request: AdminLoginRequest):
+    """Admin login with username/password."""
+    if request.username != ADMIN_USERNAME or request.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Generate admin session token (simple JWT-like for admin)
+    admin_token = jwt.encode(
+        {
+            "sub": "admin",
+            "role": "admin",
+            "exp": datetime.utcnow() + timedelta(hours=24),
+            "iat": datetime.utcnow()
+        },
+        JWT_SECRET_KEY,
+        algorithm=JWT_ALGORITHM
+    )
+    
+    return {
+        "success": True,
+        "admin_token": admin_token,
+        "expires_in": 86400  # 24 hours
+    }
+
+async def verify_admin_token(admin_token: str):
+    """Verify admin token and return True if valid."""
+    try:
+        payload = jwt.decode(admin_token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload.get("role") == "admin"
+    except JWTError:
+        return False
+
+# ============ ADMIN RECEIPTS & PRODUCTS EXPORT ============
+
+@api_router.get("/admin/receipts/all")
+async def get_all_receipts(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
+    filter_store: str = Query(None),
+    filter_user: str = Query(None),
+    skip: int = 0,
+    limit: int = 100
+):
+    """Get all receipts with filters (Admin only)."""
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    query = {}
+    if filter_store:
+        query["store_name"] = {"$regex": filter_store, "$options": "i"}
+    if filter_user:
+        query["device_id"] = filter_user
+    
+    receipts_cursor = await db.receipts.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.receipts.count_documents(query)
+    
+    # Convert ObjectId to string
+    receipts = []
+    for r in receipts_cursor:
+        if "_id" in r:
+            r["_id"] = str(r["_id"])
+        receipts.append(r)
+    
+    return {
+        "receipts": receipts,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
+
+@api_router.get("/admin/receipts/export-excel")
+async def export_all_receipts_excel(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
+    filter_store: str = Query(None),
+    filter_user: str = Query(None)
+):
+    """Export all receipts and products to Excel (Admin only)."""
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    query = {}
+    if filter_store:
+        query["store_name"] = {"$regex": filter_store, "$options": "i"}
+    if filter_user:
+        query["device_id"] = filter_user
+    
+    receipts = await db.receipts.find(query).sort("created_at", -1).to_list(10000)
+    
+    # Create Excel workbook with multiple sheets
+    wb = Workbook()
+    
+    # Sheet 1: Receipts Overview
+    ws_receipts = wb.active
+    ws_receipts.title = "Αποδείξεις"
+    
+    # Headers for receipts
+    receipt_headers = ["ID Απόδειξης", "Device ID", "Χρήστης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων"]
+    
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="0D9488", end_color="0D9488", fill_type="solid")
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    for col, header in enumerate(receipt_headers, 1):
+        cell = ws_receipts.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center')
+    
+    # Get user emails for device_ids
+    device_user_map = {}
+    users = await db.users.find({}, {"device_id": 1, "email": 1}).to_list(10000)
+    for user in users:
+        if user.get("device_id"):
+            device_user_map[user["device_id"]] = user.get("email", "")
+    
+    for row, receipt in enumerate(receipts, 2):
+        device_id = receipt.get("device_id", "")
+        user_email = device_user_map.get(device_id, "Ανώνυμος")
+        
+        ws_receipts.cell(row=row, column=1, value=receipt.get("id", receipt.get("_id", "")))
+        ws_receipts.cell(row=row, column=2, value=device_id)
+        ws_receipts.cell(row=row, column=3, value=user_email)
+        ws_receipts.cell(row=row, column=4, value=receipt.get("store_name", ""))
+        ws_receipts.cell(row=row, column=5, value=receipt.get("store_vat", ""))
+        ws_receipts.cell(row=row, column=6, value=receipt.get("date", ""))
+        ws_receipts.cell(row=row, column=7, value=receipt.get("total", 0))
+        ws_receipts.cell(row=row, column=8, value=receipt.get("payment_method", ""))
+        ws_receipts.cell(row=row, column=9, value=len(receipt.get("items", [])))
+    
+    # Adjust column widths for receipts sheet
+    for col in range(1, len(receipt_headers) + 1):
+        ws_receipts.column_dimensions[get_column_letter(col)].width = 18
+    
+    # Sheet 2: All Products
+    ws_products = wb.create_sheet("Προϊόντα")
+    
+    product_headers = ["ID Απόδειξης", "Κατάστημα", "Ημερομηνία", "Κωδικός Προϊόντος", "Περιγραφή", "Ποσότητα", "Τιμή Μονάδας €", "Σύνολο €", "ΦΠΑ %"]
+    
+    for col, header in enumerate(product_headers, 1):
+        cell = ws_products.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center')
+    
+    product_row = 2
+    for receipt in receipts:
+        receipt_id = receipt.get("id", receipt.get("_id", ""))
+        store_name = receipt.get("store_name", "")
+        date = receipt.get("date", "")
+        
+        for item in receipt.get("items", []):
+            ws_products.cell(row=product_row, column=1, value=receipt_id)
+            ws_products.cell(row=product_row, column=2, value=store_name)
+            ws_products.cell(row=product_row, column=3, value=date)
+            ws_products.cell(row=product_row, column=4, value=item.get("code", ""))
+            ws_products.cell(row=product_row, column=5, value=item.get("description", ""))
+            ws_products.cell(row=product_row, column=6, value=item.get("quantity", 1))
+            ws_products.cell(row=product_row, column=7, value=item.get("unit_price", 0))
+            ws_products.cell(row=product_row, column=8, value=item.get("total_value", 0))
+            ws_products.cell(row=product_row, column=9, value=item.get("vat_percent", 0))
+            product_row += 1
+    
+    # Adjust column widths for products sheet
+    col_widths = [20, 20, 12, 15, 40, 10, 15, 12, 10]
+    for col, width in enumerate(col_widths, 1):
+        ws_products.column_dimensions[get_column_letter(col)].width = width
+    
+    # Sheet 3: Product Codes by Store
+    ws_codes = wb.create_sheet("Κωδικοί_ανά_Κατάστημα")
+    
+    codes_headers = ["Κατάστημα", "Κωδικός Προϊόντος", "Περιγραφή", "Πλήθος Αγορών", "Μέση Τιμή €"]
+    
+    for col, header in enumerate(codes_headers, 1):
+        cell = ws_codes.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center')
+    
+    # Aggregate product codes by store
+    pipeline = [
+        {"$unwind": "$items"},
+        {"$match": {"items.code": {"$ne": ""}}},
+        {"$group": {
+            "_id": {"store": "$store_name", "code": "$items.code"},
+            "description": {"$first": "$items.description"},
+            "count": {"$sum": 1},
+            "avg_price": {"$avg": "$items.unit_price"}
+        }},
+        {"$sort": {"_id.store": 1, "count": -1}}
+    ]
+    product_codes = await db.receipts.aggregate(pipeline).to_list(50000)
+    
+    for row, pc in enumerate(product_codes, 2):
+        ws_codes.cell(row=row, column=1, value=pc["_id"].get("store", ""))
+        ws_codes.cell(row=row, column=2, value=pc["_id"].get("code", ""))
+        ws_codes.cell(row=row, column=3, value=pc.get("description", ""))
+        ws_codes.cell(row=row, column=4, value=pc.get("count", 0))
+        ws_codes.cell(row=row, column=5, value=round(pc.get("avg_price", 0), 2))
+    
+    # Adjust column widths for codes sheet
+    codes_widths = [20, 15, 40, 15, 15]
+    for col, width in enumerate(codes_widths, 1):
+        ws_codes.column_dimensions[get_column_letter(col)].width = width
+    
+    # Save to BytesIO
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"apodixxi_export_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@api_router.get("/admin/users/all")
+async def get_all_users_detailed(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
+    skip: int = 0,
+    limit: int = 100
+):
+    """Get all users with receipt counts (Admin only)."""
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    users = await db.users.find().sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.users.count_documents({})
+    
+    # Add receipt counts for each user
+    for user in users:
+        device_id = user.get("device_id")
+        if device_id:
+            receipt_count = await db.receipts.count_documents({"device_id": device_id})
+            user["receipt_count"] = receipt_count
+        else:
+            user["receipt_count"] = 0
+    
+    return {
+        "users": users,
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
+
+@api_router.get("/admin/products/existing")
+async def get_existing_products(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
+    search: str = Query(None),
+    store: str = Query(None),
+    skip: int = 0,
+    limit: int = 50
+):
+    """Get existing products from receipts for promotion selection (Admin only)."""
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    match_stage = {}
+    if store:
+        match_stage["store_name"] = {"$regex": store, "$options": "i"}
+    
+    pipeline = [
+        {"$match": match_stage} if match_stage else {"$match": {}},
+        {"$unwind": "$items"},
+        {"$group": {
+            "_id": {"$toUpper": "$items.description"},
+            "code": {"$first": "$items.code"},
+            "avg_price": {"$avg": "$items.unit_price"},
+            "min_price": {"$min": "$items.unit_price"},
+            "max_price": {"$max": "$items.unit_price"},
+            "purchase_count": {"$sum": 1},
+            "stores": {"$addToSet": "$store_name"}
+        }},
+        {"$sort": {"purchase_count": -1}}
+    ]
+    
+    if search:
+        pipeline.insert(1, {"$match": {"items.description": {"$regex": search, "$options": "i"}}})
+    
+    pipeline.append({"$skip": skip})
+    pipeline.append({"$limit": limit})
+    
+    products = await db.receipts.aggregate(pipeline).to_list(limit)
+    
+    return {
+        "products": [
+            {
+                "name": p["_id"],
+                "code": p.get("code", ""),
+                "avg_price": round(p.get("avg_price", 0), 2),
+                "min_price": round(p.get("min_price", 0), 2),
+                "max_price": round(p.get("max_price", 0), 2),
+                "purchase_count": p.get("purchase_count", 0),
+                "stores": p.get("stores", [])
+            }
+            for p in products
+        ]
+    }
+
+# ============ ADMIN WEB DASHBOARD ============
+
+@api_router.get("/admin/dashboard", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serve Admin Dashboard HTML."""
+    html_content = '''<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>apodixxi Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/lucide-static@latest/font/lucide.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+        }
+        
+        /* Login Screen */
+        .login-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0D9488 0%, #065F57 100%);
+        }
+        .login-box {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-logo h1 {
+            color: #0D9488;
+            font-size: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .login-logo p {
+            color: #666;
+            margin-top: 5px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #0D9488;
+        }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: #0D9488;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .login-btn:hover {
+            background: #0b7d73;
+        }
+        .login-error {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        /* Dashboard Layout */
+        .dashboard { display: none; }
+        .dashboard.active { display: block; }
+        
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 260px;
+            height: 100vh;
+            background: linear-gradient(180deg, #0D9488 0%, #065F57 100%);
+            padding: 20px;
+            color: white;
+            z-index: 100;
+        }
+        .sidebar-logo {
+            padding: 10px 0 30px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            margin-bottom: 20px;
+        }
+        .sidebar-logo h1 {
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sidebar-logo p {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 4px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-bottom: 6px;
+        }
+        .nav-item:hover, .nav-item.active {
+            background: rgba(255,255,255,0.15);
+        }
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+        }
+        .logout-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: background 0.2s;
+        }
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .main-content {
+            margin-left: 260px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .page-header {
+            margin-bottom: 30px;
+        }
+        .page-header h2 {
+            font-size: 28px;
+            color: #1f2937;
+        }
+        .page-header p {
+            color: #6b7280;
+            margin-top: 4px;
+        }
+        
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .stat-card .label {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1f2937;
+        }
+        .stat-card.highlight {
+            background: linear-gradient(135deg, #0D9488 0%, #065F57 100%);
+        }
+        .stat-card.highlight .label,
+        .stat-card.highlight .value {
+            color: white;
+        }
+        
+        /* Tables */
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .card-header h3 {
+            font-size: 18px;
+            color: #1f2937;
+        }
+        .card-body {
+            padding: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 14px 20px;
+            text-align: left;
+        }
+        th {
+            background: #f9fafb;
+            font-weight: 600;
+            color: #374151;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        td {
+            border-top: 1px solid #e5e7eb;
+            color: #4b5563;
+        }
+        tr:hover td {
+            background: #f9fafb;
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-primary {
+            background: #0D9488;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0b7d73;
+        }
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+        .btn-success {
+            background: #059669;
+            color: white;
+        }
+        .btn-danger {
+            background: #dc2626;
+            color: white;
+        }
+        
+        /* Filters */
+        .filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .filter-input {
+            padding: 10px 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+        .filter-input:focus {
+            outline: none;
+            border-color: #0D9488;
+        }
+        
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h3 {
+            font-size: 20px;
+            color: #1f2937;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6b7280;
+        }
+        .modal-body {
+            padding: 24px;
+        }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        
+        /* Page sections */
+        .page { display: none; }
+        .page.active { display: block; }
+        
+        /* Badge */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        /* Loading */
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #0D9488;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar { width: 80px; padding: 10px; }
+            .sidebar-logo h1 span, .nav-item span, .logout-btn span { display: none; }
+            .main-content { margin-left: 80px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-container" id="loginScreen">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>🧾 apodixxi</h1>
+                <p>Admin Dashboard</p>
+            </div>
+            <div class="login-error" id="loginError"></div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" placeholder="admin" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" placeholder="••••••••" required>
+                </div>
+                <button type="submit" class="login-btn">Σύνδεση</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Dashboard -->
+    <div class="dashboard" id="dashboard">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <h1>🧾 <span>apodixxi</span></h1>
+                <p>Admin Panel</p>
+            </div>
+            <nav>
+                <div class="nav-item active" data-page="overview">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    <span>Επισκόπηση</span>
+                </div>
+                <div class="nav-item" data-page="receipts">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <span>Αποδείξεις</span>
+                </div>
+                <div class="nav-item" data-page="users">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Χρήστες</span>
+                </div>
+                <div class="nav-item" data-page="promotions">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <span>Προωθήσεις</span>
+                </div>
+                <div class="nav-item" data-page="promo-codes">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 4H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="M7 12h10"/></svg>
+                    <span>Promo Codes</span>
+                </div>
+            </nav>
+            <button class="logout-btn" onclick="logout()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                <span>Αποσύνδεση</span>
+            </button>
+        </aside>
+        
+        <main class="main-content">
+            <!-- Overview Page -->
+            <div class="page active" id="page-overview">
+                <div class="page-header">
+                    <h2>Επισκόπηση</h2>
+                    <p>Συνολικά στατιστικά της εφαρμογής</p>
+                </div>
+                <div class="stats-grid" id="statsGrid">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Κορυφαία Καταστήματα</h3>
+                    </div>
+                    <div class="card-body">
+                        <table>
+                            <thead><tr><th>Κατάστημα</th><th>Αποδείξεις</th></tr></thead>
+                            <tbody id="topStoresTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Receipts Page -->
+            <div class="page" id="page-receipts">
+                <div class="page-header">
+                    <h2>Αποδείξεις</h2>
+                    <p>Διαχείριση και εξαγωγή αποδείξεων</p>
+                </div>
+                <div class="filters">
+                    <input type="text" class="filter-input" id="filterStore" placeholder="Φίλτρο κατά κατάστημα...">
+                    <input type="text" class="filter-input" id="filterUser" placeholder="Φίλτρο κατά device_id...">
+                    <button class="btn btn-primary" onclick="loadReceipts()">Αναζήτηση</button>
+                    <button class="btn btn-success" onclick="exportExcel()">📊 Εξαγωγή Excel</button>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <table>
+                            <thead><tr><th>ID</th><th>Χρήστης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th></tr></thead>
+                            <tbody id="receiptsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="receiptsPagination" style="padding: 20px; text-align: center;"></div>
+            </div>
+            
+            <!-- Users Page -->
+            <div class="page" id="page-users">
+                <div class="page-header">
+                    <h2>Χρήστες</h2>
+                    <p>Διαχείριση χρηστών</p>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <table>
+                            <thead><tr><th>Email</th><th>Όνομα</th><th>Τύπος</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
+                            <tbody id="usersTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Promotions Page -->
+            <div class="page" id="page-promotions">
+                <div class="page-header">
+                    <h2>Προωθήσεις Προϊόντων</h2>
+                    <p>Διαχείριση promoted προϊόντων στις προτάσεις</p>
+                </div>
+                <div class="filters">
+                    <button class="btn btn-primary" onclick="openPromotionModal()">+ Νέα Προώθηση</button>
+                    <button class="btn btn-secondary" onclick="openExistingProductsModal()">Επιλογή από Υπάρχοντα</button>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <table>
+                            <thead><tr><th>Τίτλος</th><th>Προϊόν</th><th>Τιμή</th><th>Κατάστημα</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
+                            <tbody id="promotionsTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Promo Codes Page -->
+            <div class="page" id="page-promo-codes">
+                <div class="page-header">
+                    <h2>Promo Codes</h2>
+                    <p>Διαχείριση κωδικών προσφορών για Premium</p>
+                </div>
+                <div class="filters">
+                    <button class="btn btn-primary" onclick="openPromoCodeModal()">+ Νέος Κωδικός</button>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <table>
+                            <thead><tr><th>Κωδικός</th><th>Διάρκεια</th><th>Χρήσεις</th><th>Κατάσταση</th><th>Ενέργειες</th></tr></thead>
+                            <tbody id="promoCodesTable"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Promotion Modal -->
+    <div class="modal-overlay" id="promotionModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Νέα Προώθηση Προϊόντος</h3>
+                <button class="modal-close" onclick="closeModal('promotionModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="promotionForm">
+                    <div class="form-group">
+                        <label>Τίτλος Προώθησης *</label>
+                        <input type="text" id="promoTitle" required placeholder="π.χ. Μεγάλη Προσφορά!">
+                    </div>
+                    <div class="form-group">
+                        <label>Περιγραφή</label>
+                        <input type="text" id="promoDescription" placeholder="Περιγραφή προσφοράς...">
+                    </div>
+                    <div class="form-group">
+                        <label>Όνομα Προϊόντος *</label>
+                        <input type="text" id="promoProductName" required placeholder="π.χ. ΓΑΛΑ ΦΑΡΜΑ 1L">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label>Τιμή Προσφοράς (€)</label>
+                            <input type="number" step="0.01" id="promoPrice" placeholder="1.99">
+                        </div>
+                        <div class="form-group">
+                            <label>Αρχική Τιμή (€)</label>
+                            <input type="number" step="0.01" id="promoOriginalPrice" placeholder="2.49">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Κατάστημα</label>
+                        <input type="text" id="promoStoreName" placeholder="π.χ. ΣΚΛΑΒΕΝΙΤΗΣ">
+                    </div>
+                    <div class="form-group">
+                        <label>Κωδικός Barcode</label>
+                        <input type="text" id="promoBarcodeCode" placeholder="5201234567890">
+                    </div>
+                    <div class="form-group">
+                        <label>URL Εικόνας</label>
+                        <input type="text" id="promoImageUrl" placeholder="https://...">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label>Ημ/νία Έναρξης</label>
+                            <input type="date" id="promoStartDate">
+                        </div>
+                        <div class="form-group">
+                            <label>Ημ/νία Λήξης</label>
+                            <input type="date" id="promoEndDate">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Προτεραιότητα (0-100)</label>
+                        <input type="number" id="promoPriority" value="10" min="0" max="100">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('promotionModal')">Ακύρωση</button>
+                <button class="btn btn-primary" onclick="savePromotion()">Αποθήκευση</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Existing Products Modal -->
+    <div class="modal-overlay" id="existingProductsModal">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>Επιλογή από Υπάρχοντα Προϊόντα</h3>
+                <button class="modal-close" onclick="closeModal('existingProductsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="filters">
+                    <input type="text" class="filter-input" id="searchExistingProduct" placeholder="Αναζήτηση προϊόντος...">
+                    <button class="btn btn-primary" onclick="searchExistingProducts()">Αναζήτηση</button>
+                </div>
+                <table>
+                    <thead><tr><th>Προϊόν</th><th>Κωδικός</th><th>Μ.Ο. Τιμή</th><th>Αγορές</th><th></th></tr></thead>
+                    <tbody id="existingProductsTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Promo Code Modal -->
+    <div class="modal-overlay" id="promoCodeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Νέος Promo Code</h3>
+                <button class="modal-close" onclick="closeModal('promoCodeModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="promoCodeForm">
+                    <div class="form-group">
+                        <label>Κωδικός *</label>
+                        <input type="text" id="pcCode" required placeholder="π.χ. SUMMER2025" style="text-transform: uppercase;">
+                    </div>
+                    <div class="form-group">
+                        <label>Διάρκεια Premium (ημέρες)</label>
+                        <input type="number" id="pcDays" value="30" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Μέγιστες Χρήσεις (κενό = απεριόριστο)</label>
+                        <input type="number" id="pcMaxUses" placeholder="100">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('promoCodeModal')">Ακύρωση</button>
+                <button class="btn btn-primary" onclick="savePromoCode()">Δημιουργία</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let adminToken = localStorage.getItem('adminToken');
+        let currentReceiptsPage = 0;
+        
+        // Check if already logged in
+        if (adminToken) {
+            showDashboard();
+            loadOverview();
+        }
+        
+        // Login
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    adminToken = data.admin_token;
+                    localStorage.setItem('adminToken', adminToken);
+                    showDashboard();
+                    loadOverview();
+                } else {
+                    showLoginError(data.detail || 'Σφάλμα σύνδεσης');
+                }
+            } catch (err) {
+                showLoginError('Σφάλμα σύνδεσης');
+            }
+        });
+        
+        function showLoginError(msg) {
+            const el = document.getElementById('loginError');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+        
+        function showDashboard() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('dashboard').classList.add('active');
+        }
+        
+        function logout() {
+            localStorage.removeItem('adminToken');
+            location.reload();
+        }
+        
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const page = item.dataset.page;
+                
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                document.getElementById('page-' + page).classList.add('active');
+                
+                // Load page data
+                if (page === 'overview') loadOverview();
+                else if (page === 'receipts') loadReceipts();
+                else if (page === 'users') loadUsers();
+                else if (page === 'promotions') loadPromotions();
+                else if (page === 'promo-codes') loadPromoCodes();
+            });
+        });
+        
+        // API calls
+        async function apiCall(endpoint, options = {}) {
+            const url = new URL(API_BASE + endpoint, window.location.origin);
+            url.searchParams.append('admin_token', adminToken);
+            
+            const res = await fetch(url, options);
+            if (res.status === 403) {
+                logout();
+                return null;
+            }
+            return res;
+        }
+        
+        async function loadOverview() {
+            try {
+                const res = await apiCall('/admin/stats');
+                const data = await res.json();
+                
+                document.getElementById('statsGrid').innerHTML = `
+                    <div class="stat-card highlight">
+                        <div class="label">Χρήστες</div>
+                        <div class="value">${data.total_users || 0}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Premium</div>
+                        <div class="value">${data.paid_users || 0}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Αποδείξεις</div>
+                        <div class="value">${data.total_receipts || 0}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Προϊόντα</div>
+                        <div class="value">${data.total_products || 0}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Promo Codes</div>
+                        <div class="value">${data.total_promo_codes || 0}</div>
+                    </div>
+                `;
+                
+                const topStores = data.top_stores || [];
+                document.getElementById('topStoresTable').innerHTML = topStores.map(s => `
+                    <tr>
+                        <td>${s.name || 'Άγνωστο'}</td>
+                        <td><strong>${s.count}</strong></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading overview:', err);
+            }
+        }
+        
+        async function loadReceipts() {
+            const filterStore = document.getElementById('filterStore').value;
+            const filterUser = document.getElementById('filterUser').value;
+            
+            let endpoint = `/admin/receipts/all?skip=${currentReceiptsPage * 50}&limit=50`;
+            if (filterStore) endpoint += `&filter_store=${encodeURIComponent(filterStore)}`;
+            if (filterUser) endpoint += `&filter_user=${encodeURIComponent(filterUser)}`;
+            
+            try {
+                const res = await apiCall(endpoint);
+                const data = await res.json();
+                
+                document.getElementById('receiptsTable').innerHTML = data.receipts.map(r => `
+                    <tr>
+                        <td title="${r.id || r._id}">${(r.id || r._id || '').substring(0, 8)}...</td>
+                        <td title="${r.device_id}">${(r.device_id || '').substring(0, 12)}...</td>
+                        <td>${r.store_name || '-'}</td>
+                        <td>${r.date || '-'}</td>
+                        <td><strong>€${(r.total || 0).toFixed(2)}</strong></td>
+                        <td>${(r.items || []).length}</td>
+                    </tr>
+                `).join('');
+                
+                const totalPages = Math.ceil(data.total / 50);
+                document.getElementById('receiptsPagination').innerHTML = `
+                    Σελίδα ${currentReceiptsPage + 1} από ${totalPages} (${data.total} αποδείξεις)
+                    ${currentReceiptsPage > 0 ? '<button class="btn btn-secondary" onclick="prevReceiptsPage()">◀ Προηγούμενη</button>' : ''}
+                    ${currentReceiptsPage < totalPages - 1 ? '<button class="btn btn-secondary" onclick="nextReceiptsPage()">Επόμενη ▶</button>' : ''}
+                `;
+            } catch (err) {
+                console.error('Error loading receipts:', err);
+            }
+        }
+        
+        function prevReceiptsPage() { currentReceiptsPage--; loadReceipts(); }
+        function nextReceiptsPage() { currentReceiptsPage++; loadReceipts(); }
+        
+        async function exportExcel() {
+            const filterStore = document.getElementById('filterStore').value;
+            const filterUser = document.getElementById('filterUser').value;
+            
+            let url = `${API_BASE}/admin/receipts/export-excel?admin_token=${adminToken}`;
+            if (filterStore) url += `&filter_store=${encodeURIComponent(filterStore)}`;
+            if (filterUser) url += `&filter_user=${encodeURIComponent(filterUser)}`;
+            
+            window.open(url, '_blank');
+        }
+        
+        async function loadUsers() {
+            try {
+                const res = await apiCall('/admin/users/all?limit=100');
+                const data = await res.json();
+                
+                document.getElementById('usersTable').innerHTML = data.users.map(u => `
+                    <tr>
+                        <td>${u.email || '-'}</td>
+                        <td>${u.name || '-'}</td>
+                        <td><span class="badge ${u.account_type === 'paid' ? 'badge-success' : 'badge-info'}">${u.account_type === 'paid' ? 'Premium' : 'Free'}</span></td>
+                        <td>${u.receipt_count || 0}</td>
+                        <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-'}</td>
+                        <td>
+                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">Αναβάθμιση</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error('Error loading users:', err);
+            }
+        }
+        
+        async function upgradeUser(userId) {
+            const days = prompt('Πόσες ημέρες Premium;', '30');
+            if (!days) return;
+            
+            try {
+                await fetch(`${API_BASE}/admin/users/${userId}/upgrade?admin_token=${adminToken}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ days: parseInt(days) })
+                });
+                loadUsers();
+                alert('Ο χρήστης αναβαθμίστηκε!');
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function loadPromotions() {
+            try {
+                const res = await apiCall('/admin/promotions');
+                const data = await res.json();
+                
+                document.getElementById('promotionsTable').innerHTML = (data.promotions || []).map(p => `
+                    <tr>
+                        <td>${p.title || '-'}</td>
+                        <td>${p.product_name || '-'}</td>
+                        <td>${p.price ? '€' + p.price.toFixed(2) : '-'} ${p.original_price ? '<small style="text-decoration:line-through;color:#999">€' + p.original_price.toFixed(2) + '</small>' : ''}</td>
+                        <td>${p.store_name || '-'}</td>
+                        <td><span class="badge ${p.is_active ? 'badge-success' : 'badge-warning'}">${p.is_active ? 'Ενεργή' : 'Ανενεργή'}</span></td>
+                        <td>${p.views_count || 0}</td>
+                        <td>${p.clicks_count || 0}</td>
+                        <td>
+                            <button class="btn btn-secondary" onclick="togglePromotion('${p._id}', ${!p.is_active})">${p.is_active ? 'Απενεργ.' : 'Ενεργ.'}</button>
+                            <button class="btn btn-danger" onclick="deletePromotion('${p._id}')">Διαγραφή</button>
+                        </td>
+                    </tr>
+                `).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν προωθήσεις</td></tr>';
+            } catch (err) {
+                console.error('Error loading promotions:', err);
+            }
+        }
+        
+        async function loadPromoCodes() {
+            try {
+                const res = await apiCall('/admin/promo-codes');
+                const data = await res.json();
+                
+                document.getElementById('promoCodesTable').innerHTML = (data.promo_codes || []).map(p => `
+                    <tr>
+                        <td><strong>${p.code}</strong></td>
+                        <td>${p.duration_days} ημέρες</td>
+                        <td>${p.used_count || 0}${p.max_uses ? '/' + p.max_uses : ''}</td>
+                        <td><span class="badge ${p.is_active ? 'badge-success' : 'badge-warning'}">${p.is_active ? 'Ενεργός' : 'Ανενεργός'}</span></td>
+                        <td>
+                            <button class="btn btn-secondary" onclick="togglePromoCode('${p.code}', ${!p.is_active})">${p.is_active ? 'Απενεργ.' : 'Ενεργ.'}</button>
+                            <button class="btn btn-danger" onclick="deletePromoCode('${p.code}')">Διαγραφή</button>
+                        </td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν promo codes</td></tr>';
+            } catch (err) {
+                console.error('Error loading promo codes:', err);
+            }
+        }
+        
+        // Modals
+        function openPromotionModal() {
+            document.getElementById('promotionForm').reset();
+            document.getElementById('promotionModal').classList.add('active');
+        }
+        
+        function openPromoCodeModal() {
+            document.getElementById('promoCodeForm').reset();
+            document.getElementById('promoCodeModal').classList.add('active');
+        }
+        
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+        
+        async function savePromotion() {
+            const promo = {
+                title: document.getElementById('promoTitle').value,
+                description: document.getElementById('promoDescription').value,
+                product_name: document.getElementById('promoProductName').value,
+                price: parseFloat(document.getElementById('promoPrice').value) || null,
+                original_price: parseFloat(document.getElementById('promoOriginalPrice').value) || null,
+                store_name: document.getElementById('promoStoreName').value,
+                barcode_code: document.getElementById('promoBarcodeCode').value,
+                image_url: document.getElementById('promoImageUrl').value,
+                start_date: document.getElementById('promoStartDate').value || null,
+                end_date: document.getElementById('promoEndDate').value || null,
+                priority: parseInt(document.getElementById('promoPriority').value) || 10,
+                target_all_users: true
+            };
+            
+            try {
+                await fetch(`${API_BASE}/admin/promotions?admin_token=${adminToken}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(promo)
+                });
+                closeModal('promotionModal');
+                loadPromotions();
+                alert('Η προώθηση δημιουργήθηκε!');
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function togglePromotion(id, isActive) {
+            try {
+                await fetch(`${API_BASE}/admin/promotions/${id}?admin_token=${adminToken}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: isActive })
+                });
+                loadPromotions();
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function deletePromotion(id) {
+            if (!confirm('Διαγραφή προώθησης;')) return;
+            try {
+                await fetch(`${API_BASE}/admin/promotions/${id}?admin_token=${adminToken}`, { method: 'DELETE' });
+                loadPromotions();
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function savePromoCode() {
+            const code = document.getElementById('pcCode').value.toUpperCase();
+            const days = parseInt(document.getElementById('pcDays').value);
+            const maxUses = document.getElementById('pcMaxUses').value ? parseInt(document.getElementById('pcMaxUses').value) : null;
+            
+            try {
+                await fetch(`${API_BASE}/admin/promo-codes?admin_token=${adminToken}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, duration_days: days, max_uses: maxUses })
+                });
+                closeModal('promoCodeModal');
+                loadPromoCodes();
+                alert('Ο κωδικός δημιουργήθηκε!');
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function togglePromoCode(code, isActive) {
+            try {
+                await fetch(`${API_BASE}/admin/promo-codes/${code}/toggle?is_active=${isActive}&admin_token=${adminToken}`, { method: 'PATCH' });
+                loadPromoCodes();
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function deletePromoCode(code) {
+            if (!confirm('Διαγραφή κωδικού ' + code + ';')) return;
+            try {
+                await fetch(`${API_BASE}/admin/promo-codes/${code}?admin_token=${adminToken}`, { method: 'DELETE' });
+                loadPromoCodes();
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        // Existing products modal
+        async function openExistingProductsModal() {
+            document.getElementById('existingProductsModal').classList.add('active');
+            searchExistingProducts();
+        }
+        
+        async function searchExistingProducts() {
+            const search = document.getElementById('searchExistingProduct').value;
+            let endpoint = `/admin/products/existing?limit=20`;
+            if (search) endpoint += `&search=${encodeURIComponent(search)}`;
+            
+            try {
+                const res = await apiCall(endpoint);
+                const data = await res.json();
+                
+                document.getElementById('existingProductsTable').innerHTML = (data.products || []).map(p => `
+                    <tr>
+                        <td>${p.name}</td>
+                        <td>${p.code || '-'}</td>
+                        <td>€${p.avg_price.toFixed(2)}</td>
+                        <td>${p.purchase_count}</td>
+                        <td><button class="btn btn-primary" onclick="selectExistingProduct('${p.name.replace(/'/g, "\\'")}', ${p.avg_price})">Επιλογή</button></td>
+                    </tr>
+                `).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;">Δεν βρέθηκαν προϊόντα</td></tr>';
+            } catch (err) {
+                console.error('Error:', err);
+            }
+        }
+        
+        function selectExistingProduct(name, price) {
+            closeModal('existingProductsModal');
+            document.getElementById('promoProductName').value = name;
+            document.getElementById('promoOriginalPrice').value = price.toFixed(2);
+            openPromotionModal();
+        }
+    </script>
+</body>
+</html>'''
+    return html_content
 
 @api_router.get("/admin/store-reviews")
 async def get_store_reviews(
@@ -3043,9 +4528,16 @@ async def delete_store_review(
 
 
 @api_router.get("/admin/stats")
-async def get_admin_stats(admin_key: str = Query(...)):
+async def get_admin_stats(
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
     """Get admin statistics (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     total_devices = await db.devices.count_documents({})
@@ -3133,1103 +4625,6 @@ def send_admin_notification(subject: str, body: str):
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
         return False
-
-
-# ============ WEB ADMIN DASHBOARD ============
-
-ADMIN_DASHBOARD_HTML = """
-<!DOCTYPE html>
-<html lang="el">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>apodixxi Admin</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-            min-height: 100vh;
-            color: #e2e8f0;
-        }
-        .login-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .login-box {
-            background: #1e293b;
-            border-radius: 16px;
-            padding: 40px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
-            border: 1px solid #334155;
-        }
-        .login-logo {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .login-logo h1 { color: #0d9488; font-size: 28px; }
-        .login-logo p { color: #94a3b8; font-size: 14px; margin-top: 5px; }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; color: #94a3b8; margin-bottom: 8px; font-size: 14px; font-weight: 500; }
-        .form-group input {
-            width: 100%;
-            padding: 14px 16px;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 10px;
-            color: #e2e8f0;
-            font-size: 16px;
-            transition: border-color 0.2s;
-        }
-        .form-group input:focus { outline: none; border-color: #0d9488; }
-        .login-btn {
-            width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .login-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(13,148,136,0.3); }
-        
-        /* Dashboard */
-        .dashboard { display: none; padding: 20px; max-width: 1200px; margin: 0 auto; }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #334155;
-        }
-        .header h1 { color: #0d9488; font-size: 24px; }
-        .logout-btn {
-            padding: 10px 20px;
-            background: #ef4444;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        
-        /* Stats */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            background: #1e293b;
-            border-radius: 12px;
-            padding: 20px;
-            border: 1px solid #334155;
-        }
-        .stat-card .icon { font-size: 24px; margin-bottom: 10px; }
-        .stat-card .value { font-size: 32px; font-weight: 700; color: #f8fafc; }
-        .stat-card .label { color: #94a3b8; font-size: 14px; margin-top: 5px; }
-        
-        /* Tabs */
-        .tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        .tab {
-            padding: 10px 20px;
-            background: #334155;
-            border: none;
-            border-radius: 8px;
-            color: #94a3b8;
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-        .tab.active { background: #0d9488; color: white; }
-        .tab:hover { background: #475569; }
-        .tab.active:hover { background: #0d9488; }
-        
-        /* Reviews */
-        .reviews-list { display: flex; flex-direction: column; gap: 12px; }
-        .review-card {
-            background: #1e293b;
-            border-radius: 12px;
-            padding: 20px;
-            border: 1px solid #334155;
-        }
-        .review-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 12px;
-        }
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .status-pending { background: #fef3c7; color: #92400e; }
-        .status-approved { background: #d1fae5; color: #065f46; }
-        .status-rejected { background: #fee2e2; color: #991b1b; }
-        .review-store { font-size: 18px; font-weight: 600; color: #f8fafc; }
-        .review-vat { color: #94a3b8; font-size: 14px; margin-top: 4px; }
-        .review-date { color: #64748b; font-size: 12px; margin-top: 4px; }
-        .review-url { margin-top: 10px; }
-        .review-url a { color: #0d9488; text-decoration: none; font-size: 14px; }
-        .review-url a:hover { text-decoration: underline; }
-        .review-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 16px;
-        }
-        .btn-approve {
-            flex: 1;
-            padding: 10px;
-            background: #10b981;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        .btn-reject {
-            flex: 1;
-            padding: 10px;
-            background: #ef4444;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        .btn-delete {
-            padding: 10px;
-            background: #475569;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-        
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #64748b;
-        }
-        .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
-        
-        /* Loading */
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #94a3b8;
-        }
-        
-        /* Responsive */
-        @media (max-width: 600px) {
-            .header { flex-direction: column; gap: 16px; text-align: center; }
-            .review-actions { flex-direction: column; }
-        }
-        
-        /* Main Navigation Tabs */
-        .main-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 24px;
-            border-bottom: 1px solid #334155;
-            padding-bottom: 16px;
-        }
-        .main-tab {
-            padding: 12px 24px;
-            background: transparent;
-            border: none;
-            border-radius: 8px;
-            color: #94a3b8;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 15px;
-            transition: all 0.2s;
-        }
-        .main-tab.active { background: #0d9488; color: white; }
-        .main-tab:hover:not(.active) { background: #334155; }
-        
-        /* Section containers */
-        .section { display: none; }
-        .section.active { display: block; }
-        
-        /* Promo Codes */
-        .promo-form {
-            background: #1e293b;
-            border-radius: 12px;
-            padding: 24px;
-            border: 1px solid #334155;
-            margin-bottom: 24px;
-        }
-        .promo-form h3 {
-            color: #f8fafc;
-            margin-bottom: 20px;
-            font-size: 18px;
-        }
-        .form-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 16px;
-        }
-        .form-field {
-            display: flex;
-            flex-direction: column;
-        }
-        .form-field label {
-            color: #94a3b8;
-            font-size: 13px;
-            margin-bottom: 6px;
-            font-weight: 500;
-        }
-        .form-field input {
-            padding: 12px;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            color: #e2e8f0;
-            font-size: 14px;
-        }
-        .form-field input:focus {
-            outline: none;
-            border-color: #0d9488;
-        }
-        .btn-create {
-            padding: 12px 24px;
-            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 14px;
-            margin-top: 8px;
-        }
-        .btn-create:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(13,148,136,0.3);
-        }
-        
-        /* Promo table */
-        .promo-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #1e293b;
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid #334155;
-        }
-        .promo-table th {
-            background: #0f172a;
-            color: #94a3b8;
-            font-weight: 600;
-            font-size: 13px;
-            text-align: left;
-            padding: 14px 16px;
-            border-bottom: 1px solid #334155;
-        }
-        .promo-table td {
-            padding: 14px 16px;
-            border-bottom: 1px solid #334155;
-            color: #e2e8f0;
-            font-size: 14px;
-        }
-        .promo-table tr:last-child td {
-            border-bottom: none;
-        }
-        .promo-table tr:hover {
-            background: rgba(13,148,136,0.05);
-        }
-        .promo-code {
-            font-family: monospace;
-            background: #0f172a;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-weight: 600;
-            color: #0d9488;
-        }
-        .promo-active {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .promo-active.yes { background: #d1fae5; color: #065f46; }
-        .promo-active.no { background: #fee2e2; color: #991b1b; }
-        .btn-delete-promo {
-            padding: 6px 12px;
-            background: #ef4444;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .btn-toggle {
-            padding: 6px 12px;
-            background: #475569;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-            margin-right: 8px;
-        }
-        
-        /* Users section */
-        .users-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #1e293b;
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid #334155;
-        }
-        .users-table th {
-            background: #0f172a;
-            color: #94a3b8;
-            font-weight: 600;
-            font-size: 13px;
-            text-align: left;
-            padding: 14px 16px;
-            border-bottom: 1px solid #334155;
-        }
-        .users-table td {
-            padding: 14px 16px;
-            border-bottom: 1px solid #334155;
-            color: #e2e8f0;
-            font-size: 14px;
-        }
-        .users-table tr:last-child td { border-bottom: none; }
-        .users-table tr:hover { background: rgba(13,148,136,0.05); }
-        .user-type {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .user-type.free { background: #334155; color: #94a3b8; }
-        .user-type.paid { background: #fef3c7; color: #92400e; }
-        .btn-upgrade {
-            padding: 6px 12px;
-            background: #0d9488;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-    </style>
-</head>
-<body>
-    <!-- Login Screen -->
-    <div class="login-container" id="loginScreen">
-        <div class="login-box">
-            <div class="login-logo">
-                <h1>🧾 apodixxi</h1>
-                <p>Admin Dashboard</p>
-            </div>
-            <form id="loginForm">
-                <div class="form-group">
-                    <label>Κωδικός Admin</label>
-                    <input type="password" id="adminPassword" placeholder="Εισάγετε τον κωδικό..." required>
-                </div>
-                <button type="submit" class="login-btn">Σύνδεση</button>
-            </form>
-            <p id="loginError" style="color: #ef4444; text-align: center; margin-top: 16px; display: none;">Λάθος κωδικός</p>
-        </div>
-    </div>
-
-    <!-- Dashboard -->
-    <div class="dashboard" id="dashboard">
-        <div class="header">
-            <h1>🧾 apodixxi Admin</h1>
-            <button class="logout-btn" onclick="logout()">Αποσύνδεση</button>
-        </div>
-
-        <!-- Stats -->
-        <div class="stats-grid" id="statsGrid">
-            <div class="stat-card">
-                <div class="icon">📱</div>
-                <div class="value" id="statDevices">-</div>
-                <div class="label">Συσκευές</div>
-            </div>
-            <div class="stat-card">
-                <div class="icon">🧾</div>
-                <div class="value" id="statReceipts">-</div>
-                <div class="label">Αποδείξεις</div>
-            </div>
-            <div class="stat-card">
-                <div class="icon">📦</div>
-                <div class="value" id="statProducts">-</div>
-                <div class="label">Προϊόντα</div>
-            </div>
-            <div class="stat-card">
-                <div class="icon">👥</div>
-                <div class="value" id="statUsers">-</div>
-                <div class="label">Χρήστες</div>
-            </div>
-            <div class="stat-card">
-                <div class="icon">⏳</div>
-                <div class="value" id="statPending">-</div>
-                <div class="label">Εκκρεμείς</div>
-            </div>
-            <div class="stat-card">
-                <div class="icon">🎫</div>
-                <div class="value" id="statPromoCodes">-</div>
-                <div class="label">Promo Codes</div>
-            </div>
-        </div>
-
-        <!-- Main Navigation -->
-        <div class="main-tabs">
-            <button class="main-tab active" onclick="showSection('reviews', this)">🏪 Αιτήσεις</button>
-            <button class="main-tab" onclick="showSection('promo', this)">🎫 Promo</button>
-            <button class="main-tab" onclick="showSection('promotions', this)">📢 Προσφορές</button>
-            <button class="main-tab" onclick="showSection('users', this)">👥 Χρήστες</button>
-        </div>
-
-        <!-- Reviews Section -->
-        <div class="section active" id="reviewsSection">
-            <div class="tabs">
-                <button class="tab active" data-status="pending" onclick="setFilter('pending', this)">Εκκρεμείς</button>
-                <button class="tab" data-status="approved" onclick="setFilter('approved', this)">Εγκεκριμένα</button>
-                <button class="tab" data-status="rejected" onclick="setFilter('rejected', this)">Απορριφθέντα</button>
-                <button class="tab" data-status="all" onclick="setFilter('all', this)">Όλα</button>
-            </div>
-            <div class="reviews-list" id="reviewsList">
-                <div class="loading">Φόρτωση...</div>
-            </div>
-        </div>
-
-        <!-- Promo Codes Section -->
-        <div class="section" id="promoSection">
-            <div class="promo-form">
-                <h3>➕ Δημιουργία Νέου Promo Code</h3>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Κωδικός</label>
-                        <input type="text" id="promoCode" placeholder="π.χ. APODIXXI2025" style="text-transform: uppercase;">
-                    </div>
-                    <div class="form-field">
-                        <label>Διάρκεια (ημέρες)</label>
-                        <input type="number" id="promoDuration" value="30" min="1">
-                    </div>
-                    <div class="form-field">
-                        <label>Μέγιστες χρήσεις (κενό = απεριόριστες)</label>
-                        <input type="number" id="promoMaxUses" placeholder="π.χ. 100">
-                    </div>
-                </div>
-                <button class="btn-create" onclick="createPromoCode()">🎫 Δημιουργία Κωδικού</button>
-            </div>
-            
-            <table class="promo-table">
-                <thead>
-                    <tr>
-                        <th>Κωδικός</th>
-                        <th>Διάρκεια</th>
-                        <th>Χρήσεις</th>
-                        <th>Κατάσταση</th>
-                        <th>Ημ/νία</th>
-                        <th>Ενέργειες</th>
-                    </tr>
-                </thead>
-                <tbody id="promoTableBody">
-                    <tr><td colspan="6" class="loading">Φόρτωση...</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Users Section -->
-        <div class="section" id="usersSection">
-            <table class="users-table">
-                <thead>
-                    <tr>
-                        <th>Email</th>
-                        <th>Όνομα</th>
-                        <th>Τηλέφωνο</th>
-                        <th>Τύπος</th>
-                        <th>Provider</th>
-                        <th>Λήξη Premium</th>
-                        <th>Ενέργειες</th>
-                    </tr>
-                </thead>
-                <tbody id="usersTableBody">
-                    <tr><td colspan="7" class="loading">Φόρτωση...</td></tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Promotions Section -->
-        <div class="section" id="promotionsSection">
-            <div class="promo-form">
-                <h3>📢 Δημιουργία Νέας Προσφοράς/Πρότασης</h3>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Τίτλος *</label>
-                        <input type="text" id="promoTitle" placeholder="π.χ. Προσφορά Εβδομάδας">
-                    </div>
-                    <div class="form-field">
-                        <label>Προϊόν</label>
-                        <input type="text" id="promoProduct" placeholder="π.χ. Coca-Cola 6x330ml">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Τιμή (€)</label>
-                        <input type="number" id="promoPrice" step="0.01" placeholder="3.99">
-                    </div>
-                    <div class="form-field">
-                        <label>Αρχική Τιμή (€)</label>
-                        <input type="number" id="promoOriginalPrice" step="0.01" placeholder="5.49">
-                    </div>
-                    <div class="form-field">
-                        <label>Κατάστημα</label>
-                        <input type="text" id="promoStore" placeholder="π.χ. ΣΚΛΑΒΕΝΙΤΗΣ">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-field" style="flex: 2;">
-                        <label>Περιγραφή</label>
-                        <input type="text" id="promoDesc" placeholder="Περιγραφή της προσφοράς...">
-                    </div>
-                    <div class="form-field">
-                        <label>Barcode (προαιρετικό)</label>
-                        <input type="text" id="promoBarcode" placeholder="5449000000996">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-field">
-                        <label>Ημ/νία Έναρξης</label>
-                        <input type="date" id="promoStartDate">
-                    </div>
-                    <div class="form-field">
-                        <label>Ημ/νία Λήξης</label>
-                        <input type="date" id="promoEndDate">
-                    </div>
-                    <div class="form-field">
-                        <label>Προτεραιότητα</label>
-                        <input type="number" id="promoPriority" value="0" min="0">
-                    </div>
-                </div>
-                <button class="btn-create" onclick="createPromotion()">📢 Δημιουργία Προσφοράς</button>
-            </div>
-            
-            <table class="promo-table">
-                <thead>
-                    <tr>
-                        <th>Τίτλος</th>
-                        <th>Προϊόν</th>
-                        <th>Τιμή</th>
-                        <th>Κατάστημα</th>
-                        <th>Views/Clicks</th>
-                        <th>Κατάσταση</th>
-                        <th>Ενέργειες</th>
-                    </tr>
-                </thead>
-                <tbody id="promotionsTableBody">
-                    <tr><td colspan="7" class="loading">Φόρτωση...</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <script>
-        let adminKey = '';
-        let currentFilter = 'pending';
-        let currentSection = 'reviews';
-        const API_BASE = '/api';
-
-        // Login
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const password = document.getElementById('adminPassword').value;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/stats?admin_key=${encodeURIComponent(password)}`);
-                if (res.status === 403) {
-                    document.getElementById('loginError').style.display = 'block';
-                    return;
-                }
-                adminKey = password;
-                document.getElementById('loginScreen').style.display = 'none';
-                document.getElementById('dashboard').style.display = 'block';
-                loadDashboard();
-            } catch (err) {
-                document.getElementById('loginError').style.display = 'block';
-            }
-        });
-
-        function logout() {
-            adminKey = '';
-            document.getElementById('dashboard').style.display = 'none';
-            document.getElementById('loginScreen').style.display = 'flex';
-            document.getElementById('adminPassword').value = '';
-            document.getElementById('loginError').style.display = 'none';
-        }
-
-        function showSection(section, btn) {
-            currentSection = section;
-            document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
-            btn.classList.add('active');
-            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-            document.getElementById(section + 'Section').classList.add('active');
-            
-            // Load section data
-            if (section === 'promo') loadPromoCodes();
-            if (section === 'users') loadUsers();
-            if (section === 'promotions') loadPromotions();
-        }
-
-        async function loadDashboard() {
-            await Promise.all([loadStats(), loadReviews(), loadPromoCodes()]);
-        }
-
-        async function loadStats() {
-            try {
-                const res = await fetch(`${API_BASE}/admin/stats?admin_key=${encodeURIComponent(adminKey)}`);
-                const data = await res.json();
-                document.getElementById('statDevices').textContent = data.total_devices || 0;
-                document.getElementById('statReceipts').textContent = data.total_receipts || 0;
-                document.getElementById('statProducts').textContent = data.total_products || 0;
-                document.getElementById('statPending').textContent = data.pending_reviews || 0;
-                document.getElementById('statUsers').textContent = data.total_users || 0;
-                document.getElementById('statPromoCodes').textContent = data.total_promo_codes || 0;
-            } catch (err) {
-                console.error('Failed to load stats:', err);
-            }
-        }
-
-        async function loadReviews() {
-            const container = document.getElementById('reviewsList');
-            container.innerHTML = '<div class="loading">Φόρτωση...</div>';
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/store-reviews?admin_key=${encodeURIComponent(adminKey)}&status=${currentFilter}`);
-                const data = await res.json();
-                
-                if (data.reviews.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <div class="icon">✅</div>
-                            <p>Δεν υπάρχουν αιτήσεις</p>
-                        </div>
-                    `;
-                    return;
-                }
-
-                container.innerHTML = data.reviews.map(review => `
-                    <div class="review-card" id="review-${review.id}">
-                        <div class="review-header">
-                            <div>
-                                <div class="review-store">${review.store_name || 'Άγνωστο Κατάστημα'}</div>
-                                <div class="review-vat">ΑΦΜ: ${review.vat}</div>
-                                <div class="review-date">${new Date(review.created_at).toLocaleDateString('el-GR', { 
-                                    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                                })}</div>
-                            </div>
-                            <span class="status-badge status-${review.status}">
-                                ${review.status === 'pending' ? 'Εκκρεμεί' : 
-                                  review.status === 'approved' ? 'Εγκρίθηκε' : 'Απορρίφθηκε'}
-                            </span>
-                        </div>
-                        ${review.receipt_url ? `
-                            <div class="review-url">
-                                <a href="${review.receipt_url}" target="_blank">🔗 Άνοιγμα απόδειξης</a>
-                            </div>
-                        ` : ''}
-                        ${review.status === 'pending' ? `
-                            <div class="review-actions">
-                                <button class="btn-approve" onclick="approveReview('${review.id}', '${(review.store_name || '').replace(/'/g, "\\'")}')">✅ Έγκριση</button>
-                                <button class="btn-reject" onclick="rejectReview('${review.id}')">❌ Απόρριψη</button>
-                                <button class="btn-delete" onclick="deleteReview('${review.id}')">🗑️</button>
-                            </div>
-                        ` : `
-                            <div class="review-actions">
-                                <button class="btn-delete" onclick="deleteReview('${review.id}')">🗑️ Διαγραφή</button>
-                            </div>
-                        `}
-                    </div>
-                `).join('');
-            } catch (err) {
-                container.innerHTML = '<div class="empty-state"><p>Σφάλμα φόρτωσης</p></div>';
-            }
-        }
-
-        function setFilter(status, btn) {
-            currentFilter = status;
-            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
-            btn.classList.add('active');
-            loadReviews();
-        }
-
-        async function approveReview(id, storeName) {
-            if (!confirm(`Θέλετε να εγκρίνετε το κατάστημα "${storeName}";`)) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/store-reviews/${id}/approve?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'POST'
-                });
-                if (res.ok) {
-                    alert('Το κατάστημα εγκρίθηκε!');
-                    loadDashboard();
-                }
-            } catch (err) {
-                alert('Σφάλμα κατά την έγκριση');
-            }
-        }
-
-        async function rejectReview(id) {
-            if (!confirm('Θέλετε να απορρίψετε αυτήν την αίτηση;')) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/store-reviews/${id}/reject?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ reason: 'Rejected by admin' })
-                });
-                if (res.ok) {
-                    alert('Η αίτηση απορρίφθηκε');
-                    loadDashboard();
-                }
-            } catch (err) {
-                alert('Σφάλμα κατά την απόρριψη');
-            }
-        }
-
-        async function deleteReview(id) {
-            if (!confirm('Θέλετε να διαγράψετε αυτήν την αίτηση;')) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/store-reviews/${id}?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'DELETE'
-                });
-                if (res.ok) {
-                    document.getElementById(`review-${id}`)?.remove();
-                    loadStats();
-                }
-            } catch (err) {
-                alert('Σφάλμα κατά τη διαγραφή');
-            }
-        }
-
-        // ============ PROMO CODES ============
-
-        async function loadPromoCodes() {
-            const tbody = document.getElementById('promoTableBody');
-            tbody.innerHTML = '<tr><td colspan="6" class="loading">Φόρτωση...</td></tr>';
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/promo-codes?admin_key=${encodeURIComponent(adminKey)}`);
-                const data = await res.json();
-                
-                if (!data.promo_codes || data.promo_codes.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#64748b; padding:40px;">Δεν υπάρχουν promo codes</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = data.promo_codes.map(code => `
-                    <tr>
-                        <td><span class="promo-code">${code.code}</span></td>
-                        <td>${code.duration_days} ημέρες</td>
-                        <td>${code.used_count || 0}${code.max_uses ? ' / ' + code.max_uses : ' / ∞'}</td>
-                        <td><span class="promo-active ${code.is_active ? 'yes' : 'no'}">${code.is_active ? 'Ενεργό' : 'Ανενεργό'}</span></td>
-                        <td>${new Date(code.created_at).toLocaleDateString('el-GR')}</td>
-                        <td>
-                            <button class="btn-toggle" onclick="togglePromoCode('${code.code}', ${!code.is_active})">${code.is_active ? '⏸️' : '▶️'}</button>
-                            <button class="btn-delete-promo" onclick="deletePromoCode('${code.code}')">🗑️</button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#ef4444;">Σφάλμα φόρτωσης</td></tr>';
-            }
-        }
-
-        async function createPromoCode() {
-            const code = document.getElementById('promoCode').value.trim().toUpperCase();
-            const duration = parseInt(document.getElementById('promoDuration').value) || 30;
-            const maxUses = document.getElementById('promoMaxUses').value ? parseInt(document.getElementById('promoMaxUses').value) : null;
-            
-            if (!code) {
-                alert('Παρακαλώ εισάγετε κωδικό');
-                return;
-            }
-
-            try {
-                const res = await fetch(`${API_BASE}/admin/promo-codes?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        code: code, 
-                        duration_days: duration, 
-                        max_uses: maxUses 
-                    })
-                });
-                
-                if (res.ok) {
-                    alert(`Promo code "${code}" δημιουργήθηκε!`);
-                    document.getElementById('promoCode').value = '';
-                    document.getElementById('promoDuration').value = '30';
-                    document.getElementById('promoMaxUses').value = '';
-                    loadPromoCodes();
-                    loadStats();
-                } else {
-                    const err = await res.json();
-                    alert(err.detail || 'Σφάλμα δημιουργίας');
-                }
-            } catch (err) {
-                alert('Σφάλμα δημιουργίας promo code');
-            }
-        }
-
-        async function togglePromoCode(code, newState) {
-            try {
-                const res = await fetch(`${API_BASE}/admin/promo-codes/${code}/toggle?admin_key=${encodeURIComponent(adminKey)}&is_active=${newState}`, {
-                    method: 'PATCH'
-                });
-                if (res.ok) {
-                    loadPromoCodes();
-                }
-            } catch (err) {
-                alert('Σφάλμα ενημέρωσης');
-            }
-        }
-
-        async function deletePromoCode(code) {
-            if (!confirm(`Θέλετε να διαγράψετε το promo code "${code}";`)) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/promo-codes/${code}?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'DELETE'
-                });
-                if (res.ok) {
-                    loadPromoCodes();
-                    loadStats();
-                }
-            } catch (err) {
-                alert('Σφάλμα διαγραφής');
-            }
-        }
-
-        // ============ USERS ============
-
-        async function loadUsers() {
-            const tbody = document.getElementById('usersTableBody');
-            tbody.innerHTML = '<tr><td colspan="7" class="loading">Φόρτωση...</td></tr>';
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/users?admin_key=${encodeURIComponent(adminKey)}`);
-                const data = await res.json();
-                
-                if (!data.users || data.users.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:40px;">Δεν υπάρχουν χρήστες</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = data.users.map(user => `
-                    <tr>
-                        <td>${user.email}</td>
-                        <td>${user.name || '-'}</td>
-                        <td>${user.phone || '-'}</td>
-                        <td><span class="user-type ${user.account_type}">${user.account_type === 'paid' ? '⭐ Premium' : 'Free'}</span></td>
-                        <td>${user.auth_provider || 'email'}</td>
-                        <td>${user.subscription_expires_at ? new Date(user.subscription_expires_at).toLocaleDateString('el-GR') : '-'}</td>
-                        <td>
-                            ${user.account_type === 'free' ? 
-                                `<button class="btn-upgrade" onclick="upgradeUser('${user._id}')">⬆️ Upgrade</button>` : 
-                                `<button class="btn-toggle" onclick="downgradeUser('${user._id}')">⬇️</button>`
-                            }
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#ef4444;">Σφάλμα φόρτωσης</td></tr>';
-            }
-        }
-
-        async function upgradeUser(userId) {
-            const days = prompt('Πόσες ημέρες Premium;', '30');
-            if (!days) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/users/${userId}/upgrade?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ days: parseInt(days) })
-                });
-                if (res.ok) {
-                    alert('Ο χρήστης αναβαθμίστηκε!');
-                    loadUsers();
-                    loadStats();
-                }
-            } catch (err) {
-                alert('Σφάλμα αναβάθμισης');
-            }
-        }
-
-        async function downgradeUser(userId) {
-            if (!confirm('Θέλετε να υποβαθμίσετε αυτόν τον χρήστη σε Free;')) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/users/${userId}/downgrade?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'POST'
-                });
-                if (res.ok) {
-                    loadUsers();
-                    loadStats();
-                }
-            } catch (err) {
-                alert('Σφάλμα υποβάθμισης');
-            }
-        }
-
-        // ============ PROMOTIONS ============
-
-        async function loadPromotions() {
-            const tbody = document.getElementById('promotionsTableBody');
-            tbody.innerHTML = '<tr><td colspan="7" class="loading">Φόρτωση...</td></tr>';
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/promotions?admin_key=${encodeURIComponent(adminKey)}`);
-                const data = await res.json();
-                
-                if (!data.promotions || data.promotions.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#64748b; padding:40px;">Δεν υπάρχουν προσφορές</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = data.promotions.map(promo => `
-                    <tr>
-                        <td><strong>${promo.title}</strong></td>
-                        <td>${promo.product_name || '-'}</td>
-                        <td>
-                            ${promo.price ? `<span style="color:#0d9488; font-weight:bold;">€${promo.price}</span>` : '-'}
-                            ${promo.original_price ? `<span style="text-decoration:line-through; color:#94a3b8; margin-left:4px;">€${promo.original_price}</span>` : ''}
-                        </td>
-                        <td>${promo.store_name || '-'}</td>
-                        <td>${promo.views_count || 0} / ${promo.clicks_count || 0}</td>
-                        <td><span class="promo-active ${promo.is_active ? 'yes' : 'no'}">${promo.is_active ? 'Ενεργό' : 'Ανενεργό'}</span></td>
-                        <td>
-                            <button class="btn-toggle" onclick="togglePromotion('${promo._id}', ${!promo.is_active})">${promo.is_active ? '⏸️' : '▶️'}</button>
-                            <button class="btn-delete-promo" onclick="deletePromotion('${promo._id}')">🗑️</button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (err) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#ef4444;">Σφάλμα φόρτωσης</td></tr>';
-            }
-        }
-
-        async function createPromotion() {
-            const title = document.getElementById('promoTitle').value.trim();
-            const product_name = document.getElementById('promoProduct').value.trim();
-            const price = parseFloat(document.getElementById('promoPrice').value) || null;
-            const original_price = parseFloat(document.getElementById('promoOriginalPrice').value) || null;
-            const store_name = document.getElementById('promoStore').value.trim();
-            const description = document.getElementById('promoDesc').value.trim();
-            const barcode_code = document.getElementById('promoBarcode').value.trim();
-            const start_date = document.getElementById('promoStartDate').value || null;
-            const end_date = document.getElementById('promoEndDate').value || null;
-            const priority = parseInt(document.getElementById('promoPriority').value) || 0;
-            
-            if (!title) {
-                alert('Παρακαλώ εισάγετε τίτλο');
-                return;
-            }
-
-            try {
-                const res = await fetch(`${API_BASE}/admin/promotions?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        title, product_name, price, original_price, store_name, 
-                        description, barcode_code, start_date, end_date, priority,
-                        target_all_users: true
-                    })
-                });
-                
-                if (res.ok) {
-                    alert(`Η προσφορά "${title}" δημιουργήθηκε!`);
-                    // Clear form
-                    document.getElementById('promoTitle').value = '';
-                    document.getElementById('promoProduct').value = '';
-                    document.getElementById('promoPrice').value = '';
-                    document.getElementById('promoOriginalPrice').value = '';
-                    document.getElementById('promoStore').value = '';
-                    document.getElementById('promoDesc').value = '';
-                    document.getElementById('promoBarcode').value = '';
-                    document.getElementById('promoStartDate').value = '';
-                    document.getElementById('promoEndDate').value = '';
-                    document.getElementById('promoPriority').value = '0';
-                    loadPromotions();
-                } else {
-                    const err = await res.json();
-                    alert(err.detail || 'Σφάλμα δημιουργίας');
-                }
-            } catch (err) {
-                alert('Σφάλμα δημιουργίας προσφοράς');
-            }
-        }
-
-        async function togglePromotion(promoId, newState) {
-            try {
-                const res = await fetch(`${API_BASE}/admin/promotions/${promoId}?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_active: newState })
-                });
-                if (res.ok) {
-                    loadPromotions();
-                }
-            } catch (err) {
-                alert('Σφάλμα ενημέρωσης');
-            }
-        }
-
-        async function deletePromotion(promoId) {
-            if (!confirm('Θέλετε να διαγράψετε αυτήν την προσφορά;')) return;
-            
-            try {
-                const res = await fetch(`${API_BASE}/admin/promotions/${promoId}?admin_key=${encodeURIComponent(adminKey)}`, {
-                    method: 'DELETE'
-                });
-                if (res.ok) {
-                    loadPromotions();
-                }
-            } catch (err) {
-                alert('Σφάλμα διαγραφής');
-            }
-        }
-    </script>
-</body>
-</html>
-"""
-
-@api_router.get("/admin-panel", response_class=HTMLResponse)
-async def admin_dashboard():
-    """Serve the Web Admin Dashboard."""
-    return ADMIN_DASHBOARD_HTML
 
 
 # ============ AI INTEGRATION WITH GEMINI ============
