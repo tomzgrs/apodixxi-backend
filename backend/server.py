@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body, Depends, Header
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -5132,6 +5132,18 @@ async def restore_purchases(user_email: str):
         }
     
     return {"success": False, "message": "Δεν βρέθηκαν ενεργές συνδρομές"}
+
+
+# ============ APP ICON DOWNLOAD ============
+
+@api_router.get("/assets/icon.png")
+async def get_app_icon():
+    """Download the app icon."""
+    import os
+    icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
+    if os.path.exists(icon_path):
+        return FileResponse(icon_path, media_type="image/png", filename="apodixxi-icon.png")
+    raise HTTPException(status_code=404, detail="Icon not found")
 
 
 # ============ ACCOUNT DELETION ============
