@@ -149,8 +149,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Signup failed');
+        let errorMessage = 'Signup failed';
+        try {
+          const error = await response.json();
+          errorMessage = error.detail || errorMessage;
+        } catch {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
@@ -170,8 +177,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Login failed');
+        let errorMessage = 'Login failed';
+        try {
+          const error = await response.json();
+          errorMessage = error.detail || errorMessage;
+        } catch {
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
