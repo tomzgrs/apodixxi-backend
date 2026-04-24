@@ -5134,6 +5134,294 @@ async def restore_purchases(user_email: str):
     return {"success": False, "message": "Δεν βρέθηκαν ενεργές συνδρομές"}
 
 
+# ============ ACCOUNT DELETION ============
+
+@api_router.delete("/account/delete")
+async def delete_account(current_user: dict = Depends(get_current_user)):
+    """Delete user account and all associated data."""
+    user_id = current_user["id"]
+    device_id = current_user.get("device_id")
+    
+    # Delete all user data
+    await db.receipts.delete_many({"device_id": device_id})
+    await db.users.delete_one({"_id": user_id})
+    
+    return {"success": True, "message": "Ο λογαριασμός και όλα τα δεδομένα διαγράφηκαν επιτυχώς"}
+
+@api_router.post("/account/request-deletion")
+async def request_account_deletion(email: str = Form(...)):
+    """Request account deletion via email."""
+    # Find user
+    user = await db.users.find_one({"email": email})
+    if not user:
+        # Don't reveal if email exists
+        return {"success": True, "message": "Αν υπάρχει λογαριασμός με αυτό το email, θα λάβετε οδηγίες διαγραφής."}
+    
+    # In production, send email with deletion link
+    # For now, mark for deletion
+    await db.users.update_one(
+        {"email": email},
+        {"$set": {"deletion_requested": True, "deletion_requested_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"success": True, "message": "Το αίτημα διαγραφής καταχωρήθηκε. Θα επεξεργαστεί εντός 48 ωρών."}
+
+# Account Deletion Web Page
+@app.get("/delete-account", response_class=HTMLResponse)
+async def delete_account_page():
+    """Serve account deletion request page."""
+    html_content = '''<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Διαγραφή Λογαριασμού - apodixxi</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: #1f2937;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: #2dd4bf;
+            border-radius: 20px;
+            margin: 0 auto 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .logo svg {
+            width: 50px;
+            height: 50px;
+        }
+        h1 {
+            color: #fff;
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 24px;
+        }
+        .subtitle {
+            color: #9ca3af;
+            text-align: center;
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+        .warning {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .warning h3 {
+            color: #ef4444;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        .warning ul {
+            color: #f87171;
+            font-size: 13px;
+            padding-left: 20px;
+        }
+        .warning li {
+            margin-bottom: 4px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            color: #d1d5db;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input[type="email"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid #374151;
+            border-radius: 10px;
+            background: #111827;
+            color: #fff;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input[type="email"]:focus {
+            border-color: #2dd4bf;
+        }
+        input[type="email"]::placeholder {
+            color: #6b7280;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        .checkbox-group input {
+            margin-top: 3px;
+            width: 18px;
+            height: 18px;
+            accent-color: #2dd4bf;
+        }
+        .checkbox-group label {
+            color: #9ca3af;
+            font-size: 13px;
+            margin: 0;
+        }
+        button {
+            width: 100%;
+            padding: 16px;
+            background: #ef4444;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #dc2626;
+        }
+        button:disabled {
+            background: #374151;
+            cursor: not-allowed;
+        }
+        .success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            display: none;
+        }
+        .success h3 {
+            color: #22c55e;
+            margin-bottom: 8px;
+        }
+        .success p {
+            color: #86efac;
+            font-size: 14px;
+        }
+        .contact {
+            text-align: center;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid #374151;
+        }
+        .contact p {
+            color: #6b7280;
+            font-size: 13px;
+        }
+        .contact a {
+            color: #2dd4bf;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <svg viewBox="0 0 50 50" fill="none">
+                <path d="M10 5 L35 5 L40 12 L40 40 L10 40 Z" fill="#111827"/>
+                <path d="M35 5 L40 12 L35 12 Z" fill="#0d9488"/>
+                <rect x="15" y="15" width="18" height="3" rx="1.5" fill="#111827"/>
+                <rect x="15" y="22" width="12" height="3" rx="1.5" fill="#111827"/>
+            </svg>
+        </div>
+        
+        <h1>Διαγραφή Λογαριασμού</h1>
+        <p class="subtitle">apodixxi - Διαχείριση Αποδείξεων</p>
+        
+        <div id="form-container">
+            <div class="warning">
+                <h3>⚠️ Προσοχή: Αυτή η ενέργεια είναι μη αναστρέψιμη</h3>
+                <ul>
+                    <li>Θα διαγραφούν όλες οι αποδείξεις σας</li>
+                    <li>Θα διαγραφούν τα στατιστικά σας</li>
+                    <li>Θα διαγραφεί το ιστορικό αγορών</li>
+                    <li>Δεν θα μπορείτε να ανακτήσετε τα δεδομένα</li>
+                </ul>
+            </div>
+            
+            <form id="deleteForm" onsubmit="submitForm(event)">
+                <div class="form-group">
+                    <label for="email">Email Λογαριασμού</label>
+                    <input type="email" id="email" name="email" placeholder="your@email.com" required>
+                </div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="confirm" required>
+                    <label for="confirm">Κατανοώ ότι όλα τα δεδομένα μου θα διαγραφούν οριστικά και αυτή η ενέργεια δεν μπορεί να αναιρεθεί.</label>
+                </div>
+                
+                <button type="submit" id="submitBtn">Αίτημα Διαγραφής Λογαριασμού</button>
+            </form>
+        </div>
+        
+        <div class="success" id="success">
+            <h3>✓ Το αίτημα καταχωρήθηκε</h3>
+            <p>Θα επεξεργαστούμε το αίτημά σας εντός 48 ωρών. Θα λάβετε email επιβεβαίωσης όταν ολοκληρωθεί η διαγραφή.</p>
+        </div>
+        
+        <div class="contact">
+            <p>Χρειάζεστε βοήθεια; Επικοινωνήστε μαζί μας:<br>
+            <a href="mailto:support@apodixxi.app">support@apodixxi.app</a></p>
+        </div>
+    </div>
+    
+    <script>
+        async function submitForm(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const email = document.getElementById('email').value;
+            
+            btn.disabled = true;
+            btn.textContent = 'Υποβολή...';
+            
+            try {
+                const formData = new FormData();
+                formData.append('email', email);
+                
+                const response = await fetch('/api/account/request-deletion', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    document.getElementById('form-container').style.display = 'none';
+                    document.getElementById('success').style.display = 'block';
+                } else {
+                    throw new Error('Σφάλμα κατά την υποβολή');
+                }
+            } catch (error) {
+                alert('Παρουσιάστηκε σφάλμα. Παρακαλώ δοκιμάστε ξανά.');
+                btn.disabled = false;
+                btn.textContent = 'Αίτημα Διαγραφής Λογαριασμού';
+            }
+        }
+    </script>
+</body>
+</html>'''
+    return HTMLResponse(content=html_content)
+
+
 app.include_router(api_router)
 
 app.add_middleware(
