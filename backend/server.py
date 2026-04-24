@@ -5139,11 +5139,38 @@ async def restore_purchases(user_email: str):
 @api_router.get("/assets/icon.png")
 async def get_app_icon():
     """Download the app icon."""
-    import os
-    icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
-    if os.path.exists(icon_path):
-        return FileResponse(icon_path, media_type="image/png", filename="apodixxi-icon.png")
-    raise HTTPException(status_code=404, detail="Icon not found")
+    icon_path = "/app/backend/icon.png"
+    return FileResponse(icon_path, media_type="image/png", filename="apodixxi-icon.png")
+
+@api_router.get("/download-icon", response_class=HTMLResponse)
+async def download_icon_page():
+    """Page to download app icon."""
+    import base64
+    with open("/app/backend/icon.png", "rb") as f:
+        icon_base64 = base64.b64encode(f.read()).decode()
+    
+    html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <title>Download apodixxi Icon</title>
+    <style>
+        body {{ font-family: Arial; background: #111827; color: white; text-align: center; padding: 50px; }}
+        img {{ width: 256px; height: 256px; border-radius: 50px; margin: 20px; }}
+        a {{ display: inline-block; background: #2dd4bf; color: #111827; padding: 15px 30px; 
+             text-decoration: none; border-radius: 10px; font-weight: bold; margin: 20px; }}
+        a:hover {{ background: #14b8a6; }}
+    </style>
+</head>
+<body>
+    <h1>apodixxi App Icon</h1>
+    <p>1024x1024 PNG - Ready for Google Play Store</p>
+    <img src="data:image/png;base64,{icon_base64}" alt="apodixxi icon">
+    <br>
+    <a href="data:image/png;base64,{icon_base64}" download="apodixxi-icon.png">📥 Download Icon</a>
+    <p style="color: #888; margin-top: 30px;">Right-click on image → Save image as...</p>
+</body>
+</html>'''
+    return HTMLResponse(content=html)
 
 
 # ============ ACCOUNT DELETION ============
