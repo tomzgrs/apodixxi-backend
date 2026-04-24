@@ -5167,7 +5167,7 @@ async def request_account_deletion(email: str = Form(...)):
     return {"success": True, "message": "Το αίτημα διαγραφής καταχωρήθηκε. Θα επεξεργαστεί εντός 48 ωρών."}
 
 # Account Deletion Web Page
-@app.get("/delete-account", response_class=HTMLResponse)
+@api_router.get("/delete-account", response_class=HTMLResponse)
 async def delete_account_page():
     """Serve account deletion request page."""
     html_content = '''<!DOCTYPE html>
