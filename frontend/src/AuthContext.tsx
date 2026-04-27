@@ -148,19 +148,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email, password, name })
       });
 
+      const responseText = await response.text();
+      
       if (!response.ok) {
         let errorMessage = 'Signup failed';
         try {
-          const error = await response.json();
-          errorMessage = error.detail || errorMessage;
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.detail || errorMessage;
         } catch {
-          const text = await response.text();
-          errorMessage = text || errorMessage;
+          errorMessage = responseText || errorMessage;
         }
         throw new Error(errorMessage);
       }
 
-      const data = await response.json();
+      const data = JSON.parse(responseText);
       await handleAuthResponse(data);
     } finally {
       setIsLoading(false);
@@ -176,19 +177,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ email, password })
       });
 
+      const responseText = await response.text();
+      
       if (!response.ok) {
         let errorMessage = 'Login failed';
         try {
-          const error = await response.json();
-          errorMessage = error.detail || errorMessage;
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.detail || errorMessage;
         } catch {
-          const text = await response.text();
-          errorMessage = text || errorMessage;
+          errorMessage = responseText || errorMessage;
         }
         throw new Error(errorMessage);
       }
 
-      const data = await response.json();
+      const data = JSON.parse(responseText);
       await handleAuthResponse(data);
     } finally {
       setIsLoading(false);
