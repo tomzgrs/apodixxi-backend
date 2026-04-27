@@ -1846,10 +1846,14 @@ async def export_receipts_excel(user: dict = Depends(get_current_user)):
         )
     
     # Get user's receipts
-    user_email = user.get("email")
+    device_id = user.get("device_id")
     
-    # Get all receipts (in production, filter by user's devices/ownership)
-    receipts = await db.receipts.find().sort("date", -1).to_list(1000)
+    # Filter receipts by user's device_id
+    query = {}
+    if device_id:
+        query["device_id"] = device_id
+    
+    receipts = await db.receipts.find(query).sort("date", -1).to_list(1000)
     
     if not receipts:
         raise HTTPException(status_code=404, detail="Δεν βρέθηκαν αποδείξεις")
