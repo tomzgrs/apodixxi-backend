@@ -17,12 +17,16 @@ import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
 import AppleSignInButton from '../src/components/AppleSignInButton';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const GOOGLE_CLIENT_ID_WEB = '959501343848-ka5h4aev01j01mh0se6qan71nrj9h8at.apps.googleusercontent.com';
-const GOOGLE_CLIENT_ID_ANDROID = '959501343848-u4lqddkaqai02dbfn111ksmg03glun69.apps.googleusercontent.com';
+// Firebase Project: apodixxi-58736 (889769499922)
+// Web Client ID from google-services.json -> other_platform_oauth_client
+const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
+// For Android, we use the Web Client ID with expo-auth-session
+const GOOGLE_CLIENT_ID_ANDROID = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
@@ -42,10 +46,16 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  // Google Sign-In configuration
+  // Google Sign-In configuration with proper redirect URI for EAS builds
+  const redirectUri = makeRedirectUri({
+    scheme: 'com.apodixxi.app',
+    path: 'auth',
+  });
+
   const [request, response, promptAsync] = Google.useAuthRequest({
     androidClientId: GOOGLE_CLIENT_ID_ANDROID,
     webClientId: GOOGLE_CLIENT_ID_WEB,
+    redirectUri,
     scopes: ['profile', 'email'],
   });
 
@@ -225,10 +235,6 @@ export default function LoginScreen() {
                   autoFocus
                 />
               </View>
-
-              {mockOtp && (
-                <Text style={styles.mockOtp}>Development OTP: {mockOtp}</Text>
-              )}
 
               {error ? <Text style={styles.error}>{error}</Text> : null}
 
