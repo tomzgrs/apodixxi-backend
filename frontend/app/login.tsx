@@ -25,8 +25,8 @@ WebBrowser.maybeCompleteAuthSession();
 // Firebase Project: apodixxi-58736 (889769499922)
 // Web Client ID from google-services.json -> other_platform_oauth_client
 const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
-// For Android, we use the Web Client ID with expo-auth-session
-const GOOGLE_CLIENT_ID_ANDROID = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
+// Android Client ID with SHA-1 from Play App Signing
+const GOOGLE_CLIENT_ID_ANDROID = '889769499922-6p2t89jofqvp5711qvhn2hh20mdvmgrc.apps.googleusercontent.com';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
