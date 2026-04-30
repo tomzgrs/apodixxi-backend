@@ -13,6 +13,7 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
@@ -24,6 +25,10 @@ WebBrowser.maybeCompleteAuthSession();
 // Firebase Project: apodixxi-58736 (889769499922)
 // For expo-auth-session, we use Web Client ID for all platforms (browser-based OAuth)
 const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
+
+// Get app version from Constants
+const appVersion = Constants.expoConfig?.version || '1.0.0';
+const buildNumber = Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber || '1';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
@@ -506,6 +511,11 @@ export default function LoginScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+          
+          {/* App Version */}
+          <Text style={styles.versionText}>
+            Έκδοση {appVersion} ({buildNumber})
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -668,5 +678,13 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
   linkText: {
     color: theme.primary,
     fontSize: 14,
+  },
+  versionText: {
+    textAlign: 'center',
+    color: theme.textSecondary,
+    fontSize: 12,
+    marginTop: 24,
+    marginBottom: 16,
+    opacity: 0.7,
   },
 });
