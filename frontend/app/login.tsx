@@ -47,9 +47,9 @@ export default function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
 
   // Google Sign-In configuration with proper redirect URI for EAS builds
+  // Android OAuth requires bundle ID scheme WITHOUT path parameter
   const redirectUri = makeRedirectUri({
     scheme: 'com.apodixxi.app',
-    path: 'auth',
   });
 
   const [request, response, promptAsync] = Google.useAuthRequest({
