@@ -43,9 +43,10 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  // Google Sign-In configuration - use only Web Client ID for expo-auth-session
-  // expo-auth-session uses browser-based OAuth flow, so Web Client ID works for all platforms
+  // Google Sign-In configuration - use Web Client ID for expo-auth-session
+  // expoClientId is required for production EAS builds
   const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: GOOGLE_CLIENT_ID_WEB,
     webClientId: GOOGLE_CLIENT_ID_WEB,
     scopes: ['profile', 'email'],
   });
