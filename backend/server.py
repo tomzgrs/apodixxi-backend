@@ -4685,8 +4685,14 @@ def send_admin_notification(subject: str, body: str):
 
 
 # ============ AI INTEGRATION WITH GEMINI ============
+# NOTE: AI features disabled for Coolify deployment (missing emergentintegrations)
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+AI_AVAILABLE = False
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    AI_AVAILABLE = True
+except ImportError:
+    pass
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
@@ -4707,8 +4713,8 @@ class AIRecommendationRequest(BaseModel):
 @api_router.post("/ai/insights")
 async def get_ai_insights(request: AIInsightRequest):
     """Get AI-powered insights about user's shopping habits."""
-    if not EMERGENT_LLM_KEY:
-        raise HTTPException(status_code=500, detail="AI service not configured")
+    if not AI_AVAILABLE or not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI service not available")
     
     # Fetch user's receipt data
     receipts = await db.receipts.find({"device_id": request.device_id}).to_list(100)
