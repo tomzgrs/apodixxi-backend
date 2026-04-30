@@ -4688,6 +4688,8 @@ def send_admin_notification(subject: str, body: str):
 # NOTE: AI features disabled for Coolify deployment (missing emergentintegrations)
 
 AI_AVAILABLE = False
+LlmChat = None
+UserMessage = None
 try:
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     AI_AVAILABLE = True
