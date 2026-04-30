@@ -17,16 +17,13 @@ import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
 import AppleSignInButton from '../src/components/AppleSignInButton';
 
 WebBrowser.maybeCompleteAuthSession();
 
 // Firebase Project: apodixxi-58736 (889769499922)
-// Web Client ID from google-services.json -> other_platform_oauth_client
+// For expo-auth-session, we use Web Client ID for all platforms (browser-based OAuth)
 const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
-// Android Client ID with SHA-1 from Play App Signing
-const GOOGLE_CLIENT_ID_ANDROID = '889769499922-6p2t89jofqvp5711qvhn2hh20mdvmgrc.apps.googleusercontent.com';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
@@ -46,16 +43,10 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  // Google Sign-In configuration with proper redirect URI for EAS builds
-  // Android OAuth requires bundle ID scheme WITHOUT path parameter
-  const redirectUri = makeRedirectUri({
-    scheme: 'com.apodixxi.app',
-  });
-
+  // Google Sign-In configuration - use only Web Client ID for expo-auth-session
+  // expo-auth-session uses browser-based OAuth flow, so Web Client ID works for all platforms
   const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: GOOGLE_CLIENT_ID_ANDROID,
     webClientId: GOOGLE_CLIENT_ID_WEB,
-    redirectUri,
     scopes: ['profile', 'email'],
   });
 
