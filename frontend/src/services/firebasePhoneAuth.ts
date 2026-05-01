@@ -14,10 +14,60 @@ const FIREBASE_CONFIG = {
   appId: "1:889769499922:web:5ec8c5547885b62dbc27cb"
 };
 
-// Store confirmation result for OTP verification
-let confirmationResult: any = null;
+// Store confirmation result for OTP verification - using a more robust storage mechanism
+interface ConfirmationStore {
+  result: any;
+  phoneNumber: string;
+  timestamp: number;
+}
+
+let confirmationStore: ConfirmationStore | null = null;
 let firebaseAuth: any = null;
 let isInitialized = false;
+
+// Timeout for OTP confirmation (5 minutes = 300000ms)
+const OTP_TIMEOUT = 300000;
+
+/**
+ * Check if stored confirmation is still valid
+ */
+const isConfirmationValid = (): boolean => {
+  if (!confirmationStore) return false;
+  const now = Date.now();
+  const elapsed = now - confirmationStore.timestamp;
+  return elapsed < OTP_TIMEOUT;
+};
+
+/**
+ * Get stored confirmation result
+ */
+const getConfirmationResult = (): any => {
+  if (!confirmationStore) {
+    console.log('[Firebase] No confirmation result stored');
+    return null;
+  }
+  
+  if (!isConfirmationValid()) {
+    console.log('[Firebase] Confirmation result expired');
+    confirmationStore = null;
+    return null;
+  }
+  
+  console.log('[Firebase] Confirmation result is valid, phone:', confirmationStore.phoneNumber);
+  return confirmationStore.result;
+};
+
+/**
+ * Store confirmation result
+ */
+const setConfirmationResult = (result: any, phoneNumber: string): void => {
+  confirmationStore = {
+    result,
+    phoneNumber,
+    timestamp: Date.now()
+  };
+  console.log('[Firebase] Confirmation result stored for:', phoneNumber);
+};
 
 /**
  * Initialize Firebase based on platform
@@ -99,10 +149,12 @@ export const sendPhoneOTP = async (phoneNumber: string): Promise<void> => {
         }
       });
       
-      confirmationResult = await signInWithPhoneNumber(firebaseAuth, formattedPhone, recaptchaVerifier);
+      const result = await signInWithPhoneNumber(firebaseAuth, formattedPhone, recaptchaVerifier);
+      setConfirmationResult(result, formattedPhone);
     } else {
       // Native: Direct phone auth
-      confirmationResult = await firebaseAuth.signInWithPhoneNumber(formattedPhone);
+      const result = await firebaseAuth.signInWithPhoneNumber(formattedPhone);
+      setConfirmationResult(result, formattedPhone);
     }
     
     console.log('[Firebase] OTP sent successfully');
@@ -128,8 +180,11 @@ export const sendPhoneOTP = async (phoneNumber: string): Promise<void> => {
  * @returns Firebase user credential
  */
 export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneNumber: string }> => {
+  const confirmationResult = getConfirmationResult();
+  
   if (!confirmationResult) {
-    throw new Error('Δεν έχει σταλεί OTP. Παρακαλώ ξαναστείλτε.');
+    console.log('[Firebase] No valid confirmation result found');
+    throw new Error('Η συνεδρία έληξε. Παρακαλώ ξαναστείλτε τον κωδικό OTP.');
   }
   
   console.log('[Firebase] Verifying OTP...');
@@ -140,6 +195,9 @@ export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneN
     
     console.log('[Firebase] OTP verified successfully');
     
+    // Clear the stored confirmation after successful verification
+    confirmationStore = null;
+    
     return {
       uid: user.uid,
       phoneNumber: user.phoneNumber || ''
@@ -149,8 +207,10 @@ export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneN
     
     if (error.code === 'auth/invalid-verification-code') {
       throw new Error('Μη έγκυρος κωδικός OTP');
-    } else if (error.code === 'auth/code-expired') {
-      throw new Error('Ο κωδικός OTP έληξε. Ζητήστε νέο.');
+    } else if (error.code === 'auth/code-expired' || error.code === 'auth/session-expired') {
+      // Clear expired confirmation
+      confirmationStore = null;
+      throw new Error('Η συνεδρία έληξε. Παρακαλώ ξαναστείλτε τον κωδικό OTP.');
     }
     
     throw error;
@@ -182,7 +242,8 @@ export const signOutFirebase = async (): Promise<void> => {
     await firebaseAuth.signOut();
   }
   
-  confirmationResult = null;
+  // Clear stored confirmation
+  confirmationStore = null;
 };
 
 /**
