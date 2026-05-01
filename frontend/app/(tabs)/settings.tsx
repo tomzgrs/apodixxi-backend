@@ -14,7 +14,7 @@ import { getStoreLogo } from '../../src/storeLogos';
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '14';
+const BUILD_NUMBER = '15';
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
