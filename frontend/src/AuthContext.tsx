@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { sendPhoneOTP as firebaseSendOTP, verifyPhoneOTP as firebaseVerifyOTP, signOutFirebase } from './services/firebasePhoneAuth';
+// Firebase phone auth is loaded dynamically to prevent startup crashes
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -279,9 +279,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [pendingPhoneNumber, setPendingPhoneNumber] = useState<string>('');
 
   const requestPhoneOTP = useCallback(async (phoneNumber: string): Promise<string> => {
-    // Use Firebase for real SMS OTP
+    // Use dynamic import to prevent startup crashes
     try {
-      await firebaseSendOTP(phoneNumber);
+      const { sendPhoneOTP } = await import('./services/firebasePhoneAuth');
+      await sendPhoneOTP(phoneNumber);
       setPendingPhoneNumber(phoneNumber);
       return ''; // No mock OTP - real SMS will be sent
     } catch (error: any) {
@@ -292,6 +293,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const verifyPhoneOTP = useCallback(async (phoneNumber: string, otp: string) => {
     try {
+      // Use dynamic import to prevent startup crashes
+      const { verifyPhoneOTP: firebaseVerifyOTP } = await import('./services/firebasePhoneAuth');
       // Verify OTP with Firebase
       const firebaseUser = await firebaseVerifyOTP(otp);
       
