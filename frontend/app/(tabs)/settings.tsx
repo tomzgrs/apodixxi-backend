@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, Im
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import { documentDirectory, downloadAsync } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
@@ -14,7 +14,7 @@ import { getStoreLogo } from '../../src/storeLogos';
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '13';
+const BUILD_NUMBER = '14';
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
@@ -65,11 +65,11 @@ export default function SettingsScreen() {
       
       try {
         const filename = `apodixxi_export_${new Date().toISOString().split('T')[0]}.xlsx`;
-        const fileUri = `${FileSystem.documentDirectory}${filename}`;
+        const fileUri = `${documentDirectory}${filename}`;
         
         // Download file directly using FileSystem
         const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-        const downloadResult = await FileSystem.downloadAsync(
+        const downloadResult = await downloadAsync(
           `${API_URL}/api/export/receipts`,
           fileUri,
           {
