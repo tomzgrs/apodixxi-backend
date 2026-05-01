@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>apodixxi - Παρακολούθησε τα ψώνια σου</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #ffffff;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+        
+        /* Header */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1000;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 24px;
+            font-weight: 800;
+            color: #0D9488;
+        }
+        
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #0D9488, #14b8a6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 32px;
+        }
+        
+        .nav-links a {
+            text-decoration: none;
+            color: #6b7280;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover {
+            color: #0D9488;
+        }
+        
+        .download-btn {
+            background: #0D9488;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        
+        .download-btn:hover {
+            background: #0f766e;
+        }
+        
+        /* Hero Section */
+        .hero {
+            padding: 140px 24px 80px;
+            background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
+            text-align: center;
+        }
+        
+        .hero-content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .hero-badge {
+            display: inline-block;
+            background: #ccfbf1;
+            color: #0D9488;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+        
+        .hero h1 {
+            font-size: 48px;
+            font-weight: 800;
+            color: #111827;
+            margin-bottom: 24px;
+            line-height: 1.2;
+        }
+        
+        .hero h1 span {
+            color: #0D9488;
+        }
+        
+        .hero p {
+            font-size: 20px;
+            color: #6b7280;
+            margin-bottom: 40px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .hero-buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #0D9488;
+            color: white;
+            padding: 16px 32px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 18px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 14px rgba(13, 148, 136, 0.3);
+        }
+        
+        .btn-primary:hover {
+            background: #0f766e;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(13, 148, 136, 0.4);
+        }
+        
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: white;
+            color: #374151;
+            padding: 16px 32px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 18px;
+            border: 2px solid #e5e7eb;
+            transition: all 0.2s;
+        }
+        
+        .btn-secondary:hover {
+            border-color: #0D9488;
+            color: #0D9488;
+        }
+        
+        .hero-image {
+            margin-top: 60px;
+            position: relative;
+        }
+        
+        .phone-mockup {
+            width: 280px;
+            height: 560px;
+            background: linear-gradient(145deg, #1f2937, #374151);
+            border-radius: 40px;
+            padding: 12px;
+            margin: 0 auto;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.2);
+        }
+        
+        .phone-screen {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #0D9488 0%, #14b8a6 50%, #f0fdfa 100%);
+            border-radius: 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .phone-screen-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+        
+        /* Features Section */
+        .features {
+            padding: 100px 24px;
+            background: #ffffff;
+        }
+        
+        .section-header {
+            text-align: center;
+            max-width: 600px;
+            margin: 0 auto 60px;
+        }
+        
+        .section-header h2 {
+            font-size: 36px;
+            font-weight: 800;
+            color: #111827;
+            margin-bottom: 16px;
+        }
+        
+        .section-header p {
+            font-size: 18px;
+            color: #6b7280;
+        }
+        
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 32px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .feature-card {
+            background: #f9fafb;
+            padding: 32px;
+            border-radius: 16px;
+            transition: all 0.3s;
+        }
+        
+        .feature-card:hover {
+            background: #f0fdfa;
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px rgba(13, 148, 136, 0.1);
+        }
+        
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, #0D9488, #14b8a6);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+        
+        .feature-card h3 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 12px;
+        }
+        
+        .feature-card p {
+            color: #6b7280;
+            font-size: 16px;
+        }
+        
+        /* Stats Section */
+        .stats {
+            padding: 80px 24px;
+            background: linear-gradient(135deg, #0D9488, #0f766e);
+            color: white;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 40px;
+            max-width: 1000px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .stat-item h3 {
+            font-size: 48px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+        
+        .stat-item p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        
+        /* How It Works */
+        .how-it-works {
+            padding: 100px 24px;
+            background: #f9fafb;
+        }
+        
+        .steps {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .step {
+            text-align: center;
+            max-width: 280px;
+        }
+        
+        .step-number {
+            width: 64px;
+            height: 64px;
+            background: #0D9488;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            font-weight: 800;
+            margin: 0 auto 20px;
+        }
+        
+        .step h3 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 12px;
+        }
+        
+        .step p {
+            color: #6b7280;
+        }
+        
+        /* CTA Section */
+        .cta {
+            padding: 100px 24px;
+            background: #111827;
+            text-align: center;
+            color: white;
+        }
+        
+        .cta h2 {
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+        
+        .cta p {
+            font-size: 18px;
+            opacity: 0.8;
+            margin-bottom: 40px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .store-badges {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        
+        .store-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: white;
+            color: #111827;
+            padding: 12px 24px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        
+        .store-badge:hover {
+            transform: scale(1.05);
+        }
+        
+        .store-badge-icon {
+            font-size: 32px;
+        }
+        
+        .store-badge-text {
+            text-align: left;
+        }
+        
+        .store-badge-text small {
+            display: block;
+            font-size: 12px;
+            font-weight: 400;
+            opacity: 0.7;
+        }
+        
+        .store-badge-text span {
+            font-size: 18px;
+        }
+        
+        /* Footer */
+        .footer {
+            padding: 60px 24px 30px;
+            background: #0a0a0a;
+            color: white;
+        }
+        
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+        
+        .footer-brand h3 {
+            font-size: 24px;
+            font-weight: 800;
+            color: #0D9488;
+            margin-bottom: 12px;
+        }
+        
+        .footer-brand p {
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        
+        .footer-links h4 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        
+        .footer-links a {
+            display: block;
+            color: #9ca3af;
+            text-decoration: none;
+            margin-bottom: 8px;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        
+        .footer-links a:hover {
+            color: #0D9488;
+        }
+        
+        .footer-bottom {
+            border-top: 1px solid #1f2937;
+            padding-top: 30px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+            
+            .hero h1 {
+                font-size: 32px;
+            }
+            
+            .hero p {
+                font-size: 16px;
+            }
+            
+            .section-header h2 {
+                font-size: 28px;
+            }
+            
+            .phone-mockup {
+                width: 220px;
+                height: 440px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🛒</div>
+            apodixxi
+        </div>
+        <nav class="nav-links">
+            <a href="#features">Χαρακτηριστικά</a>
+            <a href="#how-it-works">Πώς λειτουργεί</a>
+            <a href="#download">Κατέβασε</a>
+        </nav>
+        <a href="#download" class="download-btn">Κατέβασε τώρα</a>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">🎉 Νέα εφαρμογή για Android</div>
+            <h1>Παρακολούθησε τα <span>ψώνια σου</span> με ένα scan</h1>
+            <p>Σκανάρεις την απόδειξη, βλέπεις τα στατιστικά σου, εξοικονομείς χρήματα. Τόσο απλά.</p>
+            <div class="hero-buttons">
+                <a href="#download" class="btn-primary">
+                    📱 Κατέβασε δωρεάν
+                </a>
+                <a href="#features" class="btn-secondary">
+                    Μάθε περισσότερα →
+                </a>
+            </div>
+        </div>
+        <div class="hero-image">
+            <div class="phone-mockup">
+                <div class="phone-screen">
+                    <div class="phone-screen-icon">🛒</div>
+                    apodixxi
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features" id="features">
+        <div class="section-header">
+            <h2>Όλα όσα χρειάζεσαι</h2>
+            <p>Μια εφαρμογή, πολλές δυνατότητες για να ελέγχεις τα οικονομικά σου</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">📸</div>
+                <h3>Σάρωση αποδείξεων</h3>
+                <p>Φωτογράφισε την απόδειξή σου και η εφαρμογή αναγνωρίζει αυτόματα τα προϊόντα και τις τιμές.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Αναλυτικά στατιστικά</h3>
+                <p>Δες πού πηγαίνουν τα χρήματά σου με γραφήματα και αναλύσεις ανά κατηγορία και κατάστημα.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <h3>AI Shopping Assistant</h3>
+                <p>Ρώτα τον AI βοηθό για συμβουλές εξοικονόμησης και ανάλυση των αγορών σου.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📁</div>
+                <h3>Εξαγωγή σε Excel</h3>
+                <p>Κατέβασε τα δεδομένα σου σε Excel για περαιτέρω ανάλυση ή αρχειοθέτηση.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏪</div>
+                <h3>Όλα τα καταστήματα</h3>
+                <p>Υποστηρίζει όλα τα μεγάλα σούπερ μάρκετ της Ελλάδας: Σκλαβενίτης, ΑΒ, Lidl, My Market και πολλά άλλα.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <h3>Ασφαλή δεδομένα</h3>
+                <p>Τα δεδομένα σου είναι ασφαλή και μόνο δικά σου. Δεν τα μοιραζόμαστε με κανέναν.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats">
+        <div class="stats-grid">
+            <div class="stat-item">
+                <h3>1000+</h3>
+                <p>Αποδείξεις σαρώθηκαν</p>
+            </div>
+            <div class="stat-item">
+                <h3>50+</h3>
+                <p>Καταστήματα</p>
+            </div>
+            <div class="stat-item">
+                <h3>€0</h3>
+                <p>Δωρεάν για πάντα</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-header">
+            <h2>Πώς λειτουργεί</h2>
+            <p>3 απλά βήματα για να ξεκινήσεις</p>
+        </div>
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <h3>Κατέβασε την εφαρμογή</h3>
+                <p>Διαθέσιμη δωρεάν στο Google Play Store</p>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <h3>Σκανάρε την απόδειξη</h3>
+                <p>Φωτογράφισε ή επίλεξε από τη γκαλερί</p>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <h3>Δες τα στατιστικά</h3>
+                <p>Παρακολούθησε τα έξοδά σου σε πραγματικό χρόνο</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta" id="download">
+        <h2>Έτοιμος να εξοικονομήσεις;</h2>
+        <p>Κατέβασε την εφαρμογή δωρεάν και ξεκίνα να παρακολουθείς τα ψώνια σου σήμερα.</p>
+        <div class="store-badges">
+            <a href="https://play.google.com/store/apps/details?id=com.apodixxi.app" class="store-badge" target="_blank">
+                <span class="store-badge-icon">▶️</span>
+                <div class="store-badge-text">
+                    <small>Διαθέσιμο στο</small>
+                    <span>Google Play</span>
+                </div>
+            </a>
+            <a href="#" class="store-badge" style="opacity: 0.5; pointer-events: none;">
+                <span class="store-badge-icon">🍎</span>
+                <div class="store-badge-text">
+                    <small>Σύντομα στο</small>
+                    <span>App Store</span>
+                </div>
+            </a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-brand">
+                <h3>🛒 apodixxi</h3>
+                <p>Η έξυπνη εφαρμογή για να παρακολουθείς τα ψώνια σου.</p>
+            </div>
+            <div class="footer-links">
+                <h4>Σύνδεσμοι</h4>
+                <a href="#features">Χαρακτηριστικά</a>
+                <a href="#how-it-works">Πώς λειτουργεί</a>
+                <a href="#download">Κατέβασε</a>
+            </div>
+            <div class="footer-links">
+                <h4>Νομικά</h4>
+                <a href="/privacy">Πολιτική Απορρήτου</a>
+                <a href="/terms">Όροι Χρήσης</a>
+                <a href="https://api.apodixxi.app/api/delete-account">Διαγραφή Λογαριασμού</a>
+            </div>
+            <div class="footer-links">
+                <h4>Επικοινωνία</h4>
+                <a href="mailto:support@apodixxi.app">support@apodixxi.app</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2025 apodixxi. Με ❤️ από την Ελλάδα.</p>
+        </div>
+    </footer>
+</body>
+</html>
