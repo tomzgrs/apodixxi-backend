@@ -5,7 +5,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import Constants from 'expo-constants';
 import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
 import { useAuth } from '../../src/AuthContext';
@@ -13,9 +12,9 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
 
-// Get app version from Constants
-const appVersion = Constants.expoConfig?.version || '1.0.0';
-const buildNumber = Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber || '1';
+// App version - hardcoded for production stability
+const APP_VERSION = '1.0.0';
+const BUILD_NUMBER = '13';
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
@@ -505,7 +504,7 @@ export default function SettingsScreen() {
           <View style={styles.aboutCard}>
             <Ionicons name="cart" size={36} color={theme.primary} />
             <Text style={styles.aboutAppName}>apodixxi</Text>
-            <Text style={styles.aboutVersion}>{t('version')} {appVersion} ({buildNumber})</Text>
+            <Text style={styles.aboutVersion}>{t('version')} {APP_VERSION} ({BUILD_NUMBER})</Text>
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>{t('device_id')}:</Text>
               <Text style={styles.aboutValue} numberOfLines={1}>{deviceId}</Text>

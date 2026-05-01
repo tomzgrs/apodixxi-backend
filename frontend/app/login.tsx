@@ -13,7 +13,6 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
 import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as Google from 'expo-auth-session/providers/google';
@@ -26,9 +25,9 @@ WebBrowser.maybeCompleteAuthSession();
 // For expo-auth-session, we use Web Client ID for all platforms (browser-based OAuth)
 const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
 
-// Get app version from Constants
-const appVersion = Constants.expoConfig?.version || '1.0.0';
-const buildNumber = Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber || '1';
+// App version - hardcoded for production stability
+const APP_VERSION = '1.0.0';
+const BUILD_NUMBER = '12';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
@@ -514,7 +513,7 @@ export default function LoginScreen() {
           
           {/* App Version */}
           <Text style={styles.versionText}>
-            Έκδοση {appVersion} ({buildNumber})
+            Έκδοση {APP_VERSION} ({BUILD_NUMBER})
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
