@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": ["apodixxi", "com.apodixxi.app"],
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.apodixxi.app",
-      "versionCode": 17,
+      "versionCode": 18,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
