@@ -1,7 +1,17 @@
 /**
  * Firebase Phone Authentication Service
- * Handles SMS OTP verification using Firebase Auth
+ * Uses Firebase Web SDK (compatible with New Architecture)
  */
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInWithPhoneNumber, 
+  RecaptchaVerifier,
+  ConfirmationResult,
+  Auth,
+  signOut as firebaseSignOut,
+  User
+} from 'firebase/auth';
 import { Platform } from 'react-native';
 
 // Firebase configuration
@@ -14,16 +24,18 @@ const FIREBASE_CONFIG = {
   appId: "1:889769499922:web:5ec8c5547885b62dbc27cb"
 };
 
-// Store confirmation result for OTP verification - using a more robust storage mechanism
+// Store confirmation result for OTP verification
 interface ConfirmationStore {
-  result: any;
+  result: ConfirmationResult;
   phoneNumber: string;
   timestamp: number;
 }
 
 let confirmationStore: ConfirmationStore | null = null;
-let firebaseAuth: any = null;
+let firebaseApp: FirebaseApp | null = null;
+let firebaseAuth: Auth | null = null;
 let isInitialized = false;
+let recaptchaVerifier: RecaptchaVerifier | null = null;
 
 // Timeout for OTP confirmation (5 minutes = 300000ms)
 const OTP_TIMEOUT = 300000;
@@ -41,7 +53,7 @@ const isConfirmationValid = (): boolean => {
 /**
  * Get stored confirmation result
  */
-const getConfirmationResult = (): any => {
+const getConfirmationResult = (): ConfirmationResult | null => {
   if (!confirmationStore) {
     console.log('[Firebase] No confirmation result stored');
     return null;
@@ -60,7 +72,7 @@ const getConfirmationResult = (): any => {
 /**
  * Store confirmation result
  */
-const setConfirmationResult = (result: any, phoneNumber: string): void => {
+const setConfirmationResult = (result: ConfirmationResult, phoneNumber: string): void => {
   confirmationStore = {
     result,
     phoneNumber,
@@ -70,35 +82,70 @@ const setConfirmationResult = (result: any, phoneNumber: string): void => {
 };
 
 /**
- * Initialize Firebase based on platform
+ * Initialize Firebase
  */
 export const initializeFirebaseAuth = async (): Promise<void> => {
-  if (isInitialized) return;
+  if (isInitialized && firebaseAuth) return;
   
   try {
-    if (Platform.OS === 'web') {
-      // Web uses modular Firebase SDK
-      const { initializeApp, getApps, getApp } = await import('firebase/app');
-      const { getAuth } = await import('firebase/auth');
-      
-      let app;
-      if (getApps().length === 0) {
-        app = initializeApp(FIREBASE_CONFIG);
-      } else {
-        app = getApp();
-      }
-      firebaseAuth = getAuth(app);
+    // Initialize Firebase App
+    if (getApps().length === 0) {
+      firebaseApp = initializeApp(FIREBASE_CONFIG);
     } else {
-      // Native uses @react-native-firebase
-      const authModule = await import('@react-native-firebase/auth');
-      firebaseAuth = authModule.default();
+      firebaseApp = getApp();
     }
+    
+    // Get Auth instance
+    firebaseAuth = getAuth(firebaseApp);
     
     isInitialized = true;
     console.log('[Firebase] Auth initialized successfully');
   } catch (error) {
     console.error('[Firebase] Initialization error:', error);
     throw error;
+  }
+};
+
+/**
+ * Create reCAPTCHA verifier for web
+ */
+const createRecaptchaVerifier = (): RecaptchaVerifier | null => {
+  if (Platform.OS !== 'web' || !firebaseAuth) {
+    return null;
+  }
+  
+  try {
+    // Create invisible reCAPTCHA container if it doesn't exist
+    let container = document.getElementById('recaptcha-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'recaptcha-container';
+      document.body.appendChild(container);
+    }
+    
+    // Clear existing verifier
+    if (recaptchaVerifier) {
+      try {
+        recaptchaVerifier.clear();
+      } catch (e) {
+        // Ignore errors when clearing
+      }
+    }
+    
+    recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, 'recaptcha-container', {
+      size: 'invisible',
+      callback: () => {
+        console.log('[Firebase] reCAPTCHA solved');
+      },
+      'expired-callback': () => {
+        console.log('[Firebase] reCAPTCHA expired');
+      }
+    });
+    
+    return recaptchaVerifier;
+  } catch (error) {
+    console.error('[Firebase] reCAPTCHA creation error:', error);
+    return null;
   }
 };
 
@@ -132,29 +179,17 @@ export const sendPhoneOTP = async (phoneNumber: string): Promise<void> => {
   try {
     if (Platform.OS === 'web') {
       // Web: Use reCAPTCHA verifier
-      const { RecaptchaVerifier, signInWithPhoneNumber } = await import('firebase/auth');
-      
-      // Create invisible reCAPTCHA
-      const recaptchaContainer = document.getElementById('recaptcha-container');
-      if (!recaptchaContainer) {
-        const div = document.createElement('div');
-        div.id = 'recaptcha-container';
-        document.body.appendChild(div);
+      const verifier = createRecaptchaVerifier();
+      if (!verifier) {
+        throw new Error('Could not create reCAPTCHA verifier');
       }
       
-      const recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, 'recaptcha-container', {
-        size: 'invisible',
-        callback: () => {
-          console.log('[Firebase] reCAPTCHA solved');
-        }
-      });
-      
-      const result = await signInWithPhoneNumber(firebaseAuth, formattedPhone, recaptchaVerifier);
+      const result = await signInWithPhoneNumber(firebaseAuth, formattedPhone, verifier);
       setConfirmationResult(result, formattedPhone);
     } else {
-      // Native: Direct phone auth
-      const result = await firebaseAuth.signInWithPhoneNumber(formattedPhone);
-      setConfirmationResult(result, formattedPhone);
+      // Native: For now, throw a friendly error
+      // Phone auth on native requires @react-native-firebase which conflicts with new architecture
+      throw new Error('Η επαλήθευση τηλεφώνου δεν είναι διαθέσιμη αυτή τη στιγμή. Παρακαλώ χρησιμοποιήστε email ή Google για σύνδεση.');
     }
     
     console.log('[Firebase] OTP sent successfully');
@@ -220,16 +255,12 @@ export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneN
 /**
  * Get current Firebase user
  */
-export const getCurrentFirebaseUser = async (): Promise<any> => {
+export const getCurrentFirebaseUser = async (): Promise<User | null> => {
   await initializeFirebaseAuth();
   
   if (!firebaseAuth) return null;
   
-  if (Platform.OS === 'web') {
-    return firebaseAuth.currentUser;
-  } else {
-    return firebaseAuth.currentUser;
-  }
+  return firebaseAuth.currentUser;
 };
 
 /**
@@ -239,7 +270,7 @@ export const signOutFirebase = async (): Promise<void> => {
   await initializeFirebaseAuth();
   
   if (firebaseAuth) {
-    await firebaseAuth.signOut();
+    await firebaseSignOut(firebaseAuth);
   }
   
   // Clear stored confirmation
@@ -254,9 +285,7 @@ export const getFirebaseIdToken = async (): Promise<string | null> => {
   
   if (!firebaseAuth) return null;
   
-  const user = Platform.OS === 'web' 
-    ? firebaseAuth.currentUser 
-    : firebaseAuth.currentUser;
+  const user = firebaseAuth.currentUser;
   
   if (!user) return null;
   
