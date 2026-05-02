@@ -27,7 +27,7 @@ const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '25';
+const BUILD_NUMBER = '26';
 
 type AuthMode = 'login' | 'signup';
 
