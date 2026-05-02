@@ -27,7 +27,7 @@ const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '20';
+const BUILD_NUMBER = '21';
 
 type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
 
@@ -47,9 +47,10 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  // Google Sign-In configuration - expo-auth-session uses web-based OAuth flow
-  // Only webClientId is needed - it handles all platforms via browser
+  // Google Sign-In configuration - use Web Client ID for expo-auth-session
+  // expoClientId is required for production EAS builds
   const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: GOOGLE_CLIENT_ID_WEB,
     webClientId: GOOGLE_CLIENT_ID_WEB,
     scopes: ['profile', 'email'],
   });

@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.apodixxi.app",
-      "versionCode": 20,
+      "versionCode": 21,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -41,6 +41,8 @@
     "plugins": [
       "./plugins/with-android-assets",
       "expo-router",
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
       [
         "react-native-google-mobile-ads",
         {

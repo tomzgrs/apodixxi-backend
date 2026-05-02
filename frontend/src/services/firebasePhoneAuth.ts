@@ -1,17 +1,7 @@
 /**
  * Firebase Phone Authentication Service
- * Uses Firebase Web SDK (compatible with New Architecture)
+ * Handles SMS OTP verification using Firebase Auth
  */
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPhoneNumber, 
-  RecaptchaVerifier,
-  ConfirmationResult,
-  Auth,
-  signOut as firebaseSignOut,
-  User
-} from 'firebase/auth';
 import { Platform } from 'react-native';
 
 // Firebase configuration
@@ -25,127 +15,40 @@ const FIREBASE_CONFIG = {
 };
 
 // Store confirmation result for OTP verification
-interface ConfirmationStore {
-  result: ConfirmationResult;
-  phoneNumber: string;
-  timestamp: number;
-}
-
-let confirmationStore: ConfirmationStore | null = null;
-let firebaseApp: FirebaseApp | null = null;
-let firebaseAuth: Auth | null = null;
+let confirmationResult: any = null;
+let firebaseAuth: any = null;
 let isInitialized = false;
-let recaptchaVerifier: RecaptchaVerifier | null = null;
-
-// Timeout for OTP confirmation (5 minutes = 300000ms)
-const OTP_TIMEOUT = 300000;
 
 /**
- * Check if stored confirmation is still valid
- */
-const isConfirmationValid = (): boolean => {
-  if (!confirmationStore) return false;
-  const now = Date.now();
-  const elapsed = now - confirmationStore.timestamp;
-  return elapsed < OTP_TIMEOUT;
-};
-
-/**
- * Get stored confirmation result
- */
-const getConfirmationResult = (): ConfirmationResult | null => {
-  if (!confirmationStore) {
-    console.log('[Firebase] No confirmation result stored');
-    return null;
-  }
-  
-  if (!isConfirmationValid()) {
-    console.log('[Firebase] Confirmation result expired');
-    confirmationStore = null;
-    return null;
-  }
-  
-  console.log('[Firebase] Confirmation result is valid, phone:', confirmationStore.phoneNumber);
-  return confirmationStore.result;
-};
-
-/**
- * Store confirmation result
- */
-const setConfirmationResult = (result: ConfirmationResult, phoneNumber: string): void => {
-  confirmationStore = {
-    result,
-    phoneNumber,
-    timestamp: Date.now()
-  };
-  console.log('[Firebase] Confirmation result stored for:', phoneNumber);
-};
-
-/**
- * Initialize Firebase
+ * Initialize Firebase based on platform
  */
 export const initializeFirebaseAuth = async (): Promise<void> => {
-  if (isInitialized && firebaseAuth) return;
+  if (isInitialized) return;
   
   try {
-    // Initialize Firebase App
-    if (getApps().length === 0) {
-      firebaseApp = initializeApp(FIREBASE_CONFIG);
+    if (Platform.OS === 'web') {
+      // Web uses modular Firebase SDK
+      const { initializeApp, getApps, getApp } = await import('firebase/app');
+      const { getAuth } = await import('firebase/auth');
+      
+      let app;
+      if (getApps().length === 0) {
+        app = initializeApp(FIREBASE_CONFIG);
+      } else {
+        app = getApp();
+      }
+      firebaseAuth = getAuth(app);
     } else {
-      firebaseApp = getApp();
+      // Native uses @react-native-firebase
+      const authModule = await import('@react-native-firebase/auth');
+      firebaseAuth = authModule.default();
     }
-    
-    // Get Auth instance
-    firebaseAuth = getAuth(firebaseApp);
     
     isInitialized = true;
     console.log('[Firebase] Auth initialized successfully');
   } catch (error) {
     console.error('[Firebase] Initialization error:', error);
     throw error;
-  }
-};
-
-/**
- * Create reCAPTCHA verifier for web
- */
-const createRecaptchaVerifier = (): RecaptchaVerifier | null => {
-  if (Platform.OS !== 'web' || !firebaseAuth) {
-    return null;
-  }
-  
-  try {
-    // Create invisible reCAPTCHA container if it doesn't exist
-    let container = document.getElementById('recaptcha-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'recaptcha-container';
-      document.body.appendChild(container);
-    }
-    
-    // Clear existing verifier
-    if (recaptchaVerifier) {
-      try {
-        recaptchaVerifier.clear();
-      } catch (e) {
-        // Ignore errors when clearing
-      }
-    }
-    
-    recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, 'recaptcha-container', {
-      size: 'invisible',
-      callback: () => {
-        console.log('[Firebase] reCAPTCHA solved');
-      },
-      'expired-callback': () => {
-        console.log('[Firebase] reCAPTCHA expired');
-      }
-    });
-    
-    return recaptchaVerifier;
-  } catch (error) {
-    console.error('[Firebase] reCAPTCHA creation error:', error);
-    return null;
   }
 };
 
@@ -179,17 +82,27 @@ export const sendPhoneOTP = async (phoneNumber: string): Promise<void> => {
   try {
     if (Platform.OS === 'web') {
       // Web: Use reCAPTCHA verifier
-      const verifier = createRecaptchaVerifier();
-      if (!verifier) {
-        throw new Error('Could not create reCAPTCHA verifier');
+      const { RecaptchaVerifier, signInWithPhoneNumber } = await import('firebase/auth');
+      
+      // Create invisible reCAPTCHA
+      const recaptchaContainer = document.getElementById('recaptcha-container');
+      if (!recaptchaContainer) {
+        const div = document.createElement('div');
+        div.id = 'recaptcha-container';
+        document.body.appendChild(div);
       }
       
-      const result = await signInWithPhoneNumber(firebaseAuth, formattedPhone, verifier);
-      setConfirmationResult(result, formattedPhone);
+      const recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {
+          console.log('[Firebase] reCAPTCHA solved');
+        }
+      });
+      
+      confirmationResult = await signInWithPhoneNumber(firebaseAuth, formattedPhone, recaptchaVerifier);
     } else {
-      // Native: For now, throw a friendly error
-      // Phone auth on native requires @react-native-firebase which conflicts with new architecture
-      throw new Error('Η επαλήθευση τηλεφώνου δεν είναι διαθέσιμη αυτή τη στιγμή. Παρακαλώ χρησιμοποιήστε email ή Google για σύνδεση.');
+      // Native: Direct phone auth
+      confirmationResult = await firebaseAuth.signInWithPhoneNumber(formattedPhone);
     }
     
     console.log('[Firebase] OTP sent successfully');
@@ -215,11 +128,8 @@ export const sendPhoneOTP = async (phoneNumber: string): Promise<void> => {
  * @returns Firebase user credential
  */
 export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneNumber: string }> => {
-  const confirmationResult = getConfirmationResult();
-  
   if (!confirmationResult) {
-    console.log('[Firebase] No valid confirmation result found');
-    throw new Error('Η συνεδρία έληξε. Παρακαλώ ξαναστείλτε τον κωδικό OTP.');
+    throw new Error('Δεν έχει σταλεί OTP. Παρακαλώ ξαναστείλτε.');
   }
   
   console.log('[Firebase] Verifying OTP...');
@@ -230,9 +140,6 @@ export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneN
     
     console.log('[Firebase] OTP verified successfully');
     
-    // Clear the stored confirmation after successful verification
-    confirmationStore = null;
-    
     return {
       uid: user.uid,
       phoneNumber: user.phoneNumber || ''
@@ -242,10 +149,8 @@ export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneN
     
     if (error.code === 'auth/invalid-verification-code') {
       throw new Error('Μη έγκυρος κωδικός OTP');
-    } else if (error.code === 'auth/code-expired' || error.code === 'auth/session-expired') {
-      // Clear expired confirmation
-      confirmationStore = null;
-      throw new Error('Η συνεδρία έληξε. Παρακαλώ ξαναστείλτε τον κωδικό OTP.');
+    } else if (error.code === 'auth/code-expired') {
+      throw new Error('Ο κωδικός OTP έληξε. Ζητήστε νέο.');
     }
     
     throw error;
@@ -255,12 +160,16 @@ export const verifyPhoneOTP = async (otp: string): Promise<{ uid: string; phoneN
 /**
  * Get current Firebase user
  */
-export const getCurrentFirebaseUser = async (): Promise<User | null> => {
+export const getCurrentFirebaseUser = async (): Promise<any> => {
   await initializeFirebaseAuth();
   
   if (!firebaseAuth) return null;
   
-  return firebaseAuth.currentUser;
+  if (Platform.OS === 'web') {
+    return firebaseAuth.currentUser;
+  } else {
+    return firebaseAuth.currentUser;
+  }
 };
 
 /**
@@ -270,11 +179,10 @@ export const signOutFirebase = async (): Promise<void> => {
   await initializeFirebaseAuth();
   
   if (firebaseAuth) {
-    await firebaseSignOut(firebaseAuth);
+    await firebaseAuth.signOut();
   }
   
-  // Clear stored confirmation
-  confirmationStore = null;
+  confirmationResult = null;
 };
 
 /**
@@ -285,7 +193,9 @@ export const getFirebaseIdToken = async (): Promise<string | null> => {
   
   if (!firebaseAuth) return null;
   
-  const user = firebaseAuth.currentUser;
+  const user = Platform.OS === 'web' 
+    ? firebaseAuth.currentUser 
+    : firebaseAuth.currentUser;
   
   if (!user) return null;
   
