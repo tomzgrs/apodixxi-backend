@@ -27,9 +27,9 @@ const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '24';
+const BUILD_NUMBER = '25';
 
-type AuthMode = 'login' | 'signup' | 'phone' | 'phone-otp' | 'phone-email';
+type AuthMode = 'login' | 'signup';
 
 export default function LoginScreen() {
   const { signUp, signIn, signInWithGoogle, signInWithApple, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
@@ -486,14 +486,6 @@ export default function LoginScreen() {
               setIsLoading={setAppleLoading}
               setError={setError}
             />
-
-            <TouchableOpacity 
-              style={[styles.socialButton, { backgroundColor: theme.primary }]}
-              onPress={() => setMode('phone')}
-            >
-              <Ionicons name="call" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Τηλέφωνο</Text>
-            </TouchableOpacity>
           </View>
 
           {/* Toggle Login/Signup */}
