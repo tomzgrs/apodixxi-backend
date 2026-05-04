@@ -27,6 +27,9 @@
       },
       "ios": {
         "resourceClass": "m1-medium"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app"
       }
     }
   },
