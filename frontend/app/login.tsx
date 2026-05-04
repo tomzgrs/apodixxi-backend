@@ -24,12 +24,10 @@ WebBrowser.maybeCompleteAuthSession();
 // Firebase Project: apodixxi-58736 (889769499922)
 // For expo-auth-session, we use Web Client ID for all platforms (browser-based OAuth)
 const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
-// Android Client ID from Google Cloud Console - required for EAS builds
-const GOOGLE_CLIENT_ID_ANDROID = '889769499922-6p2t89jofqvp5711qvhn2hh20mdvmgrc.apps.googleusercontent.com';
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '28';
+const BUILD_NUMBER = '29';
 
 type AuthMode = 'login' | 'signup';
 
@@ -50,11 +48,10 @@ export default function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
 
   // Google Sign-In configuration - use Web Client ID for expo-auth-session
-  // androidClientId is required for Android production EAS builds
+  // expo-auth-session uses web-based OAuth flow, not native Android
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: GOOGLE_CLIENT_ID_WEB,
     webClientId: GOOGLE_CLIENT_ID_WEB,
-    androidClientId: GOOGLE_CLIENT_ID_ANDROID,
     scopes: ['profile', 'email'],
   });
 
