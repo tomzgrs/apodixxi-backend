@@ -16,7 +16,7 @@
     },
     "android": {
       "package": "com.apodixxi.app",
-      "versionCode": 27,
+      "versionCode": 28,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",

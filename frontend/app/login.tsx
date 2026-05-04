@@ -25,11 +25,11 @@ WebBrowser.maybeCompleteAuthSession();
 // For expo-auth-session, we use Web Client ID for all platforms (browser-based OAuth)
 const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
 // Android Client ID from Google Cloud Console - required for EAS builds
-const GOOGLE_CLIENT_ID_ANDROID = '889769499922-vpr10c27o33s1s6cql9d6i3t3f1bgh0k.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID_ANDROID = '889769499922-6p2t89jofqvp5711qvhn2hh20mdvmgrc.apps.googleusercontent.com';
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '27';
+const BUILD_NUMBER = '28';
 
 type AuthMode = 'login' | 'signup';
 
