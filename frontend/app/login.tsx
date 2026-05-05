@@ -15,24 +15,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
-import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import AppleSignInButton from '../src/components/AppleSignInButton';
 
 WebBrowser.maybeCompleteAuthSession();
 
-// Firebase Project: apodixxi-58736 (889769499922)
-// For expo-auth-session, we use Web Client ID for all platforms (browser-based OAuth)
-const GOOGLE_CLIENT_ID_WEB = '889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com';
-
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '29';
+const BUILD_NUMBER = '30';
 
 type AuthMode = 'login' | 'signup';
 
 export default function LoginScreen() {
-  const { signUp, signIn, signInWithGoogle, signInWithApple, requestPhoneOTP, verifyPhoneOTP, completePhoneAuth, isLoading } = useAuth();
+  const { signUp, signIn, signInWithGoogle, signInWithApple, isLoading } = useAuth();
   const { theme, isDark } = useTheme();
   
   const [mode, setMode] = useState<AuthMode>('login');
@@ -40,63 +35,10 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
-
-  // Google Sign-In configuration - use Web Client ID for expo-auth-session
-  // expo-auth-session uses web-based OAuth flow, not native Android
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: GOOGLE_CLIENT_ID_WEB,
-    webClientId: GOOGLE_CLIENT_ID_WEB,
-    scopes: ['profile', 'email'],
-  });
-
-  // Handle Google Sign-In response
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { authentication } = response;
-      if (authentication?.accessToken) {
-        handleGoogleSignIn(authentication.accessToken);
-      }
-    } else if (response?.type === 'error') {
-      setError('Αποτυχία σύνδεσης με Google');
-      setGoogleLoading(false);
-    }
-  }, [response]);
-
-  const handleGoogleSignIn = async (accessToken: string) => {
-    try {
-      setGoogleLoading(true);
-      setError('');
-      
-      // Get user info from Google
-      const userInfoResponse = await fetch('https://www.googleapis.com/userinfo/v2/me', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      
-      if (!userInfoResponse.ok) {
-        throw new Error('Failed to get user info from Google');
-      }
-      
-      const userInfo = await userInfoResponse.json();
-      
-      // Sign in with our backend
-      await signInWithGoogle({
-        email: userInfo.email,
-        name: userInfo.name,
-        googleId: userInfo.id,
-        picture: userInfo.picture,
-      });
-    } catch (err: any) {
-      setError(err.message || 'Αποτυχία σύνδεσης με Google');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
 
   const validateEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -463,21 +405,17 @@ export default function LoginScreen() {
           {/* Social Buttons */}
           <View style={styles.socialButtons}>
             <TouchableOpacity 
-              style={[styles.socialButton, { backgroundColor: '#4285F4' }, (!request || googleLoading) && styles.buttonDisabled]}
+              style={[styles.socialButton, { backgroundColor: '#4285F4', opacity: 0.6 }]}
               onPress={() => {
-                setGoogleLoading(true);
-                promptAsync();
+                Alert.alert(
+                  'Google Sign-In',
+                  'Η σύνδεση με Google δεν είναι διαθέσιμη προσωρινά. Παρακαλώ χρησιμοποιήστε email.',
+                  [{ text: 'OK' }]
+                );
               }}
-              disabled={!request || googleLoading}
             >
-              {googleLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="logo-google" size={20} color="#fff" />
-                  <Text style={styles.socialButtonText}>Google</Text>
-                </>
-              )}
+              <Ionicons name="logo-google" size={20} color="#fff" />
+              <Text style={styles.socialButtonText}>Google</Text>
             </TouchableOpacity>
 
             <AppleSignInButton
