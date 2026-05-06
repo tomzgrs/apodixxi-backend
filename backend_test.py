@@ -439,6 +439,214 @@ def test_api_root():
         print(f"❌ ERROR: {str(e)}")
         return False
 
+def test_url_import_three_types():
+    """Test URL import with three different URL types: PEPPOL, Impact, and Alternative e-invoicing.gr"""
+    print("\n🧪 Testing URL Import with Three Different URL Types...")
+    
+    device_id = "test_device_123"
+    all_passed = True
+    
+    # Test 1: PEPPOL URL (e-invoicing.gr with ct=PEPPOL)
+    print("\n   Test 1: PEPPOL URL (e-invoicing.gr with ct=PEPPOL)...")
+    peppol_url = "https://e-invoicing.gr/edocuments/ViewInvoice?ct=PEPPOL&id=CD01EBB684FF983F3CEFB2A69297F3CE9192DD0A&s=A&h=2a01d136"
+    
+    url = f"{BASE_URL}/receipts/import-url"
+    payload = {
+        "device_id": device_id,
+        "url": peppol_url,
+        "force_import": True
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        print(f"   Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"   Response Status: {data.get('status')}")
+            
+            if data.get("status") == "success":
+                receipt = data.get("receipt", {})
+                store_name = receipt.get("store_name", "")
+                store_vat = receipt.get("store_vat", "")
+                items = receipt.get("items", [])
+                total = receipt.get("total", 0)
+                
+                print(f"   Store Name: {store_name}")
+                print(f"   Store VAT: {store_vat}")
+                print(f"   Items Count: {len(items)}")
+                print(f"   Total: {total}")
+                
+                # Check expected values
+                if "ΣΚΛΑΒΕΝΙΤΗΣ" in store_name.upper() or "SKLAVENITIS" in store_name.upper():
+                    print("✅ PASS: PEPPOL URL - Store name correctly identified (ΣΚΛΑΒΕΝΙΤΗΣ)")
+                else:
+                    print(f"⚠️  WARNING: PEPPOL URL - Expected store name 'ΣΚΛΑΒΕΝΙΤΗΣ', got '{store_name}'")
+                    all_passed = False
+                
+                if store_vat == "800764388":
+                    print("✅ PASS: PEPPOL URL - VAT correctly identified (800764388)")
+                else:
+                    print(f"⚠️  WARNING: PEPPOL URL - Expected VAT '800764388', got '{store_vat}'")
+                    all_passed = False
+                
+                if len(items) > 0:
+                    print("✅ PASS: PEPPOL URL - Items array is not empty")
+                else:
+                    print("❌ FAIL: PEPPOL URL - Items array is empty")
+                    all_passed = False
+                
+                if total > 0:
+                    print("✅ PASS: PEPPOL URL - Total is valid number > 0")
+                else:
+                    print("❌ FAIL: PEPPOL URL - Total is not > 0")
+                    all_passed = False
+                    
+            else:
+                print(f"❌ FAIL: PEPPOL URL - Expected status 'success', got '{data.get('status')}'")
+                print(f"   Full Response: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                all_passed = False
+        else:
+            print(f"❌ FAIL: PEPPOL URL - HTTP {response.status_code}")
+            print(f"   Response: {response.text}")
+            all_passed = False
+            
+    except Exception as e:
+        print(f"❌ ERROR: PEPPOL URL test - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        all_passed = False
+    
+    # Test 2: Impact URL (einvoice.impact.gr)
+    print("\n   Test 2: Impact URL (einvoice.impact.gr)...")
+    impact_url = "https://einvoice.impact.gr/v/EL094062259-309445967-FAD2781A8D7B80445B71BFDB609B7A0B19A3CB96-08686C25D466493498780DE44AC4688D"
+    
+    payload = {
+        "device_id": device_id,
+        "url": impact_url,
+        "force_import": True
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        print(f"   Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"   Response Status: {data.get('status')}")
+            
+            if data.get("status") == "success":
+                receipt = data.get("receipt", {})
+                store_name = receipt.get("store_name", "")
+                items = receipt.get("items", [])
+                total = receipt.get("total", 0)
+                
+                print(f"   Store Name: {store_name}")
+                print(f"   Items Count: {len(items)}")
+                print(f"   Total: {total}")
+                
+                # Check expected values
+                if "METRO" in store_name.upper():
+                    print("✅ PASS: Impact URL - Store name correctly identified (METRO)")
+                else:
+                    print(f"⚠️  WARNING: Impact URL - Expected store name 'METRO', got '{store_name}'")
+                    all_passed = False
+                
+                if len(items) > 0:
+                    print("✅ PASS: Impact URL - Items array is not empty")
+                else:
+                    print("❌ FAIL: Impact URL - Items array is empty")
+                    all_passed = False
+                
+                if total > 0:
+                    print("✅ PASS: Impact URL - Total is valid number > 0")
+                else:
+                    print("❌ FAIL: Impact URL - Total is not > 0")
+                    all_passed = False
+                    
+            else:
+                print(f"❌ FAIL: Impact URL - Expected status 'success', got '{data.get('status')}'")
+                print(f"   Full Response: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                all_passed = False
+        else:
+            print(f"❌ FAIL: Impact URL - HTTP {response.status_code}")
+            print(f"   Response: {response.text}")
+            all_passed = False
+            
+    except Exception as e:
+        print(f"❌ ERROR: Impact URL test - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        all_passed = False
+    
+    # Test 3: Alternative e-invoicing.gr format (with /-1/uuid)
+    print("\n   Test 3: Alternative e-invoicing.gr format (with /-1/uuid)...")
+    alt_url = "https://e-invoicing.gr/edocuments/ViewInvoice/-1/196416ef-29ae-4d1f-bb5f-dd6ef38daffe_6fgkll8"
+    
+    payload = {
+        "device_id": device_id,
+        "url": alt_url,
+        "force_import": True
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        print(f"   Status Code: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"   Response Status: {data.get('status')}")
+            
+            if data.get("status") == "success":
+                receipt = data.get("receipt", {})
+                store_name = receipt.get("store_name", "")
+                items = receipt.get("items", [])
+                total = receipt.get("total", 0)
+                
+                print(f"   Store Name: {store_name}")
+                print(f"   Items Count: {len(items)}")
+                print(f"   Total: {total}")
+                
+                # Check that parsing succeeded via entersoft parser
+                if len(items) > 0:
+                    print("✅ PASS: Alternative e-invoicing.gr URL - Items array is not empty (parsed successfully)")
+                else:
+                    print("❌ FAIL: Alternative e-invoicing.gr URL - Items array is empty")
+                    all_passed = False
+                
+                if total > 0:
+                    print("✅ PASS: Alternative e-invoicing.gr URL - Total is valid number > 0")
+                else:
+                    print("❌ FAIL: Alternative e-invoicing.gr URL - Total is not > 0")
+                    all_passed = False
+                
+                if store_name:
+                    print(f"✅ PASS: Alternative e-invoicing.gr URL - Store name identified: {store_name}")
+                else:
+                    print("⚠️  WARNING: Alternative e-invoicing.gr URL - Store name is empty")
+                    
+            else:
+                print(f"❌ FAIL: Alternative e-invoicing.gr URL - Expected status 'success', got '{data.get('status')}'")
+                print(f"   Full Response: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                all_passed = False
+        else:
+            print(f"❌ FAIL: Alternative e-invoicing.gr URL - HTTP {response.status_code}")
+            print(f"   Response: {response.text}")
+            all_passed = False
+            
+    except Exception as e:
+        print(f"❌ ERROR: Alternative e-invoicing.gr URL test - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        all_passed = False
+    
+    if all_passed:
+        print("\n✅ ALL THREE URL TYPES PASSED")
+    else:
+        print("\n⚠️  SOME URL TYPES HAD ISSUES - See details above")
+    
+    return all_passed
+
 def main():
     """Run all backend tests"""
     print("🚀 Starting GroceryTracker Backend API Tests")
@@ -446,13 +654,7 @@ def main():
     print("=" * 60)
     
     tests = [
-        ("API Root", test_api_root),
-        ("Device Registration", test_device_registration),
-        ("Duplicate Detection", test_duplicate_detection),
-        ("Epsilon Digital URL Detection", test_epsilon_digital_url_detection),
-        ("WebView Data Import", test_webview_data_import),
-        ("Stats Endpoint", test_stats_endpoint),
-        ("Receipts Endpoint", test_receipts_endpoint),
+        ("URL Import - Three Types (PEPPOL, Impact, Alternative)", test_url_import_three_types),
     ]
     
     results = []

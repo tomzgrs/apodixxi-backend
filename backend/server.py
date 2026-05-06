@@ -291,8 +291,8 @@ STORE_VAT_MAPPING = {
     "094384144": "BAZAAR",
     "094288618": "BAZAAR",  # Alternative VAT
     
-    # 9. ΕΓΝΑΤΙΑ
-    "094357707": "ΕΓΝΑΤΙΑ",
+    # 9. DISCOUNT MARKT
+    "094357707": "DISCOUNT MARKT",
     
     # 10. ΣΥΝ.ΚΑ ΚΡΗΤΗΣ
     "996722071": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
@@ -332,8 +332,9 @@ STORE_BRAND_KEYWORDS = {
     "MARKETIN": "MARKET IN",
     "BAZAAR": "BAZAAR",
     "ΜΠΑΖΑΡ": "BAZAAR",
-    "ΕΓΝΑΤΙΑ": "ΕΓΝΑΤΙΑ",
-    "EGNATIA": "ΕΓΝΑΤΙΑ",
+    "DISCOUNT MARKT": "DISCOUNT MARKT",
+    "DISCOUNT": "DISCOUNT MARKT",
+    "ΝΤΙΣΚΑΟΥΝΤ": "DISCOUNT MARKT",
     "ΣΥΝ.ΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
     "ΣΥΝΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
     "LIDL": "LIDL",
@@ -803,12 +804,347 @@ def parse_mydata_xml(xml_content: str) -> dict:
 
 def detect_provider(url: str) -> str:
     if 'e-invoicing.gr' in url:
+        # Check if it's PEPPOL format (either explicit or alternative format with /-1/)
+        if 'ct=PEPPOL' in url or 'contentType=PEPPOL' in url:
+            return 'peppol'
+        # Alternative format with /-1/uuid often returns HTML-rendered PEPPOL
+        # We'll try the entersoft parser first, and fallback to PEPPOL if needed
         return 'entersoft'
     elif 'einvoice.impact.gr' in url:
         return 'impact'
     elif 'epsilondigital' in url or 'epsilonnet.gr' in url:
         return 'epsilon_digital'
     return 'unknown'
+
+
+def parse_peppol_xml(xml_content: str, source_url: str) -> dict:
+    """Parse PEPPOL UBL Invoice XML format (used by e-invoicing.gr for some receipts)."""
+    data = {
+        "store_name": "",
+        "store_address": "",
+        "store_vat": "",
+        "receipt_number": "",
+        "date": "",
+        "payment_method": "",
+        "items": [],
+        "subtotal": 0.0,
+        "discount_total": 0.0,
+        "total": 0.0,
+        "vat_total": 0.0,
+        "net_total": 0.0,
+        "source_url": source_url,
+        "source_type": "peppol",
+        "provider": "PEPPOL (e-invoicing.gr)"
+    }
+    
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError as e:
+        logger.error(f"PEPPOL XML parse error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid PEPPOL XML format")
+    
+    # Define namespaces for PEPPOL UBL format
+    namespaces = {
+        'inv': 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
+        'cbc': 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
+        'cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
+    }
+    
+    # Try to find the Invoice element
+    invoice = root.find('.//inv:Invoice', namespaces) or root.find('.//{urn:oasis:names:specification:ubl:schema:xsd:Invoice-2}Invoice')
+    if invoice is None:
+        # Maybe the root is the Invoice itself
+        if 'Invoice' in root.tag:
+            invoice = root
+        else:
+            logger.warning("Could not find Invoice element in PEPPOL XML")
+            invoice = root
+    
+    # Extract basic info
+    # Invoice ID format: VAT|DATE|SERIES|TYPE|CATEGORY|NUMBER
+    id_elem = invoice.find('.//cbc:ID', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}ID')
+    if id_elem is not None and id_elem.text:
+        id_parts = id_elem.text.split('|')
+        if len(id_parts) >= 6:
+            data["store_vat"] = id_parts[0]
+            data["receipt_number"] = id_parts[5] if len(id_parts) > 5 else id_parts[-1]
+    
+    # Issue Date
+    date_elem = invoice.find('.//cbc:IssueDate', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}IssueDate')
+    if date_elem is not None and date_elem.text:
+        data["date"] = date_elem.text
+    
+    # Supplier/Issuer info
+    supplier = invoice.find('.//cac:AccountingSupplierParty', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}AccountingSupplierParty')
+    if supplier is not None:
+        party = supplier.find('.//cac:Party', namespaces) or supplier.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Party')
+        if party is not None:
+            # Party Name
+            name_elem = party.find('.//cbc:Name', namespaces) or party.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Name')
+            if name_elem is not None and name_elem.text:
+                data["store_name"] = name_elem.text
+            
+            # VAT from PartyTaxScheme
+            vat_elem = party.find('.//cbc:CompanyID', namespaces) or party.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CompanyID')
+            if vat_elem is not None and vat_elem.text:
+                vat_text = vat_elem.text.replace('EL', '').replace('GR', '').strip()
+                if vat_text.isdigit():
+                    data["store_vat"] = vat_text
+            
+            # Address
+            address = party.find('.//cac:PostalAddress', namespaces) or party.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}PostalAddress')
+            if address is not None:
+                street = address.find('.//cbc:StreetName', namespaces) or address.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}StreetName')
+                city = address.find('.//cbc:CityName', namespaces) or address.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CityName')
+                postal = address.find('.//cbc:PostalZone', namespaces) or address.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}PostalZone')
+                addr_parts = []
+                if street is not None and street.text:
+                    addr_parts.append(street.text)
+                if postal is not None and postal.text:
+                    addr_parts.append(postal.text)
+                if city is not None and city.text:
+                    addr_parts.append(city.text)
+                data["store_address"] = ", ".join(addr_parts)
+    
+    # Invoice Lines
+    for line in invoice.findall('.//cac:InvoiceLine', namespaces) or invoice.findall('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}InvoiceLine'):
+        item_data = {
+            "code": "",
+            "description": "",
+            "unit": "ΤΕΜ",
+            "quantity": 1.0,
+            "unit_price": 0.0,
+            "pre_discount_value": 0.0,
+            "discount": 0.0,
+            "vat_percent": 0.0,
+            "total_value": 0.0,
+        }
+        
+        # Item ID (code)
+        item_id = line.find('.//cbc:ID', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}ID')
+        if item_id is not None and item_id.text:
+            item_data["code"] = item_id.text
+        
+        # Quantity
+        qty = line.find('.//cbc:InvoicedQuantity', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}InvoicedQuantity')
+        if qty is not None and qty.text:
+            try:
+                item_data["quantity"] = float(qty.text.replace(',', '.'))
+            except ValueError:
+                pass
+            # Unit from attribute
+            if qty.get('unitCode'):
+                item_data["unit"] = qty.get('unitCode')
+        
+        # Line Extension Amount (net value)
+        net_val = line.find('.//cbc:LineExtensionAmount', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}LineExtensionAmount')
+        if net_val is not None and net_val.text:
+            try:
+                item_data["pre_discount_value"] = float(net_val.text.replace(',', '.'))
+            except ValueError:
+                pass
+        
+        # Item details
+        item = line.find('.//cac:Item', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Item')
+        if item is not None:
+            desc = item.find('.//cbc:Name', namespaces) or item.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Name')
+            if desc is not None and desc.text:
+                item_data["description"] = desc.text
+            
+            # Seller's Item ID
+            sellers_id = item.find('.//cac:SellersItemIdentification', namespaces)
+            if sellers_id is not None:
+                id_val = sellers_id.find('.//cbc:ID', namespaces) or sellers_id.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}ID')
+                if id_val is not None and id_val.text:
+                    item_data["code"] = id_val.text
+            
+            # VAT category
+            tax = item.find('.//cac:ClassifiedTaxCategory', namespaces) or item.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}ClassifiedTaxCategory')
+            if tax is not None:
+                percent = tax.find('.//cbc:Percent', namespaces) or tax.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Percent')
+                if percent is not None and percent.text:
+                    try:
+                        item_data["vat_percent"] = float(percent.text.replace(',', '.'))
+                    except ValueError:
+                        pass
+        
+        # Price
+        price = line.find('.//cac:Price', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Price')
+        if price is not None:
+            price_amt = price.find('.//cbc:PriceAmount', namespaces) or price.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}PriceAmount')
+            if price_amt is not None and price_amt.text:
+                try:
+                    item_data["unit_price"] = float(price_amt.text.replace(',', '.'))
+                except ValueError:
+                    pass
+        
+        # Calculate total with VAT
+        if item_data["pre_discount_value"] > 0:
+            vat_amount = item_data["pre_discount_value"] * (item_data["vat_percent"] / 100)
+            item_data["total_value"] = round(item_data["pre_discount_value"] + vat_amount, 2)
+        
+        if item_data["description"]:
+            data["items"].append(item_data)
+    
+    # Calculate totals
+    if data["items"]:
+        data["net_total"] = round(sum(i["pre_discount_value"] for i in data["items"]), 2)
+        data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
+        data["vat_total"] = round(data["total"] - data["net_total"], 2)
+    
+    # Try to get totals from LegalMonetaryTotal
+    monetary = invoice.find('.//cac:LegalMonetaryTotal', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}LegalMonetaryTotal')
+    if monetary is not None:
+        payable = monetary.find('.//cbc:PayableAmount', namespaces) or monetary.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}PayableAmount')
+        if payable is not None and payable.text:
+            try:
+                data["total"] = float(payable.text.replace(',', '.'))
+            except ValueError:
+                pass
+        
+        tax_excl = monetary.find('.//cbc:TaxExclusiveAmount', namespaces) or monetary.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}TaxExclusiveAmount')
+        if tax_excl is not None and tax_excl.text:
+            try:
+                data["net_total"] = float(tax_excl.text.replace(',', '.'))
+            except ValueError:
+                pass
+    
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
+    
+    return data
+
+
+async def fetch_peppol_invoice(url: str) -> str:
+    """Fetch PEPPOL invoice - first get the iframe, then fetch the HTML content.
+    
+    Note: PEPPOL URLs from e-invoicing.gr return HTML (not raw XML) when isPreview=True,
+    which is what the iframe contains. The HTML structure is similar to Entersoft format.
+    """
+    html = await fetch_html(url)
+    soup = BeautifulSoup(html, 'lxml')
+    
+    # Find iframe
+    iframe = soup.find('iframe', id='iframeContent')
+    if not iframe or not iframe.get('src'):
+        raise HTTPException(status_code=400, detail="Could not find invoice iframe in page")
+    
+    iframe_src = iframe['src']
+    if iframe_src.startswith('/'):
+        iframe_src = 'https://e-invoicing.gr' + iframe_src
+    
+    # Add isPreview=True if not present (ensures HTML format)
+    if 'isPreview' not in iframe_src:
+        iframe_src += '&isPreview=True'
+    
+    # Fetch the HTML content
+    return await fetch_html(iframe_src)
+
+
+
+def parse_peppol_html(html: str, source_url: str) -> dict:
+    """Parse PEPPOL HTML (rendered preview from e-invoicing.gr).
+    
+    The HTML structure is similar to Entersoft but with some differences:
+    - Store name in BoldBlueHeader div
+    - VAT after store name in format "Α.Φ.Μ: XXXXXXXXX"
+    - Products in table with classes table, table-sm, etc.
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    data = {
+        "store_name": "",
+        "store_address": "",
+        "store_vat": "",
+        "receipt_number": "",
+        "date": "",
+        "payment_method": "",
+        "items": [],
+        "subtotal": 0.0,
+        "discount_total": 0.0,
+        "total": 0.0,
+        "vat_total": 0.0,
+        "net_total": 0.0,
+        "source_url": source_url,
+        "source_type": "peppol",
+        "provider": "PEPPOL (e-invoicing.gr)"
+    }
+    
+    # Store name from BoldBlueHeader
+    header = soup.find('div', class_='BoldBlueHeader')
+    if header:
+        data["store_name"] = header.get_text(strip=True)
+    
+    # VAT and other info
+    for div in soup.find_all('div'):
+        txt = div.get_text(strip=True)
+        if 'Α.Φ.Μ:' in txt:
+            match = re.search(r'Α\.Φ\.Μ:\s*(\d+)', txt)
+            if match:
+                data["store_vat"] = match.group(1)
+        elif 'Αρ. Παραστατικού' in txt or 'Αρ. Τιμολ' in txt:
+            # Try to extract receipt number
+            match = re.search(r'[\d]+$', txt.split(':')[-1].strip() if ':' in txt else txt)
+            if match:
+                data["receipt_number"] = match.group(0)
+        elif 'Ημ/νία' in txt and not data["date"]:
+            # Try to extract date
+            match = re.search(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})', txt)
+            if match:
+                data["date"] = match.group(1)
+    
+    # Address - look for specific patterns
+    for div in soup.find_all('div', class_='fontSize8pt'):
+        txt = div.get_text(strip=True)
+        # Look for address patterns (contains comma and numbers but not VAT)
+        if txt and ',' in txt and any(c.isdigit() for c in txt) and 'Α.Φ.Μ' not in txt:
+            if not data["store_address"] or len(txt) < len(data["store_address"]):
+                data["store_address"] = txt
+                break
+    
+    # Parse products table
+    table = soup.find('table', class_='table')
+    if table:
+        tbody = table.find('tbody')
+        if tbody:
+            for row in tbody.find_all('tr'):
+                cells = row.find_all('td')
+                if len(cells) >= 9:
+                    item = {
+                        "code": cells[0].get_text(strip=True),
+                        "description": cells[1].get_text(strip=True),
+                        "unit": cells[2].get_text(strip=True),
+                        "quantity": parse_greek_number(cells[3].get_text(strip=True)),
+                        "unit_price": parse_greek_number(cells[4].get_text(strip=True)),
+                        "pre_discount_value": parse_greek_number(cells[5].get_text(strip=True)),
+                        "discount": parse_greek_number(cells[6].get_text(strip=True)),
+                        "vat_percent": parse_greek_number(cells[7].get_text(strip=True).replace('%', '')),
+                        "total_value": parse_greek_number(cells[8].get_text(strip=True)),
+                    }
+                    if item["description"]:  # Only add if has description
+                        data["items"].append(item)
+    
+    # Calculate totals from items
+    if data["items"]:
+        data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
+        data["net_total"] = round(sum(i["pre_discount_value"] for i in data["items"]), 2)
+        data["vat_total"] = round(data["total"] - data["net_total"], 2)
+        data["discount_total"] = round(sum(i["discount"] for i in data["items"]), 2)
+    
+    # Try to find explicit total from page (look for ΤΕΛΙΚΗ ΑΞΙΑ or similar)
+    for div in soup.find_all('div'):
+        txt = div.get_text(strip=True)
+        if 'ΤΕΛΙΚΗ ΑΞΙΑ' in txt or 'ΣΥΝΟΛΟ ΠΛΗΡΩΤΕΟ' in txt:
+            # Look for the value in next sibling or same line
+            next_div = div.find_next_sibling('div')
+            if next_div:
+                val = parse_greek_number(next_div.get_text(strip=True))
+                if val > 0:
+                    data["total"] = val
+    
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
+    
+    return data
 
 
 def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str, found_final_total: float = 0.0) -> dict:
@@ -2408,6 +2744,10 @@ async def import_receipt_from_url(input: URLImportInput):
     if provider == 'entersoft':
         html = await fetch_entersoft_invoice(url)
         receipt_data = parse_entersoft(html, url)
+    elif provider == 'peppol':
+        # PEPPOL URLs return HTML (like Entersoft) when isPreview=True is added
+        html_content = await fetch_peppol_invoice(url)
+        receipt_data = parse_peppol_html(html_content, url)
     elif provider == 'impact':
         html = await fetch_html(url)
         receipt_data = parse_impact(html, url)
@@ -4693,7 +5033,8 @@ UserMessage = None
 try:
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     AI_AVAILABLE = True
-except ImportError:
+except (ImportError, AttributeError, Exception) as e:
+    logger.warning(f"AI features disabled: {e}")
     pass
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")

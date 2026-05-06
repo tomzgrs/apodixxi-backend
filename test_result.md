@@ -119,6 +119,9 @@ backend:
       - working: true
         agent: "main"
         comment: "Entersoft and Impact parsers working correctly"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: POST /api/receipts/import-url with three different URL types - ALL PASSED. (1) PEPPOL URL (e-invoicing.gr with ct=PEPPOL): Successfully parsed, returned store name 'ΣΚΛΑΒΕΝΙΤΗΣ', VAT '800764388', 13 items, total 27.95€. (2) Impact URL (einvoice.impact.gr): Successfully parsed, returned store name 'METRO', 9 items, total 17.07€. (3) Alternative e-invoicing.gr format (/-1/uuid): Successfully parsed via entersoft parser, returned store name 'ΜΑΣΟΥΤΗΣ', 2 items, total 2.04€. All responses returned status 'success', contained receipt object with items array, store names correctly identified, and totals are valid numbers > 0."
 
   - task: "URL Import - Epsilon Digital detection"
     implemented: true
@@ -369,3 +372,40 @@ agent_communication:
       - All backend endpoints responding correctly via https://deal-finder-396.preview.emergentagent.com/api
       
       Backend duplicate detection functionality is production-ready!
+  - agent: "testing"
+    message: |
+      ✅ URL IMPORT TESTING COMPLETE - Three URL Types Tested Successfully!
+      
+      TESTED SUCCESSFULLY:
+      1. PEPPOL URL (e-invoicing.gr with ct=PEPPOL):
+         ✅ URL: https://e-invoicing.gr/edocuments/ViewInvoice?ct=PEPPOL&id=CD01EBB684FF983F3CEFB2A69297F3CE9192DD0A&s=A&h=2a01d136
+         ✅ Store Name: ΣΚΛΑΒΕΝΙΤΗΣ (correctly identified)
+         ✅ VAT: 800764388 (correctly identified)
+         ✅ Items: 13 items parsed
+         ✅ Total: 27.95€ (valid number > 0)
+         ✅ Response: status "success", contains receipt object with items array
+      
+      2. Impact URL (einvoice.impact.gr):
+         ✅ URL: https://einvoice.impact.gr/v/EL094062259-309445967-FAD2781A8D7B80445B71BFDB609B7A0B19A3CB96-08686C25D466493498780DE44AC4688D
+         ✅ Store Name: METRO (correctly identified)
+         ✅ Items: 9 items parsed
+         ✅ Total: 17.07€ (valid number > 0)
+         ✅ Response: status "success", contains receipt object with items array
+      
+      3. Alternative e-invoicing.gr format (/-1/uuid):
+         ✅ URL: https://e-invoicing.gr/edocuments/ViewInvoice/-1/196416ef-29ae-4d1f-bb5f-dd6ef38daffe_6fgkll8
+         ✅ Store Name: ΜΑΣΟΥΤΗΣ (correctly identified)
+         ✅ Items: 2 items parsed
+         ✅ Total: 2.04€ (valid number > 0)
+         ✅ Response: status "success", contains receipt object with items array
+         ✅ Parser: Successfully parsed via entersoft parser
+      
+      VERIFICATION:
+      - All three URL types return status "success"
+      - All responses contain receipt object with items array
+      - Store names correctly identified for all URLs
+      - All totals are valid numbers > 0
+      - Device ID "test_device_123" used for all tests
+      - All backend endpoints responding correctly via https://deal-finder-396.preview.emergentagent.com/api
+      
+      URL import functionality for PEPPOL, Impact, and Alternative e-invoicing.gr formats is production-ready!
