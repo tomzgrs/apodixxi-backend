@@ -31,11 +31,16 @@ async function request(path: string, options: RequestInit = {}) {
 export const api = {
   getDeviceId,
 
-  registerDevice: async (language: string) => {
+  registerDevice: async (language: string, accessToken?: string | null) => {
     const device_id = await getDeviceId();
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
     return request('/devices/register', {
       method: 'POST',
       body: JSON.stringify({ device_id, language }),
+      headers,
     });
   },
 

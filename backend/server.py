@@ -2701,13 +2701,61 @@ async def track_recommendation_view(rec_id: str):
 
 
 @api_router.post("/devices/register")
-async def register_device(input: DeviceRegister):
+async def register_device(
+    input: DeviceRegister,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # Try to get user from JWT token
+    user_email = ""
+    user_id = None
+    if credentials and credentials.credentials:
+        try:
+            payload = verify_token(credentials.credentials)
+            user_email = payload.get("email", "")
+            user_id = payload.get("sub")
+            logger.info(f"[devices/register] User authenticated: {user_email}")
+        except Exception as e:
+            logger.debug(f"[devices/register] No valid token: {e}")
+    
     existing = await db.devices.find_one({"device_id": input.device_id}, {"_id": 0})
     if existing:
-        await db.devices.update_one({"device_id": input.device_id}, {"$set": {"language": input.language, "last_seen": datetime.now(timezone.utc).isoformat()}})
+        update_data = {"language": input.language, "last_seen": datetime.now(timezone.utc).isoformat()}
+        if user_email:
+            update_data["user_email"] = user_email
+        if user_id:
+            update_data["user_id"] = user_id
+        await db.devices.update_one({"device_id": input.device_id}, {"$set": update_data})
+        
+        # Also update user's device_id if authenticated
+        if user_email:
+            await db.users.update_one(
+                {"email": user_email.lower()},
+                {"$set": {"device_id": input.device_id}}
+            )
+            logger.info(f"[devices/register] Linked device {input.device_id} to user {user_email}")
+        
         return {"status": "updated", "device_id": input.device_id}
-    doc = {"device_id": input.device_id, "language": input.language, "created_at": datetime.now(timezone.utc).isoformat(), "last_seen": datetime.now(timezone.utc).isoformat()}
+    
+    doc = {
+        "device_id": input.device_id,
+        "language": input.language,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_seen": datetime.now(timezone.utc).isoformat()
+    }
+    if user_email:
+        doc["user_email"] = user_email
+    if user_id:
+        doc["user_id"] = user_id
     await db.devices.insert_one(doc)
+    
+    # Also update user's device_id if authenticated
+    if user_email:
+        await db.users.update_one(
+            {"email": user_email.lower()},
+            {"$set": {"device_id": input.device_id}}
+        )
+        logger.info(f"[devices/register] Linked device {input.device_id} to user {user_email}")
+    
     return {"status": "registered", "device_id": input.device_id}
 
 
@@ -3709,6 +3757,50 @@ async def get_all_users_detailed(
         "skip": skip,
         "limit": limit
     }
+
+
+@api_router.post("/admin/link-device")
+async def link_device_to_user(
+    email: str = Query(...),
+    device_id: str = Query(...),
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
+    """Manually link a device_id to a user (Admin only). Use this to fix device-user associations."""
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    # Find user by email
+    user = await db.users.find_one({"email": email.lower()})
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User not found: {email}")
+    
+    # Update user's device_id
+    await db.users.update_one(
+        {"email": email.lower()},
+        {"$set": {"device_id": device_id}}
+    )
+    
+    # Also update/create device record
+    await db.devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"user_email": email.lower(), "linked_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True
+    )
+    
+    logger.info(f"[admin/link-device] Linked device {device_id} to user {email}")
+    
+    return {
+        "status": "success",
+        "message": f"Device {device_id} linked to user {email}",
+        "user_id": str(user.get("_id")),
+        "email": email
+    }
+
 
 @api_router.get("/admin/products/existing")
 async def get_existing_products(
