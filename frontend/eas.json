@@ -21,6 +21,15 @@
         "EXPO_PUBLIC_BACKEND_URL": "https://deal-finder-396.preview.emergentagent.com"
       }
     },
+    "preview-production": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app"
+      }
+    },
     "production": {
       "android": {
         "buildType": "app-bundle"
