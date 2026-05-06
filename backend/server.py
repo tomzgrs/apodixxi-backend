@@ -129,6 +129,7 @@ class UserSignupRequest(BaseModel):
 class UserLoginRequest(BaseModel):
     email: str
     password: str
+    device_id: Optional[str] = None  # Client's device_id to link with user
 
 class GoogleAuthRequest(BaseModel):
     google_id: Optional[str] = None
@@ -1398,7 +1399,8 @@ async def login(request: UserLoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     # Get or create device_id for user
-    user_device_id = user.get("device_id")
+    # Use client's device_id if provided, otherwise generate or use existing
+    user_device_id = request.device_id or user.get("device_id")
     if not user_device_id:
         user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
     
@@ -2730,12 +2732,32 @@ async def import_receipt_from_url(
     
     # FALLBACK: If no token, try to get email from device_id lookup
     if not user_email and input.device_id:
+        # First try direct device_id match
         user_doc = await db.users.find_one({"device_id": input.device_id})
         if user_doc:
             user_email = user_doc.get("email", "")
             logger.info(f"[import-url] Fallback: Found email from device_id: {user_email}")
         else:
-            logger.warning(f"[import-url] No user found for device_id: {input.device_id}")
+            # Try to find user by matching device association (check devices collection)
+            device_doc = await db.devices.find_one({"device_id": input.device_id})
+            if device_doc and device_doc.get("user_id"):
+                user_doc = await db.users.find_one({"_id": device_doc.get("user_id")})
+                if user_doc:
+                    user_email = user_doc.get("email", "")
+                    logger.info(f"[import-url] Fallback: Found email via devices collection: {user_email}")
+            
+            # If still no email, check if this device_id has any previous receipts with user info
+            if not user_email:
+                recent_receipt = await db.receipts.find_one(
+                    {"device_id": input.device_id, "user_email": {"$ne": "", "$exists": True}},
+                    sort=[("created_at", -1)]
+                )
+                if recent_receipt and recent_receipt.get("user_email"):
+                    user_email = recent_receipt.get("user_email")
+                    logger.info(f"[import-url] Fallback: Found email from previous receipt: {user_email}")
+            
+            if not user_email:
+                logger.warning(f"[import-url] No user found for device_id: {input.device_id}")
     
     logger.info(f"[import-url] Processing URL: {url[:50]}... | user_email: {user_email}")
 

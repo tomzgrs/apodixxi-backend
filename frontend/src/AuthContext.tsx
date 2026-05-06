@@ -171,10 +171,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
+      // Get device_id to link with user account
+      const device_id = await AsyncStorage.getItem('device_id');
+      
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password, device_id })
       });
 
       const responseText = await response.text();
