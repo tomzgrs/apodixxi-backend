@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { I18nContext } from './_layout';
 import { COLORS } from '../src/constants';
 import { api } from '../src/api';
+import { useAuth } from '../src/AuthContext';
 
 let CameraView: any = null;
 let useCameraPermissions: any = null;
@@ -19,6 +20,7 @@ try {
 
 function ScannerContent() {
   const { t, lang } = useContext(I18nContext);
+  const { accessToken } = useAuth();
   const router = useRouter();
   const [scanned, setScanned] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -64,7 +66,7 @@ function ScannerContent() {
     if (isSupported) {
       setLoading(true);
       try {
-        const result = await api.importFromUrl(data);
+        const result = await api.importFromUrl(data, false, accessToken);
         
         // Check for duplicate
         if (result.status === 'duplicate') {

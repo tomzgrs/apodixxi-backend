@@ -36,11 +36,16 @@ export const api = {
     });
   },
 
-  importFromUrl: async (url: string, forceImport: boolean = false) => {
+  importFromUrl: async (url: string, forceImport: boolean = false, accessToken?: string | null) => {
     const device_id = await getDeviceId();
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
     return request('/receipts/import-url', {
       method: 'POST',
       body: JSON.stringify({ device_id, url, force_import: forceImport }),
+      headers,
     });
   },
 

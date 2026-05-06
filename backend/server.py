@@ -216,6 +216,8 @@ class ProductItem(BaseModel):
 class ReceiptData(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     device_id: str = ""
+    user_email: str = ""  # Email of the user who scanned the receipt
+    receipt_url: str = ""  # Original QR code URL
     store_name: str = ""
     store_address: str = ""
     store_vat: str = ""
@@ -2708,9 +2710,21 @@ async def register_device(input: DeviceRegister):
 
 
 @api_router.post("/receipts/import-url")
-async def import_receipt_from_url(input: URLImportInput):
+async def import_receipt_from_url(
+    input: URLImportInput,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
     url = input.url.strip()
     provider = detect_provider(url)
+    
+    # Extract user email from JWT token if provided
+    user_email = ""
+    if credentials:
+        try:
+            payload = verify_token(credentials.credentials)
+            user_email = payload.get("email", "")
+        except Exception:
+            pass  # Token invalid, continue without email
 
     if provider == 'epsilon_digital':
         # Check for duplicates even for epsilon digital
@@ -2757,11 +2771,15 @@ async def import_receipt_from_url(input: URLImportInput):
     if not receipt_data["items"]:
         raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
 
+    # Add user_email and receipt_url to receipt data
+    receipt_data["user_email"] = user_email
+    receipt_data["receipt_url"] = url
+    
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    # Index products
+    # Index products with user_email
     for item in receipt_data["items"]:
         await db.products.update_one(
             {"description": item["description"], "store_name": receipt_data["store_name"]},
@@ -2774,6 +2792,7 @@ async def import_receipt_from_url(input: URLImportInput):
                 "last_unit_price": item["unit_price"],
                 "last_date": receipt_data["date"],
                 "unit": item["unit"],
+                "user_email": user_email,  # Track which user added this product
                 "vat_percent": item["vat_percent"],
                 "updated_at": datetime.now(timezone.utc).isoformat()
             },
@@ -3420,13 +3439,16 @@ async def get_all_receipts(
     for r in receipts_cursor:
         if "_id" in r:
             r["_id"] = str(r["_id"])
-        # Add user info
+        # Add user info (prefer direct user_email from receipt, fallback to lookup)
         device_id = r.get("device_id", "")
         user_info = user_map.get(device_id, {})
-        r["user_email"] = user_info.get("email", "")
+        # Use user_email from receipt if available, otherwise lookup
+        r["user_email"] = r.get("user_email") or user_info.get("email", "")
         r["user_phone"] = user_info.get("phone", "")
         r["user_name"] = user_info.get("name", "")
         r["auth_provider"] = user_info.get("auth_provider", "")
+        # Ensure receipt_url is included
+        r["receipt_url"] = r.get("receipt_url") or r.get("source_url", "")
         receipts.append(r)
     
     return {
@@ -3466,8 +3488,8 @@ async def export_all_receipts_excel(
     ws_receipts = wb.active
     ws_receipts.title = "Αποδείξεις"
     
-    # Headers for receipts - UPDATED with more user details
-    receipt_headers = ["ID Απόδειξης", "Device ID", "Email Χρήστη", "Τηλέφωνο", "Τρόπος Σύνδεσης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων"]
+    # Headers for receipts - UPDATED with more user details and receipt URL
+    receipt_headers = ["ID Απόδειξης", "Device ID", "Email Χρήστη", "Τηλέφωνο", "Τρόπος Σύνδεσης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων", "Receipt URL"]
     
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="0D9488", end_color="0D9488", fill_type="solid")
@@ -3511,9 +3533,13 @@ async def export_all_receipts_excel(
         device_id = receipt.get("device_id", "")
         user_info = device_user_map.get(device_id, {})
         
+        # Use user_email from receipt if available, otherwise lookup
+        user_email = receipt.get("user_email") or user_info.get("email", "Ανώνυμος")
+        receipt_url = receipt.get("receipt_url") or receipt.get("source_url", "")
+        
         ws_receipts.cell(row=row, column=1, value=str(receipt.get("id", receipt.get("_id", ""))))
         ws_receipts.cell(row=row, column=2, value=device_id)
-        ws_receipts.cell(row=row, column=3, value=user_info.get("email", "Ανώνυμος"))
+        ws_receipts.cell(row=row, column=3, value=user_email)
         ws_receipts.cell(row=row, column=4, value=user_info.get("phone", "-"))
         ws_receipts.cell(row=row, column=5, value=auth_provider_names.get(user_info.get("auth_provider", "unknown"), "Άγνωστο"))
         ws_receipts.cell(row=row, column=6, value=receipt.get("store_name", ""))
@@ -3522,9 +3548,10 @@ async def export_all_receipts_excel(
         ws_receipts.cell(row=row, column=9, value=receipt.get("total", 0))
         ws_receipts.cell(row=row, column=10, value=receipt.get("payment_method", ""))
         ws_receipts.cell(row=row, column=11, value=len(receipt.get("items", [])))
+        ws_receipts.cell(row=row, column=12, value=receipt_url)
     
     # Adjust column widths for receipts sheet
-    col_widths_receipts = [22, 18, 30, 15, 18, 20, 15, 12, 12, 15, 12]
+    col_widths_receipts = [22, 18, 30, 15, 18, 20, 15, 12, 12, 15, 12, 60]
     for col, width in enumerate(col_widths_receipts, 1):
         ws_receipts.column_dimensions[get_column_letter(col)].width = width
     
@@ -4223,7 +4250,7 @@ async def admin_dashboard():
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>ID</th><th>Email</th><th>Τηλέφωνο</th><th>Τρόπος Σύνδεσης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th></tr></thead>
+                            <thead><tr><th>ID</th><th>Email</th><th>Τηλέφωνο</th><th>Τρόπος Σύνδεσης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th><th>Receipt URL</th></tr></thead>
                             <tbody id="receiptsTable"></tbody>
                         </table>
                     </div>
@@ -4567,6 +4594,7 @@ async def admin_dashboard():
                         <td>${r.date || '-'}</td>
                         <td><strong>€${(r.total || 0).toFixed(2)}</strong></td>
                         <td>${(r.items || []).length}</td>
+                        <td>${r.receipt_url ? `<a href="${r.receipt_url}" target="_blank" class="btn btn-secondary" style="padding:2px 8px;font-size:12px;">Άνοιγμα</a>` : '-'}</td>
                     </tr>
                 `).join('');
                 
