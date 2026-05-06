@@ -2724,11 +2724,18 @@ async def import_receipt_from_url(
         try:
             payload = verify_token(credentials.credentials)
             user_email = payload.get("email", "")
-            logger.info(f"[import-url] Extracted email: {user_email}")
+            logger.info(f"[import-url] Extracted email from token: {user_email}")
         except Exception as e:
             logger.warning(f"[import-url] Token verification failed: {e}")
-    else:
-        logger.warning("[import-url] No token provided in request")
+    
+    # FALLBACK: If no token, try to get email from device_id lookup
+    if not user_email and input.device_id:
+        user_doc = await db.users.find_one({"device_id": input.device_id})
+        if user_doc:
+            user_email = user_doc.get("email", "")
+            logger.info(f"[import-url] Fallback: Found email from device_id: {user_email}")
+        else:
+            logger.warning(f"[import-url] No user found for device_id: {input.device_id}")
     
     logger.info(f"[import-url] Processing URL: {url[:50]}... | user_email: {user_email}")
 
