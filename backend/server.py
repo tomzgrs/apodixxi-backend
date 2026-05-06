@@ -1875,8 +1875,28 @@ async def refresh_token(refresh_token: str = Body(..., embed=True)):
 
 
 @api_router.get("/auth/me")
-async def get_me(user: dict = Depends(get_current_user)):
-    """Get current user profile."""
+async def get_me(
+    user: dict = Depends(get_current_user),
+    device_id: Optional[str] = Query(None)
+):
+    """Get current user profile. Optionally link device_id to user."""
+    
+    # If device_id provided, link it to this user
+    if device_id:
+        current_device = user.get("device_id")
+        if current_device != device_id:
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"device_id": device_id}}
+            )
+            # Also update devices collection
+            await db.devices.update_one(
+                {"device_id": device_id},
+                {"$set": {"user_email": user["email"], "user_id": user["_id"], "linked_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+            logger.info(f"[auth/me] Auto-linked device {device_id} to user {user['email']}")
+    
     # Check subscription status
     account_type = user.get("account_type", "free")
     subscription_expires = user.get("subscription_expires_at")
@@ -3096,7 +3116,32 @@ async def compare_product_prices(q: str = Query(..., min_length=2)):
 
 
 @api_router.get("/stats")
-async def get_stats(device_id: str = Query(...)):
+async def get_stats(
+    device_id: str = Query(...),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # If user is authenticated, auto-link device to user
+    if credentials and credentials.credentials:
+        try:
+            payload = verify_token(credentials.credentials)
+            user_email = payload.get("email", "")
+            user_id = payload.get("sub")
+            if user_email:
+                # Update user's device_id
+                await db.users.update_one(
+                    {"email": user_email.lower()},
+                    {"$set": {"device_id": device_id}}
+                )
+                # Update devices collection
+                await db.devices.update_one(
+                    {"device_id": device_id},
+                    {"$set": {"user_email": user_email, "user_id": user_id, "linked_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True
+                )
+                logger.info(f"[stats] Auto-linked device {device_id} to user {user_email}")
+        except Exception:
+            pass  # Token invalid, just continue without linking
+    
     total_receipts = await db.receipts.count_documents({"device_id": device_id})
     total_products = await db.products.count_documents({})
 

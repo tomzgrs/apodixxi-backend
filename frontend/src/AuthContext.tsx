@@ -75,8 +75,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const token = await storage.getItem('accessToken');
       if (token) {
         setAccessToken(token);
-        // Validate token with backend
-        const response = await fetch(`${API_URL}/api/auth/me`, {
+        // Get device_id to link with user
+        const deviceId = await AsyncStorage.getItem('device_id');
+        // Validate token with backend and link device
+        const url = deviceId 
+          ? `${API_URL}/api/auth/me?device_id=${deviceId}`
+          : `${API_URL}/api/auth/me`;
+        const response = await fetch(url, {
           headers: { Authorization: `Bearer ${token}` }
         });
         
@@ -380,7 +385,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!accessToken) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/auth/me`, {
+      // Get device_id to link with user
+      const deviceId = await AsyncStorage.getItem('device_id');
+      const url = deviceId 
+        ? `${API_URL}/api/auth/me?device_id=${deviceId}`
+        : `${API_URL}/api/auth/me`;
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
 
