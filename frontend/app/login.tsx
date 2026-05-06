@@ -24,7 +24,7 @@ WebBrowser.maybeCompleteAuthSession();
 const APP_VERSION = '1.0.0';
 const BUILD_NUMBER = '31';
 
-type AuthMode = 'login' | 'signup';
+type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password';
 
 export default function LoginScreen() {
   const { signUp, signIn, signInWithGoogle, signInWithApple, isLoading } = useAuth();
@@ -39,6 +39,10 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
 
   const validateEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -190,6 +194,242 @@ export default function LoginScreen() {
 
               <TouchableOpacity onPress={handleRequestOTP} style={styles.linkButton}>
                 <Text style={styles.linkText}>Αποστολή νέου κωδικού</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // Forgot Password Screen
+  if (mode === 'forgot-password') {
+    const handleForgotPassword = async () => {
+      setError('');
+      if (!email) {
+        setError('Παρακαλώ εισάγετε το email σας');
+        return;
+      }
+      if (!validateEmail(email)) {
+        setError('Μη έγκυρη διεύθυνση email');
+        return;
+      }
+      
+      setForgotPasswordLoading(true);
+      try {
+        const response = await fetch(`${require('../src/AuthContext').API_URL}/api/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          setForgotPasswordSuccess(true);
+        } else {
+          setError(data.detail || 'Κάτι πήγε στραβά');
+        }
+      } catch (err: any) {
+        setError(err.message || 'Κάτι πήγε στραβά');
+      } finally {
+        setForgotPasswordLoading(false);
+      }
+    };
+
+    if (forgotPasswordSuccess) {
+      return (
+        <SafeAreaView style={styles.container}>
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <View style={styles.header}>
+              <View style={styles.logoContainer}>
+                <Ionicons name="mail-open" size={40} color={theme.primary} />
+              </View>
+              <Text style={styles.title}>Ελέγξτε το Email σας</Text>
+              <Text style={styles.subtitle}>
+                Αν υπάρχει λογαριασμός με αυτό το email, θα λάβετε οδηγίες για επαναφορά κωδικού.
+              </Text>
+            </View>
+            
+            <View style={styles.form}>
+              <TouchableOpacity 
+                style={styles.primaryButton}
+                onPress={() => {
+                  setMode('reset-password');
+                  setForgotPasswordSuccess(false);
+                }}
+              >
+                <Text style={styles.primaryButtonText}>Έχω τον κωδικό επαναφοράς</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.primaryButton, { backgroundColor: theme.card, marginTop: 12 }]}
+                onPress={() => {
+                  setMode('login');
+                  setForgotPasswordSuccess(false);
+                  setEmail('');
+                }}
+              >
+                <Text style={[styles.primaryButtonText, { color: theme.text }]}>Επιστροφή στη σύνδεση</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
+        >
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => setMode('login')} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={24} color={theme.text} />
+              </TouchableOpacity>
+              <View style={styles.logoContainer}>
+                <Ionicons name="key" size={40} color={theme.primary} />
+              </View>
+              <Text style={styles.title}>Ξέχασα τον κωδικό</Text>
+              <Text style={styles.subtitle}>Εισάγετε το email σας για να λάβετε κωδικό επαναφοράς</Text>
+            </View>
+
+            <View style={styles.form}>
+              <View style={styles.inputContainer}>
+                <Ionicons name="mail" size={20} color={theme.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  placeholderTextColor={theme.textSecondary}
+                  value={email}
+                  onChangeText={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoFocus
+                />
+              </View>
+
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+
+              <TouchableOpacity 
+                style={[styles.primaryButton, forgotPasswordLoading && styles.buttonDisabled]} 
+                onPress={handleForgotPassword}
+                disabled={forgotPasswordLoading}
+              >
+                {forgotPasswordLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Αποστολή κωδικού</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
+  // Reset Password Screen
+  if (mode === 'reset-password') {
+    const handleResetPassword = async () => {
+      setError('');
+      if (!resetToken) {
+        setError('Παρακαλώ εισάγετε τον κωδικό επαναφοράς');
+        return;
+      }
+      if (!newPassword || newPassword.length < 8) {
+        setError('Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες');
+        return;
+      }
+      
+      setForgotPasswordLoading(true);
+      try {
+        const response = await fetch(`${require('../src/AuthContext').API_URL}/api/auth/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: resetToken, new_password: newPassword })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          Alert.alert(
+            'Επιτυχία!',
+            'Ο κωδικός σας άλλαξε. Μπορείτε τώρα να συνδεθείτε.',
+            [{ text: 'OK', onPress: () => {
+              setMode('login');
+              setResetToken('');
+              setNewPassword('');
+            }}]
+          );
+        } else {
+          setError(data.detail || 'Κάτι πήγε στραβά');
+        }
+      } catch (err: any) {
+        setError(err.message || 'Κάτι πήγε στραβά');
+      } finally {
+        setForgotPasswordLoading(false);
+      }
+    };
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
+        >
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <View style={styles.header}>
+              <TouchableOpacity onPress={() => setMode('forgot-password')} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={24} color={theme.text} />
+              </TouchableOpacity>
+              <View style={styles.logoContainer}>
+                <Ionicons name="lock-open" size={40} color={theme.primary} />
+              </View>
+              <Text style={styles.title}>Νέος Κωδικός</Text>
+              <Text style={styles.subtitle}>Εισάγετε τον κωδικό που λάβατε στο email</Text>
+            </View>
+
+            <View style={styles.form}>
+              <View style={styles.inputContainer}>
+                <Ionicons name="keypad" size={20} color={theme.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.input, { letterSpacing: 4, fontWeight: '600', fontSize: 18 }]}
+                  placeholder="XXXXXX"
+                  placeholderTextColor={theme.textSecondary}
+                  value={resetToken}
+                  onChangeText={(text) => setResetToken(text.toUpperCase())}
+                  autoCapitalize="characters"
+                  maxLength={6}
+                  autoFocus
+                />
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <Ionicons name="lock-closed" size={20} color={theme.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Νέος κωδικός"
+                  placeholderTextColor={theme.textSecondary}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+                  <Ionicons name={showPassword ? "eye-off" : "eye"} size={20} color={theme.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+
+              <TouchableOpacity 
+                style={[styles.primaryButton, forgotPasswordLoading && styles.buttonDisabled]} 
+                onPress={handleResetPassword}
+                disabled={forgotPasswordLoading}
+              >
+                {forgotPasswordLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Αλλαγή κωδικού</Text>
+                )}
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -380,6 +620,16 @@ export default function LoginScreen() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
+            {/* Forgot Password Link - only show on login */}
+            {mode === 'login' && (
+              <TouchableOpacity 
+                style={styles.forgotPasswordContainer}
+                onPress={() => setMode('forgot-password' as AuthMode)}
+              >
+                <Text style={styles.forgotPasswordText}>Ξέχασα τον κωδικό μου</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity 
               style={[styles.primaryButton, isLoading && styles.buttonDisabled]} 
               onPress={handleEmailAuth}
@@ -524,6 +774,15 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontSize: 14,
     marginBottom: 12,
     textAlign: 'center',
+  },
+  forgotPasswordContainer: {
+    alignItems: 'flex-end',
+    marginBottom: 8,
+  },
+  forgotPasswordText: {
+    color: theme.primary,
+    fontSize: 14,
+    fontWeight: '500',
   },
   mockOtp: {
     color: theme.primary,

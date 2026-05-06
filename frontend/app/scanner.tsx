@@ -104,7 +104,7 @@ function ScannerContent() {
       // Unknown URL - try anyway
       setLoading(true);
       try {
-        const result = await api.importFromUrl(data);
+        const result = await api.importFromUrl(data, false, accessToken);
         
         // Check if WebView is required
         if (result.status === 'webview_required') {

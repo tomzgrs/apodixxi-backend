@@ -47,6 +47,14 @@ JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
+# ============ SMTP CONFIGURATION ============
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "apodixxi@gmail.com")
+
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
@@ -252,6 +260,13 @@ class URLImportInput(BaseModel):
 class DeviceRegister(BaseModel):
     device_id: str
     language: str = "el"
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 class WebViewExtractedData(BaseModel):
     device_id: str
@@ -1938,6 +1953,209 @@ async def logout(user: dict = Depends(get_current_user)):
     """Logout current user."""
     # In production, you might want to blacklist the token
     return {"success": True, "message": "Logged out successfully"}
+
+
+# ============ FORGOT PASSWORD ============
+
+def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"):
+    """Send password reset email via Gmail SMTP."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        logger.error("SMTP credentials not configured")
+        raise HTTPException(status_code=500, detail="Email service not configured")
+    
+    # Create reset link (deep link for mobile app)
+    reset_link = f"apodixxi://reset-password?token={reset_token}"
+    web_reset_link = f"https://apodixxi.gr/reset-password?token={reset_token}"
+    
+    subject = f"{app_name} - Επαναφορά Κωδικού"
+    
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
+            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }}
+            .button {{ display: inline-block; background: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+            .code {{ background: #e0e0e0; padding: 10px 20px; font-family: monospace; font-size: 18px; border-radius: 4px; display: inline-block; }}
+            .footer {{ text-align: center; color: #666; font-size: 12px; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🧾 {app_name}</h1>
+            </div>
+            <div class="content">
+                <h2>Επαναφορά Κωδικού Πρόσβασης</h2>
+                <p>Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.</p>
+                
+                <p>Πατήστε το παρακάτω κουμπί για να ορίσετε νέο κωδικό:</p>
+                
+                <p style="text-align: center;">
+                    <a href="{web_reset_link}" class="button">Επαναφορά Κωδικού</a>
+                </p>
+                
+                <p>Ή αντιγράψτε αυτόν τον κωδικό στην εφαρμογή:</p>
+                <p style="text-align: center;">
+                    <span class="code">{reset_token}</span>
+                </p>
+                
+                <p><strong>Σημείωση:</strong> Ο κωδικός λήγει σε 1 ώρα.</p>
+                
+                <p>Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.</p>
+            </div>
+            <div class="footer">
+                <p>© 2025 {app_name} - Η εφαρμογή παρακολούθησης αποδείξεων</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    text_body = f"""
+    Επαναφορά Κωδικού Πρόσβασης - {app_name}
+    
+    Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.
+    
+    Κωδικός επαναφοράς: {reset_token}
+    
+    Link επαναφοράς: {web_reset_link}
+    
+    Ο κωδικός λήγει σε 1 ώρα.
+    
+    Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.
+    """
+    
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = SMTP_FROM
+    msg['To'] = to_email
+    
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+    
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+        logger.info(f"Reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send reset email: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send reset email")
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Request password reset email."""
+    email = request.email.lower().strip()
+    
+    # Check if user exists
+    user = await db.users.find_one({"email": email})
+    if not user:
+        # Don't reveal if email exists or not (security)
+        return {"success": True, "message": "If this email exists, a reset link has been sent"}
+    
+    # Check if user registered with social auth (can't reset password)
+    if user.get("auth_provider") in ["google", "apple", "phone"]:
+        raise HTTPException(
+            status_code=400, 
+            detail="This account uses social login. Please sign in with Google/Apple."
+        )
+    
+    # Generate reset token (6 characters, uppercase)
+    reset_token = uuid.uuid4().hex[:6].upper()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    
+    # Store reset token
+    await db.password_resets.delete_many({"email": email})  # Remove old tokens
+    await db.password_resets.insert_one({
+        "email": email,
+        "token": reset_token,
+        "expires_at": expires_at.isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "used": False
+    })
+    
+    # Send email
+    try:
+        send_reset_email(email, reset_token)
+    except Exception as e:
+        logger.error(f"Failed to send reset email: {e}")
+        # Still return success to not reveal email existence
+    
+    return {"success": True, "message": "If this email exists, a reset link has been sent"}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """Reset password using token from email."""
+    token = request.token.upper().strip()
+    new_password = request.new_password
+    
+    # Validate password
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    # Find valid token
+    reset_doc = await db.password_resets.find_one({
+        "token": token,
+        "used": False
+    })
+    
+    if not reset_doc:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+    
+    # Check expiration
+    expires_at = datetime.fromisoformat(reset_doc["expires_at"].replace('Z', '+00:00'))
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Reset code has expired")
+    
+    # Update password
+    email = reset_doc["email"]
+    hashed_password = hash_password(new_password)
+    
+    result = await db.users.update_one(
+        {"email": email},
+        {"$set": {"password": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="Failed to update password")
+    
+    # Mark token as used
+    await db.password_resets.update_one(
+        {"_id": reset_doc["_id"]},
+        {"$set": {"used": True}}
+    )
+    
+    logger.info(f"Password reset successful for {email}")
+    return {"success": True, "message": "Password has been reset successfully"}
+
+
+@api_router.post("/auth/verify-reset-token")
+async def verify_reset_token(token: str = Body(..., embed=True)):
+    """Verify if a reset token is valid (for UI validation)."""
+    token = token.upper().strip()
+    
+    reset_doc = await db.password_resets.find_one({
+        "token": token,
+        "used": False
+    })
+    
+    if not reset_doc:
+        return {"valid": False, "message": "Invalid reset code"}
+    
+    expires_at = datetime.fromisoformat(reset_doc["expires_at"].replace('Z', '+00:00'))
+    if datetime.now(timezone.utc) > expires_at:
+        return {"valid": False, "message": "Reset code has expired"}
+    
+    return {"valid": True, "email": reset_doc["email"]}
 
 
 # ============ PROMO CODES ============
