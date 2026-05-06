@@ -2719,12 +2719,18 @@ async def import_receipt_from_url(
     
     # Extract user email from JWT token if provided
     user_email = ""
-    if credentials:
+    if credentials and credentials.credentials:
+        logger.info(f"[import-url] Token received: {credentials.credentials[:20]}...")
         try:
             payload = verify_token(credentials.credentials)
             user_email = payload.get("email", "")
-        except Exception:
-            pass  # Token invalid, continue without email
+            logger.info(f"[import-url] Extracted email: {user_email}")
+        except Exception as e:
+            logger.warning(f"[import-url] Token verification failed: {e}")
+    else:
+        logger.warning("[import-url] No token provided in request")
+    
+    logger.info(f"[import-url] Processing URL: {url[:50]}... | user_email: {user_email}")
 
     if provider == 'epsilon_digital':
         # Check for duplicates even for epsilon digital
