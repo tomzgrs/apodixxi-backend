@@ -36,7 +36,19 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
+
+# CORS must be added FIRST, before any routes
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api_router = APIRouter(prefix="/api")
+# Create duplicate router without prefix for Coolify compatibility
+root_router = APIRouter()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -6402,15 +6414,24 @@ async def delete_account_page():
     return HTMLResponse(content=html_content)
 
 
+# Mount API router with /api prefix (for Kubernetes/development)
 app.include_router(api_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Also mount routes WITHOUT /api prefix for production (Coolify direct access)
+# Create a copy of the router without the /api prefix
+from fastapi import APIRouter as FastAPIRouter
+no_prefix_router = FastAPIRouter()
+
+# Re-register all api_router routes without the /api prefix
+for route in api_router.routes:
+    no_prefix_router.routes.append(route)
+
+app.include_router(no_prefix_router)
+
+# Root endpoint for health checks
+@app.get("/")
+async def root():
+    return {"message": "apodixxi API", "version": "1.0.0", "status": "healthy"}
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
