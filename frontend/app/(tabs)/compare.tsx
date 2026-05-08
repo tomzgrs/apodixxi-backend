@@ -8,6 +8,7 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { getStoreLogo } from '../../src/storeLogos';
 import { api } from '../../src/api';
+import AdBanner from '../../src/components/AdBanner';
 
 type SortOption = 'price_asc' | 'price_desc' | 'store' | 'date';
 
@@ -403,6 +404,11 @@ export default function CompareScreen() {
           </View>
         </View>
       </Modal>
+      
+      {/* Ad Banner */}
+      <View style={styles.adContainer}>
+        <AdBanner useTestAds={true} position="bottom" />
+      </View>
     </SafeAreaView>
   );
 }
@@ -410,6 +416,11 @@ export default function CompareScreen() {
 const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.background },
   scroll: { padding: Spacing.base, paddingBottom: Spacing['3xl'] },
+  adContainer: {
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+  },
   title: { 
     fontSize: Typography['2xl'], 
     fontWeight: Typography.extrabold, 

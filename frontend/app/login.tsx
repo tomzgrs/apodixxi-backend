@@ -22,7 +22,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '31';
+const BUILD_NUMBER = '33';
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password';
 

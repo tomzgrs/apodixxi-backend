@@ -26,17 +26,26 @@ export default function DashboardScreen() {
   const [showDistributionDropdown, setShowDistributionDropdown] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<{
+    is_premium: boolean;
+    app_name: string;
+    days_remaining: number | null;
+  }>({ is_premium: false, app_name: 'apodixxi', days_remaining: null });
 
   const loadData = useCallback(async () => {
     try {
       const id = await api.getDeviceId();
       setDeviceId(id);
-      const [statsData, analyticsData] = await Promise.all([
+      const [statsData, analyticsData, subStatus] = await Promise.all([
         api.getStats(),
-        api.getAnalytics(6)
+        api.getAnalytics(6),
+        api.getSubscriptionStatus().catch(() => ({ is_premium: false, app_name: 'apodixxi', days_remaining: null }))
       ]);
       setStats(statsData);
       setAnalytics(analyticsData);
+      if (subStatus) {
+        setSubscriptionStatus(subStatus);
+      }
     } catch (e) {
       console.log('Dashboard load error:', e);
     } finally {
@@ -90,7 +99,14 @@ export default function DashboardScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Καλώς ήρθατε 👋</Text>
-            <Text testID="app-title" style={styles.appTitle}>{t('app_name')}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text testID="app-title" style={styles.appTitle}>{subscriptionStatus.app_name}</Text>
+              {subscriptionStatus.is_premium && (
+                <View style={styles.premiumBadge}>
+                  <Ionicons name="star" size={12} color="#FFD700" />
+                </View>
+              )}
+            </View>
           </View>
           <TouchableOpacity 
             style={styles.settingsBtn}
@@ -481,6 +497,12 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontWeight: Typography.bold, 
     color: theme.text,
     letterSpacing: -0.5
+  },
+  premiumBadge: {
+    marginLeft: 6,
+    padding: 4,
+    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+    borderRadius: Radius.full,
   },
   settingsBtn: {
     width: 44,

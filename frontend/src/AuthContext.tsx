@@ -6,6 +6,8 @@ import { Platform } from 'react-native';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://api.apodixxi.app';
 
+export { API_URL };
+
 export interface User {
   id: string;
   email: string;
@@ -129,10 +131,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const handleAuthResponse = async (data: {
     access_token: string;
     refresh_token: string;
+    device_id?: string;
     user: User;
   }) => {
     await storage.setItem('accessToken', data.access_token);
     await storage.setItem('refreshToken', data.refresh_token);
+    
+    // If server returns a device_id, update local storage to sync with user account
+    // This ensures the device sees all user's receipts
+    if (data.device_id) {
+      await AsyncStorage.setItem('device_id', data.device_id);
+      console.log('Device ID synced:', data.device_id);
+    }
+    
     setAccessToken(data.access_token);
     setUser(data.user);
   };

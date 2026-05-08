@@ -187,4 +187,18 @@ export const api = {
     }
     return res.blob();
   },
+
+  async getSubscriptionStatus() {
+    const deviceId = await this.getDeviceId();
+    const accessToken = await AsyncStorage.getItem('accessToken');
+    const headers: Record<string, string> = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    const res = await fetch(`${API_URL}/api/subscription/status?device_id=${deviceId}`, {
+      headers
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
 };

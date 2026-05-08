@@ -11,10 +11,11 @@ import { useAuth } from '../../src/AuthContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
+import AdBanner from '../../src/components/AdBanner';
 
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '13';
+const BUILD_NUMBER = '33';
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
@@ -118,6 +119,12 @@ export default function SettingsScreen() {
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.background },
     scroll: { padding: Spacing.lg, paddingBottom: Spacing['3xl'] },
+    adContainer: {
+      alignItems: 'center',
+      paddingVertical: Spacing.sm,
+      paddingHorizontal: Spacing.md,
+      marginTop: Spacing.md,
+    },
     title: { 
       fontSize: Typography['2xl'], 
       fontWeight: Typography.extrabold, 
@@ -510,6 +517,11 @@ export default function SettingsScreen() {
               <Text style={styles.aboutValue} numberOfLines={1}>{deviceId}</Text>
             </View>
           </View>
+        </View>
+        
+        {/* Ad Banner */}
+        <View style={styles.adContainer}>
+          <AdBanner useTestAds={true} position="bottom" />
         </View>
       </ScrollView>
     </SafeAreaView>

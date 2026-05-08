@@ -13,6 +13,7 @@ import math
 import smtplib
 import httpx
 import io
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -353,6 +354,8 @@ STORE_BRAND_KEYWORDS = {
     "DISCOUNT MARKT": "DISCOUNT MARKT",
     "DISCOUNT": "DISCOUNT MARKT",
     "ΝΤΙΣΚΑΟΥΝΤ": "DISCOUNT MARKT",
+    "ΕΓΝΑΤΙΑ": "DISCOUNT MARKT",
+    "EGNATIA": "DISCOUNT MARKT",
     "ΣΥΝ.ΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
     "ΣΥΝΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
     "LIDL": "LIDL",
@@ -538,7 +541,7 @@ def parse_entersoft(html: str, source_url: str) -> dict:
                         "description": cells[1].get_text(strip=True),
                         "unit": cells[2].get_text(strip=True),
                         "quantity": parse_greek_number(cells[3].get_text(strip=True)),
-                        "unit_price": parse_greek_number(cells[4].get_text(strip=True)),
+                        "unit_price": parse_greek_number(cells[5].get_text(strip=True)),  # ΑΞΙΑ ΠΡΟ ΕΚΠΤ. (shelf price with VAT)
                         "pre_discount_value": parse_greek_number(cells[5].get_text(strip=True)),
                         "discount": parse_greek_number(cells[6].get_text(strip=True)),
                         "vat_percent": parse_greek_number(cells[7].get_text(strip=True).replace('%', '')),
@@ -2228,6 +2231,68 @@ async def apply_promo_code(request: PromoCodeRequest, user: dict = Depends(get_c
         "message": f"Promo code applied! You have {duration_days} days of premium access.",
         "account_type": "paid",
         "subscription_expires_at": new_expires.isoformat()
+    }
+
+
+@api_router.get("/subscription/status")
+async def get_subscription_status(device_id: str = Query(None), authorization: str = Header(None)):
+    """Get user subscription status. Returns free/premium status and expiry date."""
+    
+    user = None
+    
+    # Try to get user from JWT token first
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                user = await db.users.find_one({"_id": user_id})
+        except:
+            pass
+    
+    # Fallback to device_id
+    if not user and device_id:
+        user = await db.users.find_one({"device_id": device_id})
+    
+    if not user:
+        return {
+            "account_type": "free",
+            "is_premium": False,
+            "subscription_expires_at": None,
+            "days_remaining": None,
+            "app_name": "apodixxi"
+        }
+    
+    account_type = user.get("account_type", "free")
+    subscription_expires = user.get("subscription_expires_at")
+    
+    is_premium = False
+    days_remaining = None
+    
+    if account_type == "paid" and subscription_expires:
+        try:
+            expires_dt = datetime.fromisoformat(subscription_expires.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if expires_dt > now:
+                is_premium = True
+                days_remaining = (expires_dt - now).days
+            else:
+                # Subscription expired, downgrade to free
+                await db.users.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {"account_type": "free"}}
+                )
+                account_type = "free"
+        except:
+            pass
+    
+    return {
+        "account_type": account_type,
+        "is_premium": is_premium,
+        "subscription_expires_at": subscription_expires,
+        "days_remaining": days_remaining,
+        "app_name": "apodixxi+" if is_premium else "apodixxi"
     }
 
 
@@ -5443,19 +5508,147 @@ def send_admin_notification(subject: str, body: str):
 
 
 # ============ AI INTEGRATION WITH GEMINI ============
-# NOTE: AI features disabled for Coolify deployment (missing emergentintegrations)
 
+# Gemini API Configuration
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 AI_AVAILABLE = False
-LlmChat = None
-UserMessage = None
-try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    AI_AVAILABLE = True
-except (ImportError, AttributeError, Exception) as e:
-    logger.warning(f"AI features disabled: {e}")
-    pass
+genai_client = None
 
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+try:
+    from google import genai
+    from google.genai import types
+    if GEMINI_API_KEY:
+        genai_client = genai.Client(api_key=GEMINI_API_KEY)
+        AI_AVAILABLE = True
+        logger.info("Gemini AI enabled successfully with google.genai")
+    else:
+        logger.warning("GEMINI_API_KEY not set - AI features disabled")
+except ImportError as e:
+    logger.warning(f"google-genai not installed, trying google-generativeai: {e}")
+    try:
+        import google.generativeai as genai_module
+        if GEMINI_API_KEY:
+            genai_module.configure(api_key=GEMINI_API_KEY)
+            AI_AVAILABLE = True
+            logger.info("Gemini AI enabled with legacy google.generativeai")
+    except ImportError:
+        logger.warning("No Gemini AI package available")
+except Exception as e:
+    logger.warning(f"AI features disabled: {e}")
+
+# Master Categories for AI Classification
+MASTER_CATEGORIES = [
+    "Τρόφιμα & Ποτά",
+    "Προσωπική Φροντίδα",
+    "Καθαριότητα & Σπίτι",
+    "Βρεφικά Είδη",
+    "Κατοικίδια",
+    "Είδη Bazaar / Σπιτιού",
+    "Άλλο"
+]
+
+async def generate_ai_content(prompt: str) -> str:
+    """Generate content using Gemini AI."""
+    if not AI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="AI service not available")
+    
+    try:
+        if genai_client:
+            # New google.genai API
+            response = genai_client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
+            return response.text
+        else:
+            # Legacy google.generativeai API
+            import google.generativeai as genai_module
+            model = genai_module.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            return response.text
+    except Exception as e:
+        logger.error(f"Gemini AI error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+async def classify_product_with_ai(product_name: str, store_name: str = "") -> str:
+    """Classify a product into one of the master categories using Gemini AI."""
+    if not AI_AVAILABLE:
+        return "Άλλο"
+    
+    try:
+        prompt = f"""Κατηγοριοποίησε το παρακάτω προϊόν supermarket σε ΜΙΑ από τις εξής κατηγορίες:
+1. Τρόφιμα & Ποτά (Γαλακτοκομικά, Αλλαντικά, Κρεοπωλείο, Μαναβική, Κατεψυγμένα, Σνακ, Ποτά/Αναψυκτικά)
+2. Προσωπική Φροντίδα (Σαμπουάν, Αφρόλουτρα, Στοματική Υγιεινή, Καλλυντικά)
+3. Καθαριότητα & Σπίτι (Απορρυπαντικά, Χαρτικά, Εργαλεία καθαρισμού)
+4. Βρεφικά Είδη (Πάνες, Βρεφικές Τροφές)
+5. Κατοικίδια (Τροφές ζώων, Άμμος γάτας)
+6. Είδη Bazaar / Σπιτιού (Κουζινικά, Ηλεκτρικές συσκευές, Ένδυση)
+7. Άλλο
+
+Προϊόν: {product_name}
+{f'Κατάστημα: {store_name}' if store_name else ''}
+
+Απάντησε ΜΟΝΟ με το όνομα της κατηγορίας, χωρίς εξηγήσεις."""
+
+        response_text = await generate_ai_content(prompt)
+        category = response_text.strip()
+        
+        # Validate response is one of our categories
+        for master_cat in MASTER_CATEGORIES:
+            if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
+                return master_cat
+        
+        return "Άλλο"
+    except Exception as e:
+        logger.error(f"AI classification error: {e}")
+        return "Άλλο"
+
+async def batch_classify_products(products: list) -> dict:
+    """Classify multiple products in a single AI call for efficiency."""
+    if not AI_AVAILABLE or not products:
+        return {p: "Άλλο" for p in products}
+    
+    try:
+        products_list = "\n".join([f"- {p}" for p in products[:50]])  # Limit to 50 products
+        
+        prompt = f"""Κατηγοριοποίησε τα παρακάτω προϊόντα supermarket. Για κάθε προϊόν, δώσε ΜΙΑ από τις κατηγορίες:
+- Τρόφιμα & Ποτά
+- Προσωπική Φροντίδα
+- Καθαριότητα & Σπίτι
+- Βρεφικά Είδη
+- Κατοικίδια
+- Είδη Bazaar / Σπιτιού
+- Άλλο
+
+Προϊόντα:
+{products_list}
+
+Απάντησε σε μορφή JSON: {{"product_name": "category", ...}}
+Μόνο JSON, χωρίς εξηγήσεις."""
+
+        response_text = await generate_ai_content(prompt)
+        
+        # Try to parse JSON response
+        import re
+        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            # Validate categories
+            validated = {}
+            for product, category in result.items():
+                matched = False
+                for master_cat in MASTER_CATEGORIES:
+                    if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
+                        validated[product] = master_cat
+                        matched = True
+                        break
+                if not matched:
+                    validated[product] = "Άλλο"
+            return validated
+        return {p: "Άλλο" for p in products}
+    except Exception as e:
+        logger.error(f"Batch AI classification error: {e}")
+        return {p: "Άλλο" for p in products}
 
 class AIInsightRequest(BaseModel):
     device_id: str
@@ -5474,7 +5667,7 @@ class AIRecommendationRequest(BaseModel):
 @api_router.post("/ai/insights")
 async def get_ai_insights(request: AIInsightRequest):
     """Get AI-powered insights about user's shopping habits."""
-    if not AI_AVAILABLE or not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=503, detail="AI service not available")
     
     # Fetch user's receipt data
@@ -5535,17 +5728,10 @@ async def get_ai_insights(request: AIInsightRequest):
 Προτείνε 3-5 προϊόντα με βάση τις αγοραστικές του συνήθειες."""
     
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"insights_{request.device_id}_{request.insight_type}",
-            system_message="Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων. Δίνεις σύντομες, πρακτικές συμβουλές στα ελληνικά."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
+        response_text = await generate_ai_content(prompt)
         
         return {
-            "insight": response,
+            "insight": response_text.strip(),
             "stats": {
                 "total_receipts": len(receipts),
                 "total_spent": round(total_spent, 2),
@@ -5561,7 +5747,7 @@ async def get_ai_insights(request: AIInsightRequest):
 @api_router.post("/ai/chat")
 async def ai_chat(request: AIChatRequest):
     """Chat with AI assistant about shopping habits."""
-    if not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
     # Fetch user's receipt data for context
@@ -5581,33 +5767,30 @@ async def ai_chat(request: AIChatRequest):
     session_id = request.session_id or f"chat_{request.device_id}_{uuid.uuid4().hex[:8]}"
     
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=f"""Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
+        system_prompt = f"""Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
 Απαντάς πάντα στα ελληνικά, σύντομα και φιλικά.
 {context}
 Μπορείς να βοηθήσεις με ερωτήσεις σχετικά με:
 - Έξοδα και στατιστικά αγορών
 - Συμβουλές εξοικονόμησης
 - Σύγκριση τιμών μεταξύ καταστημάτων
-- Προτάσεις προϊόντων"""
-        ).with_model("gemini", "gemini-2.5-flash")
+- Προτάσεις προϊόντων
+
+Χρήστης: {request.message}"""
         
-        user_message = UserMessage(text=request.message)
-        response = await chat.send_message(user_message)
+        response_text = await generate_ai_content(system_prompt)
         
         # Store chat message in database
         await db.ai_chats.insert_one({
             "device_id": request.device_id,
             "session_id": session_id,
             "user_message": request.message,
-            "ai_response": response,
+            "ai_response": response_text,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         
         return {
-            "response": response,
+            "response": response_text,
             "session_id": session_id
         }
     except Exception as e:
@@ -5618,7 +5801,7 @@ async def ai_chat(request: AIChatRequest):
 @api_router.post("/ai/smart-recommendations")
 async def get_ai_recommendations(request: AIRecommendationRequest):
     """Get AI-powered product recommendations based on shopping history."""
-    if not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
     # Fetch user's purchase history
@@ -5660,20 +5843,13 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
 Παράδειγμα: [{{"title": "Γάλα σε προσφορά", "description": "Αγοράζετε συχνά γάλα - δείτε προσφορές", "reason": "Βασισμένο στις αγορές σας"}}]"""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"recs_{request.device_id}",
-            system_message="Είσαι ένας έξυπνος βοηθός αγορών. Απαντάς ΜΟΝΟ με valid JSON, χωρίς markdown."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
+        system_prompt = "Είσαι ένας έξυπνος βοηθός αγορών. Απαντάς ΜΟΝΟ με valid JSON, χωρίς markdown.\n\n" + prompt
+        response_text = await generate_ai_content(system_prompt)
         
         # Try to parse JSON response
-        import json
         try:
             # Clean up response if it has markdown
-            clean_response = response.strip()
+            clean_response = response_text.strip()
             if clean_response.startswith("```"):
                 clean_response = clean_response.split("```")[1]
                 if clean_response.startswith("json"):
@@ -5681,7 +5857,7 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
             recommendations = json.loads(clean_response)
         except:
             # If JSON parsing fails, return as text
-            recommendations = [{"title": "AI Προτάσεις", "description": response, "reason": "AI-generated"}]
+            recommendations = [{"title": "AI Προτάσεις", "description": response_text, "reason": "AI-generated"}]
         
         return {
             "recommendations": recommendations[:request.limit],
@@ -5696,7 +5872,7 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
 @api_router.get("/ai/weekly-summary")
 async def get_weekly_summary(device_id: str):
     """Get AI-generated weekly shopping summary."""
-    if not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
     # Get receipts from last 7 days
@@ -5739,17 +5915,11 @@ async def get_weekly_summary(device_id: str):
 3. Μια συμβουλή εξοικονόμησης"""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"weekly_{device_id}",
-            system_message="Είσαι φιλικός οικονομικός σύμβουλος. Δίνεις σύντομες, χρήσιμες συμβουλές στα ελληνικά."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
+        system_prompt = "Είσαι φιλικός οικονομικός σύμβουλος. Δίνεις σύντομες, χρήσιμες συμβουλές στα ελληνικά.\n\n" + prompt
+        response_text = await generate_ai_content(system_prompt)
         
         return {
-            "summary": response,
+            "summary": response_text,
             "stats": {
                 "total_spent": round(total, 2),
                 "receipts_count": len(receipts),
