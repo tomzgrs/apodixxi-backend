@@ -15,7 +15,7 @@
       }
     },
     "android": {
-      "package": "com.apodixxi.test",
+      "package": "com.apodixxi.app",
       "versionCode": 33,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
