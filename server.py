@@ -13,6 +13,7 @@ import math
 import smtplib
 import httpx
 import io
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -46,6 +47,14 @@ JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "apodixxi-secret-key-change-me
 JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+# ============ SMTP CONFIGURATION ============
+
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", "apodixxi@gmail.com")
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -129,6 +138,7 @@ class UserSignupRequest(BaseModel):
 class UserLoginRequest(BaseModel):
     email: str
     password: str
+    device_id: Optional[str] = None  # Client's device_id to link with user
 
 class GoogleAuthRequest(BaseModel):
     google_id: Optional[str] = None
@@ -216,6 +226,8 @@ class ProductItem(BaseModel):
 class ReceiptData(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     device_id: str = ""
+    user_email: str = ""  # Email of the user who scanned the receipt
+    receipt_url: str = ""  # Original QR code URL
     store_name: str = ""
     store_address: str = ""
     store_vat: str = ""
@@ -249,6 +261,13 @@ class URLImportInput(BaseModel):
 class DeviceRegister(BaseModel):
     device_id: str
     language: str = "el"
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 class WebViewExtractedData(BaseModel):
     device_id: str
@@ -291,8 +310,8 @@ STORE_VAT_MAPPING = {
     "094384144": "BAZAAR",
     "094288618": "BAZAAR",  # Alternative VAT
     
-    # 9. ΕΓΝΑΤΙΑ
-    "094357707": "ΕΓΝΑΤΙΑ",
+    # 9. DISCOUNT MARKT
+    "094357707": "DISCOUNT MARKT",
     
     # 10. ΣΥΝ.ΚΑ ΚΡΗΤΗΣ
     "996722071": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
@@ -332,8 +351,11 @@ STORE_BRAND_KEYWORDS = {
     "MARKETIN": "MARKET IN",
     "BAZAAR": "BAZAAR",
     "ΜΠΑΖΑΡ": "BAZAAR",
-    "ΕΓΝΑΤΙΑ": "ΕΓΝΑΤΙΑ",
-    "EGNATIA": "ΕΓΝΑΤΙΑ",
+    "DISCOUNT MARKT": "DISCOUNT MARKT",
+    "DISCOUNT": "DISCOUNT MARKT",
+    "ΝΤΙΣΚΑΟΥΝΤ": "DISCOUNT MARKT",
+    "ΕΓΝΑΤΙΑ": "DISCOUNT MARKT",
+    "EGNATIA": "DISCOUNT MARKT",
     "ΣΥΝ.ΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
     "ΣΥΝΚΑ": "ΣΥΝ.ΚΑ ΚΡΗΤΗΣ",
     "LIDL": "LIDL",
@@ -519,7 +541,7 @@ def parse_entersoft(html: str, source_url: str) -> dict:
                         "description": cells[1].get_text(strip=True),
                         "unit": cells[2].get_text(strip=True),
                         "quantity": parse_greek_number(cells[3].get_text(strip=True)),
-                        "unit_price": parse_greek_number(cells[4].get_text(strip=True)),
+                        "unit_price": parse_greek_number(cells[5].get_text(strip=True)),  # ΑΞΙΑ ΠΡΟ ΕΚΠΤ. (shelf price with VAT)
                         "pre_discount_value": parse_greek_number(cells[5].get_text(strip=True)),
                         "discount": parse_greek_number(cells[6].get_text(strip=True)),
                         "vat_percent": parse_greek_number(cells[7].get_text(strip=True).replace('%', '')),
@@ -803,12 +825,347 @@ def parse_mydata_xml(xml_content: str) -> dict:
 
 def detect_provider(url: str) -> str:
     if 'e-invoicing.gr' in url:
+        # Check if it's PEPPOL format (either explicit or alternative format with /-1/)
+        if 'ct=PEPPOL' in url or 'contentType=PEPPOL' in url:
+            return 'peppol'
+        # Alternative format with /-1/uuid often returns HTML-rendered PEPPOL
+        # We'll try the entersoft parser first, and fallback to PEPPOL if needed
         return 'entersoft'
     elif 'einvoice.impact.gr' in url:
         return 'impact'
     elif 'epsilondigital' in url or 'epsilonnet.gr' in url:
         return 'epsilon_digital'
     return 'unknown'
+
+
+def parse_peppol_xml(xml_content: str, source_url: str) -> dict:
+    """Parse PEPPOL UBL Invoice XML format (used by e-invoicing.gr for some receipts)."""
+    data = {
+        "store_name": "",
+        "store_address": "",
+        "store_vat": "",
+        "receipt_number": "",
+        "date": "",
+        "payment_method": "",
+        "items": [],
+        "subtotal": 0.0,
+        "discount_total": 0.0,
+        "total": 0.0,
+        "vat_total": 0.0,
+        "net_total": 0.0,
+        "source_url": source_url,
+        "source_type": "peppol",
+        "provider": "PEPPOL (e-invoicing.gr)"
+    }
+    
+    try:
+        root = ET.fromstring(xml_content)
+    except ET.ParseError as e:
+        logger.error(f"PEPPOL XML parse error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid PEPPOL XML format")
+    
+    # Define namespaces for PEPPOL UBL format
+    namespaces = {
+        'inv': 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
+        'cbc': 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
+        'cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
+    }
+    
+    # Try to find the Invoice element
+    invoice = root.find('.//inv:Invoice', namespaces) or root.find('.//{urn:oasis:names:specification:ubl:schema:xsd:Invoice-2}Invoice')
+    if invoice is None:
+        # Maybe the root is the Invoice itself
+        if 'Invoice' in root.tag:
+            invoice = root
+        else:
+            logger.warning("Could not find Invoice element in PEPPOL XML")
+            invoice = root
+    
+    # Extract basic info
+    # Invoice ID format: VAT|DATE|SERIES|TYPE|CATEGORY|NUMBER
+    id_elem = invoice.find('.//cbc:ID', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}ID')
+    if id_elem is not None and id_elem.text:
+        id_parts = id_elem.text.split('|')
+        if len(id_parts) >= 6:
+            data["store_vat"] = id_parts[0]
+            data["receipt_number"] = id_parts[5] if len(id_parts) > 5 else id_parts[-1]
+    
+    # Issue Date
+    date_elem = invoice.find('.//cbc:IssueDate', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}IssueDate')
+    if date_elem is not None and date_elem.text:
+        data["date"] = date_elem.text
+    
+    # Supplier/Issuer info
+    supplier = invoice.find('.//cac:AccountingSupplierParty', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}AccountingSupplierParty')
+    if supplier is not None:
+        party = supplier.find('.//cac:Party', namespaces) or supplier.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Party')
+        if party is not None:
+            # Party Name
+            name_elem = party.find('.//cbc:Name', namespaces) or party.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Name')
+            if name_elem is not None and name_elem.text:
+                data["store_name"] = name_elem.text
+            
+            # VAT from PartyTaxScheme
+            vat_elem = party.find('.//cbc:CompanyID', namespaces) or party.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CompanyID')
+            if vat_elem is not None and vat_elem.text:
+                vat_text = vat_elem.text.replace('EL', '').replace('GR', '').strip()
+                if vat_text.isdigit():
+                    data["store_vat"] = vat_text
+            
+            # Address
+            address = party.find('.//cac:PostalAddress', namespaces) or party.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}PostalAddress')
+            if address is not None:
+                street = address.find('.//cbc:StreetName', namespaces) or address.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}StreetName')
+                city = address.find('.//cbc:CityName', namespaces) or address.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}CityName')
+                postal = address.find('.//cbc:PostalZone', namespaces) or address.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}PostalZone')
+                addr_parts = []
+                if street is not None and street.text:
+                    addr_parts.append(street.text)
+                if postal is not None and postal.text:
+                    addr_parts.append(postal.text)
+                if city is not None and city.text:
+                    addr_parts.append(city.text)
+                data["store_address"] = ", ".join(addr_parts)
+    
+    # Invoice Lines
+    for line in invoice.findall('.//cac:InvoiceLine', namespaces) or invoice.findall('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}InvoiceLine'):
+        item_data = {
+            "code": "",
+            "description": "",
+            "unit": "ΤΕΜ",
+            "quantity": 1.0,
+            "unit_price": 0.0,
+            "pre_discount_value": 0.0,
+            "discount": 0.0,
+            "vat_percent": 0.0,
+            "total_value": 0.0,
+        }
+        
+        # Item ID (code)
+        item_id = line.find('.//cbc:ID', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}ID')
+        if item_id is not None and item_id.text:
+            item_data["code"] = item_id.text
+        
+        # Quantity
+        qty = line.find('.//cbc:InvoicedQuantity', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}InvoicedQuantity')
+        if qty is not None and qty.text:
+            try:
+                item_data["quantity"] = float(qty.text.replace(',', '.'))
+            except ValueError:
+                pass
+            # Unit from attribute
+            if qty.get('unitCode'):
+                item_data["unit"] = qty.get('unitCode')
+        
+        # Line Extension Amount (net value)
+        net_val = line.find('.//cbc:LineExtensionAmount', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}LineExtensionAmount')
+        if net_val is not None and net_val.text:
+            try:
+                item_data["pre_discount_value"] = float(net_val.text.replace(',', '.'))
+            except ValueError:
+                pass
+        
+        # Item details
+        item = line.find('.//cac:Item', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Item')
+        if item is not None:
+            desc = item.find('.//cbc:Name', namespaces) or item.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Name')
+            if desc is not None and desc.text:
+                item_data["description"] = desc.text
+            
+            # Seller's Item ID
+            sellers_id = item.find('.//cac:SellersItemIdentification', namespaces)
+            if sellers_id is not None:
+                id_val = sellers_id.find('.//cbc:ID', namespaces) or sellers_id.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}ID')
+                if id_val is not None and id_val.text:
+                    item_data["code"] = id_val.text
+            
+            # VAT category
+            tax = item.find('.//cac:ClassifiedTaxCategory', namespaces) or item.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}ClassifiedTaxCategory')
+            if tax is not None:
+                percent = tax.find('.//cbc:Percent', namespaces) or tax.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Percent')
+                if percent is not None and percent.text:
+                    try:
+                        item_data["vat_percent"] = float(percent.text.replace(',', '.'))
+                    except ValueError:
+                        pass
+        
+        # Price
+        price = line.find('.//cac:Price', namespaces) or line.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}Price')
+        if price is not None:
+            price_amt = price.find('.//cbc:PriceAmount', namespaces) or price.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}PriceAmount')
+            if price_amt is not None and price_amt.text:
+                try:
+                    item_data["unit_price"] = float(price_amt.text.replace(',', '.'))
+                except ValueError:
+                    pass
+        
+        # Calculate total with VAT
+        if item_data["pre_discount_value"] > 0:
+            vat_amount = item_data["pre_discount_value"] * (item_data["vat_percent"] / 100)
+            item_data["total_value"] = round(item_data["pre_discount_value"] + vat_amount, 2)
+        
+        if item_data["description"]:
+            data["items"].append(item_data)
+    
+    # Calculate totals
+    if data["items"]:
+        data["net_total"] = round(sum(i["pre_discount_value"] for i in data["items"]), 2)
+        data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
+        data["vat_total"] = round(data["total"] - data["net_total"], 2)
+    
+    # Try to get totals from LegalMonetaryTotal
+    monetary = invoice.find('.//cac:LegalMonetaryTotal', namespaces) or invoice.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}LegalMonetaryTotal')
+    if monetary is not None:
+        payable = monetary.find('.//cbc:PayableAmount', namespaces) or monetary.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}PayableAmount')
+        if payable is not None and payable.text:
+            try:
+                data["total"] = float(payable.text.replace(',', '.'))
+            except ValueError:
+                pass
+        
+        tax_excl = monetary.find('.//cbc:TaxExclusiveAmount', namespaces) or monetary.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}TaxExclusiveAmount')
+        if tax_excl is not None and tax_excl.text:
+            try:
+                data["net_total"] = float(tax_excl.text.replace(',', '.'))
+            except ValueError:
+                pass
+    
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
+    
+    return data
+
+
+async def fetch_peppol_invoice(url: str) -> str:
+    """Fetch PEPPOL invoice - first get the iframe, then fetch the HTML content.
+    
+    Note: PEPPOL URLs from e-invoicing.gr return HTML (not raw XML) when isPreview=True,
+    which is what the iframe contains. The HTML structure is similar to Entersoft format.
+    """
+    html = await fetch_html(url)
+    soup = BeautifulSoup(html, 'lxml')
+    
+    # Find iframe
+    iframe = soup.find('iframe', id='iframeContent')
+    if not iframe or not iframe.get('src'):
+        raise HTTPException(status_code=400, detail="Could not find invoice iframe in page")
+    
+    iframe_src = iframe['src']
+    if iframe_src.startswith('/'):
+        iframe_src = 'https://e-invoicing.gr' + iframe_src
+    
+    # Add isPreview=True if not present (ensures HTML format)
+    if 'isPreview' not in iframe_src:
+        iframe_src += '&isPreview=True'
+    
+    # Fetch the HTML content
+    return await fetch_html(iframe_src)
+
+
+
+def parse_peppol_html(html: str, source_url: str) -> dict:
+    """Parse PEPPOL HTML (rendered preview from e-invoicing.gr).
+    
+    The HTML structure is similar to Entersoft but with some differences:
+    - Store name in BoldBlueHeader div
+    - VAT after store name in format "Α.Φ.Μ: XXXXXXXXX"
+    - Products in table with classes table, table-sm, etc.
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    data = {
+        "store_name": "",
+        "store_address": "",
+        "store_vat": "",
+        "receipt_number": "",
+        "date": "",
+        "payment_method": "",
+        "items": [],
+        "subtotal": 0.0,
+        "discount_total": 0.0,
+        "total": 0.0,
+        "vat_total": 0.0,
+        "net_total": 0.0,
+        "source_url": source_url,
+        "source_type": "peppol",
+        "provider": "PEPPOL (e-invoicing.gr)"
+    }
+    
+    # Store name from BoldBlueHeader
+    header = soup.find('div', class_='BoldBlueHeader')
+    if header:
+        data["store_name"] = header.get_text(strip=True)
+    
+    # VAT and other info
+    for div in soup.find_all('div'):
+        txt = div.get_text(strip=True)
+        if 'Α.Φ.Μ:' in txt:
+            match = re.search(r'Α\.Φ\.Μ:\s*(\d+)', txt)
+            if match:
+                data["store_vat"] = match.group(1)
+        elif 'Αρ. Παραστατικού' in txt or 'Αρ. Τιμολ' in txt:
+            # Try to extract receipt number
+            match = re.search(r'[\d]+$', txt.split(':')[-1].strip() if ':' in txt else txt)
+            if match:
+                data["receipt_number"] = match.group(0)
+        elif 'Ημ/νία' in txt and not data["date"]:
+            # Try to extract date
+            match = re.search(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})', txt)
+            if match:
+                data["date"] = match.group(1)
+    
+    # Address - look for specific patterns
+    for div in soup.find_all('div', class_='fontSize8pt'):
+        txt = div.get_text(strip=True)
+        # Look for address patterns (contains comma and numbers but not VAT)
+        if txt and ',' in txt and any(c.isdigit() for c in txt) and 'Α.Φ.Μ' not in txt:
+            if not data["store_address"] or len(txt) < len(data["store_address"]):
+                data["store_address"] = txt
+                break
+    
+    # Parse products table
+    table = soup.find('table', class_='table')
+    if table:
+        tbody = table.find('tbody')
+        if tbody:
+            for row in tbody.find_all('tr'):
+                cells = row.find_all('td')
+                if len(cells) >= 9:
+                    item = {
+                        "code": cells[0].get_text(strip=True),
+                        "description": cells[1].get_text(strip=True),
+                        "unit": cells[2].get_text(strip=True),
+                        "quantity": parse_greek_number(cells[3].get_text(strip=True)),
+                        "unit_price": parse_greek_number(cells[4].get_text(strip=True)),
+                        "pre_discount_value": parse_greek_number(cells[5].get_text(strip=True)),
+                        "discount": parse_greek_number(cells[6].get_text(strip=True)),
+                        "vat_percent": parse_greek_number(cells[7].get_text(strip=True).replace('%', '')),
+                        "total_value": parse_greek_number(cells[8].get_text(strip=True)),
+                    }
+                    if item["description"]:  # Only add if has description
+                        data["items"].append(item)
+    
+    # Calculate totals from items
+    if data["items"]:
+        data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
+        data["net_total"] = round(sum(i["pre_discount_value"] for i in data["items"]), 2)
+        data["vat_total"] = round(data["total"] - data["net_total"], 2)
+        data["discount_total"] = round(sum(i["discount"] for i in data["items"]), 2)
+    
+    # Try to find explicit total from page (look for ΤΕΛΙΚΗ ΑΞΙΑ or similar)
+    for div in soup.find_all('div'):
+        txt = div.get_text(strip=True)
+        if 'ΤΕΛΙΚΗ ΑΞΙΑ' in txt or 'ΣΥΝΟΛΟ ΠΛΗΡΩΤΕΟ' in txt:
+            # Look for the value in next sibling or same line
+            next_div = div.find_next_sibling('div')
+            if next_div:
+                val = parse_greek_number(next_div.get_text(strip=True))
+                if val > 0:
+                    data["total"] = val
+    
+    # Use clean store name (VAT mapping or keyword detection)
+    data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
+    
+    return data
 
 
 def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str, found_final_total: float = 0.0) -> dict:
@@ -1060,7 +1417,8 @@ async def login(request: UserLoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     # Get or create device_id for user
-    user_device_id = user.get("device_id")
+    # Use client's device_id if provided, otherwise generate or use existing
+    user_device_id = request.device_id or user.get("device_id")
     if not user_device_id:
         user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
     
@@ -1535,8 +1893,28 @@ async def refresh_token(refresh_token: str = Body(..., embed=True)):
 
 
 @api_router.get("/auth/me")
-async def get_me(user: dict = Depends(get_current_user)):
-    """Get current user profile."""
+async def get_me(
+    user: dict = Depends(get_current_user),
+    device_id: Optional[str] = Query(None)
+):
+    """Get current user profile. Optionally link device_id to user."""
+    
+    # If device_id provided, link it to this user
+    if device_id:
+        current_device = user.get("device_id")
+        if current_device != device_id:
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"device_id": device_id}}
+            )
+            # Also update devices collection
+            await db.devices.update_one(
+                {"device_id": device_id},
+                {"$set": {"user_email": user["email"], "user_id": user["_id"], "linked_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True
+            )
+            logger.info(f"[auth/me] Auto-linked device {device_id} to user {user['email']}")
+    
     # Check subscription status
     account_type = user.get("account_type", "free")
     subscription_expires = user.get("subscription_expires_at")
@@ -1578,6 +1956,209 @@ async def logout(user: dict = Depends(get_current_user)):
     """Logout current user."""
     # In production, you might want to blacklist the token
     return {"success": True, "message": "Logged out successfully"}
+
+
+# ============ FORGOT PASSWORD ============
+
+def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"):
+    """Send password reset email via Gmail SMTP."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        logger.error("SMTP credentials not configured")
+        raise HTTPException(status_code=500, detail="Email service not configured")
+    
+    # Create reset link (deep link for mobile app)
+    reset_link = f"apodixxi://reset-password?token={reset_token}"
+    web_reset_link = f"https://apodixxi.gr/reset-password?token={reset_token}"
+    
+    subject = f"{app_name} - Επαναφορά Κωδικού"
+    
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
+            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }}
+            .button {{ display: inline-block; background: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+            .code {{ background: #e0e0e0; padding: 10px 20px; font-family: monospace; font-size: 18px; border-radius: 4px; display: inline-block; }}
+            .footer {{ text-align: center; color: #666; font-size: 12px; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🧾 {app_name}</h1>
+            </div>
+            <div class="content">
+                <h2>Επαναφορά Κωδικού Πρόσβασης</h2>
+                <p>Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.</p>
+                
+                <p>Πατήστε το παρακάτω κουμπί για να ορίσετε νέο κωδικό:</p>
+                
+                <p style="text-align: center;">
+                    <a href="{web_reset_link}" class="button">Επαναφορά Κωδικού</a>
+                </p>
+                
+                <p>Ή αντιγράψτε αυτόν τον κωδικό στην εφαρμογή:</p>
+                <p style="text-align: center;">
+                    <span class="code">{reset_token}</span>
+                </p>
+                
+                <p><strong>Σημείωση:</strong> Ο κωδικός λήγει σε 1 ώρα.</p>
+                
+                <p>Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.</p>
+            </div>
+            <div class="footer">
+                <p>© 2025 {app_name} - Η εφαρμογή παρακολούθησης αποδείξεων</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    text_body = f"""
+    Επαναφορά Κωδικού Πρόσβασης - {app_name}
+    
+    Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.
+    
+    Κωδικός επαναφοράς: {reset_token}
+    
+    Link επαναφοράς: {web_reset_link}
+    
+    Ο κωδικός λήγει σε 1 ώρα.
+    
+    Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.
+    """
+    
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = SMTP_FROM
+    msg['To'] = to_email
+    
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+    
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, to_email, msg.as_string())
+        logger.info(f"Reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send reset email: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send reset email")
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Request password reset email."""
+    email = request.email.lower().strip()
+    
+    # Check if user exists
+    user = await db.users.find_one({"email": email})
+    if not user:
+        # Don't reveal if email exists or not (security)
+        return {"success": True, "message": "If this email exists, a reset link has been sent"}
+    
+    # Check if user registered with social auth (can't reset password)
+    if user.get("auth_provider") in ["google", "apple", "phone"]:
+        raise HTTPException(
+            status_code=400, 
+            detail="This account uses social login. Please sign in with Google/Apple."
+        )
+    
+    # Generate reset token (6 characters, uppercase)
+    reset_token = uuid.uuid4().hex[:6].upper()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    
+    # Store reset token
+    await db.password_resets.delete_many({"email": email})  # Remove old tokens
+    await db.password_resets.insert_one({
+        "email": email,
+        "token": reset_token,
+        "expires_at": expires_at.isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "used": False
+    })
+    
+    # Send email
+    try:
+        send_reset_email(email, reset_token)
+    except Exception as e:
+        logger.error(f"Failed to send reset email: {e}")
+        # Still return success to not reveal email existence
+    
+    return {"success": True, "message": "If this email exists, a reset link has been sent"}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """Reset password using token from email."""
+    token = request.token.upper().strip()
+    new_password = request.new_password
+    
+    # Validate password
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    # Find valid token
+    reset_doc = await db.password_resets.find_one({
+        "token": token,
+        "used": False
+    })
+    
+    if not reset_doc:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+    
+    # Check expiration
+    expires_at = datetime.fromisoformat(reset_doc["expires_at"].replace('Z', '+00:00'))
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=400, detail="Reset code has expired")
+    
+    # Update password
+    email = reset_doc["email"]
+    hashed_password = hash_password(new_password)
+    
+    result = await db.users.update_one(
+        {"email": email},
+        {"$set": {"password": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="Failed to update password")
+    
+    # Mark token as used
+    await db.password_resets.update_one(
+        {"_id": reset_doc["_id"]},
+        {"$set": {"used": True}}
+    )
+    
+    logger.info(f"Password reset successful for {email}")
+    return {"success": True, "message": "Password has been reset successfully"}
+
+
+@api_router.post("/auth/verify-reset-token")
+async def verify_reset_token(token: str = Body(..., embed=True)):
+    """Verify if a reset token is valid (for UI validation)."""
+    token = token.upper().strip()
+    
+    reset_doc = await db.password_resets.find_one({
+        "token": token,
+        "used": False
+    })
+    
+    if not reset_doc:
+        return {"valid": False, "message": "Invalid reset code"}
+    
+    expires_at = datetime.fromisoformat(reset_doc["expires_at"].replace('Z', '+00:00'))
+    if datetime.now(timezone.utc) > expires_at:
+        return {"valid": False, "message": "Reset code has expired"}
+    
+    return {"valid": True, "email": reset_doc["email"]}
 
 
 # ============ PROMO CODES ============
@@ -1650,6 +2231,68 @@ async def apply_promo_code(request: PromoCodeRequest, user: dict = Depends(get_c
         "message": f"Promo code applied! You have {duration_days} days of premium access.",
         "account_type": "paid",
         "subscription_expires_at": new_expires.isoformat()
+    }
+
+
+@api_router.get("/subscription/status")
+async def get_subscription_status(device_id: str = Query(None), authorization: str = Header(None)):
+    """Get user subscription status. Returns free/premium status and expiry date."""
+    
+    user = None
+    
+    # Try to get user from JWT token first
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                user = await db.users.find_one({"_id": user_id})
+        except:
+            pass
+    
+    # Fallback to device_id
+    if not user and device_id:
+        user = await db.users.find_one({"device_id": device_id})
+    
+    if not user:
+        return {
+            "account_type": "free",
+            "is_premium": False,
+            "subscription_expires_at": None,
+            "days_remaining": None,
+            "app_name": "apodixxi"
+        }
+    
+    account_type = user.get("account_type", "free")
+    subscription_expires = user.get("subscription_expires_at")
+    
+    is_premium = False
+    days_remaining = None
+    
+    if account_type == "paid" and subscription_expires:
+        try:
+            expires_dt = datetime.fromisoformat(subscription_expires.replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            if expires_dt > now:
+                is_premium = True
+                days_remaining = (expires_dt - now).days
+            else:
+                # Subscription expired, downgrade to free
+                await db.users.update_one(
+                    {"_id": user["_id"]},
+                    {"$set": {"account_type": "free"}}
+                )
+                account_type = "free"
+        except:
+            pass
+    
+    return {
+        "account_type": account_type,
+        "is_premium": is_premium,
+        "subscription_expires_at": subscription_expires,
+        "days_remaining": days_remaining,
+        "app_name": "apodixxi+" if is_premium else "apodixxi"
     }
 
 
@@ -2361,20 +3004,113 @@ async def track_recommendation_view(rec_id: str):
 
 
 @api_router.post("/devices/register")
-async def register_device(input: DeviceRegister):
+async def register_device(
+    input: DeviceRegister,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # Try to get user from JWT token
+    user_email = ""
+    user_id = None
+    if credentials and credentials.credentials:
+        try:
+            payload = verify_token(credentials.credentials)
+            user_email = payload.get("email", "")
+            user_id = payload.get("sub")
+            logger.info(f"[devices/register] User authenticated: {user_email}")
+        except Exception as e:
+            logger.debug(f"[devices/register] No valid token: {e}")
+    
     existing = await db.devices.find_one({"device_id": input.device_id}, {"_id": 0})
     if existing:
-        await db.devices.update_one({"device_id": input.device_id}, {"$set": {"language": input.language, "last_seen": datetime.now(timezone.utc).isoformat()}})
+        update_data = {"language": input.language, "last_seen": datetime.now(timezone.utc).isoformat()}
+        if user_email:
+            update_data["user_email"] = user_email
+        if user_id:
+            update_data["user_id"] = user_id
+        await db.devices.update_one({"device_id": input.device_id}, {"$set": update_data})
+        
+        # Also update user's device_id if authenticated
+        if user_email:
+            await db.users.update_one(
+                {"email": user_email.lower()},
+                {"$set": {"device_id": input.device_id}}
+            )
+            logger.info(f"[devices/register] Linked device {input.device_id} to user {user_email}")
+        
         return {"status": "updated", "device_id": input.device_id}
-    doc = {"device_id": input.device_id, "language": input.language, "created_at": datetime.now(timezone.utc).isoformat(), "last_seen": datetime.now(timezone.utc).isoformat()}
+    
+    doc = {
+        "device_id": input.device_id,
+        "language": input.language,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_seen": datetime.now(timezone.utc).isoformat()
+    }
+    if user_email:
+        doc["user_email"] = user_email
+    if user_id:
+        doc["user_id"] = user_id
     await db.devices.insert_one(doc)
+    
+    # Also update user's device_id if authenticated
+    if user_email:
+        await db.users.update_one(
+            {"email": user_email.lower()},
+            {"$set": {"device_id": input.device_id}}
+        )
+        logger.info(f"[devices/register] Linked device {input.device_id} to user {user_email}")
+    
     return {"status": "registered", "device_id": input.device_id}
 
 
 @api_router.post("/receipts/import-url")
-async def import_receipt_from_url(input: URLImportInput):
+async def import_receipt_from_url(
+    input: URLImportInput,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
     url = input.url.strip()
     provider = detect_provider(url)
+    
+    # Extract user email from JWT token if provided
+    user_email = ""
+    if credentials and credentials.credentials:
+        logger.info(f"[import-url] Token received: {credentials.credentials[:20]}...")
+        try:
+            payload = verify_token(credentials.credentials)
+            user_email = payload.get("email", "")
+            logger.info(f"[import-url] Extracted email from token: {user_email}")
+        except Exception as e:
+            logger.warning(f"[import-url] Token verification failed: {e}")
+    
+    # FALLBACK: If no token, try to get email from device_id lookup
+    if not user_email and input.device_id:
+        # First try direct device_id match
+        user_doc = await db.users.find_one({"device_id": input.device_id})
+        if user_doc:
+            user_email = user_doc.get("email", "")
+            logger.info(f"[import-url] Fallback: Found email from device_id: {user_email}")
+        else:
+            # Try to find user by matching device association (check devices collection)
+            device_doc = await db.devices.find_one({"device_id": input.device_id})
+            if device_doc and device_doc.get("user_id"):
+                user_doc = await db.users.find_one({"_id": device_doc.get("user_id")})
+                if user_doc:
+                    user_email = user_doc.get("email", "")
+                    logger.info(f"[import-url] Fallback: Found email via devices collection: {user_email}")
+            
+            # If still no email, check if this device_id has any previous receipts with user info
+            if not user_email:
+                recent_receipt = await db.receipts.find_one(
+                    {"device_id": input.device_id, "user_email": {"$ne": "", "$exists": True}},
+                    sort=[("created_at", -1)]
+                )
+                if recent_receipt and recent_receipt.get("user_email"):
+                    user_email = recent_receipt.get("user_email")
+                    logger.info(f"[import-url] Fallback: Found email from previous receipt: {user_email}")
+            
+            if not user_email:
+                logger.warning(f"[import-url] No user found for device_id: {input.device_id}")
+    
+    logger.info(f"[import-url] Processing URL: {url[:50]}... | user_email: {user_email}")
 
     if provider == 'epsilon_digital':
         # Check for duplicates even for epsilon digital
@@ -2408,6 +3144,10 @@ async def import_receipt_from_url(input: URLImportInput):
     if provider == 'entersoft':
         html = await fetch_entersoft_invoice(url)
         receipt_data = parse_entersoft(html, url)
+    elif provider == 'peppol':
+        # PEPPOL URLs return HTML (like Entersoft) when isPreview=True is added
+        html_content = await fetch_peppol_invoice(url)
+        receipt_data = parse_peppol_html(html_content, url)
     elif provider == 'impact':
         html = await fetch_html(url)
         receipt_data = parse_impact(html, url)
@@ -2417,11 +3157,15 @@ async def import_receipt_from_url(input: URLImportInput):
     if not receipt_data["items"]:
         raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
 
+    # Add user_email and receipt_url to receipt data
+    receipt_data["user_email"] = user_email
+    receipt_data["receipt_url"] = url
+    
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    # Index products
+    # Index products with user_email
     for item in receipt_data["items"]:
         await db.products.update_one(
             {"description": item["description"], "store_name": receipt_data["store_name"]},
@@ -2434,6 +3178,7 @@ async def import_receipt_from_url(input: URLImportInput):
                 "last_unit_price": item["unit_price"],
                 "last_date": receipt_data["date"],
                 "unit": item["unit"],
+                "user_email": user_email,  # Track which user added this product
                 "vat_percent": item["vat_percent"],
                 "updated_at": datetime.now(timezone.utc).isoformat()
             },
@@ -2654,7 +3399,32 @@ async def compare_product_prices(q: str = Query(..., min_length=2)):
 
 
 @api_router.get("/stats")
-async def get_stats(device_id: str = Query(...)):
+async def get_stats(
+    device_id: str = Query(...),
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    # If user is authenticated, auto-link device to user
+    if credentials and credentials.credentials:
+        try:
+            payload = verify_token(credentials.credentials)
+            user_email = payload.get("email", "")
+            user_id = payload.get("sub")
+            if user_email:
+                # Update user's device_id
+                await db.users.update_one(
+                    {"email": user_email.lower()},
+                    {"$set": {"device_id": device_id}}
+                )
+                # Update devices collection
+                await db.devices.update_one(
+                    {"device_id": device_id},
+                    {"$set": {"user_email": user_email, "user_id": user_id, "linked_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True
+                )
+                logger.info(f"[stats] Auto-linked device {device_id} to user {user_email}")
+        except Exception:
+            pass  # Token invalid, just continue without linking
+    
     total_receipts = await db.receipts.count_documents({"device_id": device_id})
     total_products = await db.products.count_documents({})
 
@@ -3080,13 +3850,16 @@ async def get_all_receipts(
     for r in receipts_cursor:
         if "_id" in r:
             r["_id"] = str(r["_id"])
-        # Add user info
+        # Add user info (prefer direct user_email from receipt, fallback to lookup)
         device_id = r.get("device_id", "")
         user_info = user_map.get(device_id, {})
-        r["user_email"] = user_info.get("email", "")
+        # Use user_email from receipt if available, otherwise lookup
+        r["user_email"] = r.get("user_email") or user_info.get("email", "")
         r["user_phone"] = user_info.get("phone", "")
         r["user_name"] = user_info.get("name", "")
         r["auth_provider"] = user_info.get("auth_provider", "")
+        # Ensure receipt_url is included
+        r["receipt_url"] = r.get("receipt_url") or r.get("source_url", "")
         receipts.append(r)
     
     return {
@@ -3126,8 +3899,8 @@ async def export_all_receipts_excel(
     ws_receipts = wb.active
     ws_receipts.title = "Αποδείξεις"
     
-    # Headers for receipts - UPDATED with more user details
-    receipt_headers = ["ID Απόδειξης", "Device ID", "Email Χρήστη", "Τηλέφωνο", "Τρόπος Σύνδεσης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων"]
+    # Headers for receipts - UPDATED with more user details and receipt URL
+    receipt_headers = ["ID Απόδειξης", "Device ID", "Email Χρήστη", "Τηλέφωνο", "Τρόπος Σύνδεσης", "Κατάστημα", "ΑΦΜ Καταστήματος", "Ημερομηνία", "Σύνολο €", "Τρόπος Πληρωμής", "Αρ. Προϊόντων", "Receipt URL"]
     
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="0D9488", end_color="0D9488", fill_type="solid")
@@ -3171,9 +3944,13 @@ async def export_all_receipts_excel(
         device_id = receipt.get("device_id", "")
         user_info = device_user_map.get(device_id, {})
         
+        # Use user_email from receipt if available, otherwise lookup
+        user_email = receipt.get("user_email") or user_info.get("email", "Ανώνυμος")
+        receipt_url = receipt.get("receipt_url") or receipt.get("source_url", "")
+        
         ws_receipts.cell(row=row, column=1, value=str(receipt.get("id", receipt.get("_id", ""))))
         ws_receipts.cell(row=row, column=2, value=device_id)
-        ws_receipts.cell(row=row, column=3, value=user_info.get("email", "Ανώνυμος"))
+        ws_receipts.cell(row=row, column=3, value=user_email)
         ws_receipts.cell(row=row, column=4, value=user_info.get("phone", "-"))
         ws_receipts.cell(row=row, column=5, value=auth_provider_names.get(user_info.get("auth_provider", "unknown"), "Άγνωστο"))
         ws_receipts.cell(row=row, column=6, value=receipt.get("store_name", ""))
@@ -3182,9 +3959,10 @@ async def export_all_receipts_excel(
         ws_receipts.cell(row=row, column=9, value=receipt.get("total", 0))
         ws_receipts.cell(row=row, column=10, value=receipt.get("payment_method", ""))
         ws_receipts.cell(row=row, column=11, value=len(receipt.get("items", [])))
+        ws_receipts.cell(row=row, column=12, value=receipt_url)
     
     # Adjust column widths for receipts sheet
-    col_widths_receipts = [22, 18, 30, 15, 18, 20, 15, 12, 12, 15, 12]
+    col_widths_receipts = [22, 18, 30, 15, 18, 20, 15, 12, 12, 15, 12, 60]
     for col, width in enumerate(col_widths_receipts, 1):
         ws_receipts.column_dimensions[get_column_letter(col)].width = width
     
@@ -3307,6 +4085,50 @@ async def get_all_users_detailed(
         "skip": skip,
         "limit": limit
     }
+
+
+@api_router.post("/admin/link-device")
+async def link_device_to_user(
+    email: str = Query(...),
+    device_id: str = Query(...),
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
+    """Manually link a device_id to a user (Admin only). Use this to fix device-user associations."""
+    # Verify admin access
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    # Find user by email
+    user = await db.users.find_one({"email": email.lower()})
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User not found: {email}")
+    
+    # Update user's device_id
+    await db.users.update_one(
+        {"email": email.lower()},
+        {"$set": {"device_id": device_id}}
+    )
+    
+    # Also update/create device record
+    await db.devices.update_one(
+        {"device_id": device_id},
+        {"$set": {"user_email": email.lower(), "linked_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True
+    )
+    
+    logger.info(f"[admin/link-device] Linked device {device_id} to user {email}")
+    
+    return {
+        "status": "success",
+        "message": f"Device {device_id} linked to user {email}",
+        "user_id": str(user.get("_id")),
+        "email": email
+    }
+
 
 @api_router.get("/admin/products/existing")
 async def get_existing_products(
@@ -3883,7 +4705,7 @@ async def admin_dashboard():
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>ID</th><th>Email</th><th>Τηλέφωνο</th><th>Τρόπος Σύνδεσης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th></tr></thead>
+                            <thead><tr><th>ID</th><th>Email</th><th>Τηλέφωνο</th><th>Τρόπος Σύνδεσης</th><th>Κατάστημα</th><th>Ημερομηνία</th><th>Σύνολο</th><th>Προϊόντα</th><th>Receipt URL</th></tr></thead>
                             <tbody id="receiptsTable"></tbody>
                         </table>
                     </div>
@@ -4227,6 +5049,7 @@ async def admin_dashboard():
                         <td>${r.date || '-'}</td>
                         <td><strong>€${(r.total || 0).toFixed(2)}</strong></td>
                         <td>${(r.items || []).length}</td>
+                        <td>${r.receipt_url ? `<a href="${r.receipt_url}" target="_blank" class="btn btn-secondary" style="padding:2px 8px;font-size:12px;">Άνοιγμα</a>` : '-'}</td>
                     </tr>
                 `).join('');
                 
@@ -4685,18 +5508,147 @@ def send_admin_notification(subject: str, body: str):
 
 
 # ============ AI INTEGRATION WITH GEMINI ============
-# NOTE: AI features disabled for Coolify deployment (missing emergentintegrations)
 
+# Gemini API Configuration
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 AI_AVAILABLE = False
-LlmChat = None
-UserMessage = None
-try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    AI_AVAILABLE = True
-except ImportError:
-    pass
+genai_client = None
 
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+try:
+    from google import genai
+    from google.genai import types
+    if GEMINI_API_KEY:
+        genai_client = genai.Client(api_key=GEMINI_API_KEY)
+        AI_AVAILABLE = True
+        logger.info("Gemini AI enabled successfully with google.genai")
+    else:
+        logger.warning("GEMINI_API_KEY not set - AI features disabled")
+except ImportError as e:
+    logger.warning(f"google-genai not installed, trying google-generativeai: {e}")
+    try:
+        import google.generativeai as genai_module
+        if GEMINI_API_KEY:
+            genai_module.configure(api_key=GEMINI_API_KEY)
+            AI_AVAILABLE = True
+            logger.info("Gemini AI enabled with legacy google.generativeai")
+    except ImportError:
+        logger.warning("No Gemini AI package available")
+except Exception as e:
+    logger.warning(f"AI features disabled: {e}")
+
+# Master Categories for AI Classification
+MASTER_CATEGORIES = [
+    "Τρόφιμα & Ποτά",
+    "Προσωπική Φροντίδα",
+    "Καθαριότητα & Σπίτι",
+    "Βρεφικά Είδη",
+    "Κατοικίδια",
+    "Είδη Bazaar / Σπιτιού",
+    "Άλλο"
+]
+
+async def generate_ai_content(prompt: str) -> str:
+    """Generate content using Gemini AI."""
+    if not AI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="AI service not available")
+    
+    try:
+        if genai_client:
+            # New google.genai API
+            response = genai_client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
+            return response.text
+        else:
+            # Legacy google.generativeai API
+            import google.generativeai as genai_module
+            model = genai_module.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            return response.text
+    except Exception as e:
+        logger.error(f"Gemini AI error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
+
+async def classify_product_with_ai(product_name: str, store_name: str = "") -> str:
+    """Classify a product into one of the master categories using Gemini AI."""
+    if not AI_AVAILABLE:
+        return "Άλλο"
+    
+    try:
+        prompt = f"""Κατηγοριοποίησε το παρακάτω προϊόν supermarket σε ΜΙΑ από τις εξής κατηγορίες:
+1. Τρόφιμα & Ποτά (Γαλακτοκομικά, Αλλαντικά, Κρεοπωλείο, Μαναβική, Κατεψυγμένα, Σνακ, Ποτά/Αναψυκτικά)
+2. Προσωπική Φροντίδα (Σαμπουάν, Αφρόλουτρα, Στοματική Υγιεινή, Καλλυντικά)
+3. Καθαριότητα & Σπίτι (Απορρυπαντικά, Χαρτικά, Εργαλεία καθαρισμού)
+4. Βρεφικά Είδη (Πάνες, Βρεφικές Τροφές)
+5. Κατοικίδια (Τροφές ζώων, Άμμος γάτας)
+6. Είδη Bazaar / Σπιτιού (Κουζινικά, Ηλεκτρικές συσκευές, Ένδυση)
+7. Άλλο
+
+Προϊόν: {product_name}
+{f'Κατάστημα: {store_name}' if store_name else ''}
+
+Απάντησε ΜΟΝΟ με το όνομα της κατηγορίας, χωρίς εξηγήσεις."""
+
+        response_text = await generate_ai_content(prompt)
+        category = response_text.strip()
+        
+        # Validate response is one of our categories
+        for master_cat in MASTER_CATEGORIES:
+            if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
+                return master_cat
+        
+        return "Άλλο"
+    except Exception as e:
+        logger.error(f"AI classification error: {e}")
+        return "Άλλο"
+
+async def batch_classify_products(products: list) -> dict:
+    """Classify multiple products in a single AI call for efficiency."""
+    if not AI_AVAILABLE or not products:
+        return {p: "Άλλο" for p in products}
+    
+    try:
+        products_list = "\n".join([f"- {p}" for p in products[:50]])  # Limit to 50 products
+        
+        prompt = f"""Κατηγοριοποίησε τα παρακάτω προϊόντα supermarket. Για κάθε προϊόν, δώσε ΜΙΑ από τις κατηγορίες:
+- Τρόφιμα & Ποτά
+- Προσωπική Φροντίδα
+- Καθαριότητα & Σπίτι
+- Βρεφικά Είδη
+- Κατοικίδια
+- Είδη Bazaar / Σπιτιού
+- Άλλο
+
+Προϊόντα:
+{products_list}
+
+Απάντησε σε μορφή JSON: {{"product_name": "category", ...}}
+Μόνο JSON, χωρίς εξηγήσεις."""
+
+        response_text = await generate_ai_content(prompt)
+        
+        # Try to parse JSON response
+        import re
+        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            # Validate categories
+            validated = {}
+            for product, category in result.items():
+                matched = False
+                for master_cat in MASTER_CATEGORIES:
+                    if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
+                        validated[product] = master_cat
+                        matched = True
+                        break
+                if not matched:
+                    validated[product] = "Άλλο"
+            return validated
+        return {p: "Άλλο" for p in products}
+    except Exception as e:
+        logger.error(f"Batch AI classification error: {e}")
+        return {p: "Άλλο" for p in products}
 
 class AIInsightRequest(BaseModel):
     device_id: str
@@ -4715,7 +5667,7 @@ class AIRecommendationRequest(BaseModel):
 @api_router.post("/ai/insights")
 async def get_ai_insights(request: AIInsightRequest):
     """Get AI-powered insights about user's shopping habits."""
-    if not AI_AVAILABLE or not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=503, detail="AI service not available")
     
     # Fetch user's receipt data
@@ -4776,17 +5728,10 @@ async def get_ai_insights(request: AIInsightRequest):
 Προτείνε 3-5 προϊόντα με βάση τις αγοραστικές του συνήθειες."""
     
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"insights_{request.device_id}_{request.insight_type}",
-            system_message="Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων. Δίνεις σύντομες, πρακτικές συμβουλές στα ελληνικά."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
+        response_text = await generate_ai_content(prompt)
         
         return {
-            "insight": response,
+            "insight": response_text.strip(),
             "stats": {
                 "total_receipts": len(receipts),
                 "total_spent": round(total_spent, 2),
@@ -4802,7 +5747,7 @@ async def get_ai_insights(request: AIInsightRequest):
 @api_router.post("/ai/chat")
 async def ai_chat(request: AIChatRequest):
     """Chat with AI assistant about shopping habits."""
-    if not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
     # Fetch user's receipt data for context
@@ -4822,33 +5767,30 @@ async def ai_chat(request: AIChatRequest):
     session_id = request.session_id or f"chat_{request.device_id}_{uuid.uuid4().hex[:8]}"
     
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=f"""Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
+        system_prompt = f"""Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
 Απαντάς πάντα στα ελληνικά, σύντομα και φιλικά.
 {context}
 Μπορείς να βοηθήσεις με ερωτήσεις σχετικά με:
 - Έξοδα και στατιστικά αγορών
 - Συμβουλές εξοικονόμησης
 - Σύγκριση τιμών μεταξύ καταστημάτων
-- Προτάσεις προϊόντων"""
-        ).with_model("gemini", "gemini-2.5-flash")
+- Προτάσεις προϊόντων
+
+Χρήστης: {request.message}"""
         
-        user_message = UserMessage(text=request.message)
-        response = await chat.send_message(user_message)
+        response_text = await generate_ai_content(system_prompt)
         
         # Store chat message in database
         await db.ai_chats.insert_one({
             "device_id": request.device_id,
             "session_id": session_id,
             "user_message": request.message,
-            "ai_response": response,
+            "ai_response": response_text,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         
         return {
-            "response": response,
+            "response": response_text,
             "session_id": session_id
         }
     except Exception as e:
@@ -4859,7 +5801,7 @@ async def ai_chat(request: AIChatRequest):
 @api_router.post("/ai/smart-recommendations")
 async def get_ai_recommendations(request: AIRecommendationRequest):
     """Get AI-powered product recommendations based on shopping history."""
-    if not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
     # Fetch user's purchase history
@@ -4901,20 +5843,13 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
 Παράδειγμα: [{{"title": "Γάλα σε προσφορά", "description": "Αγοράζετε συχνά γάλα - δείτε προσφορές", "reason": "Βασισμένο στις αγορές σας"}}]"""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"recs_{request.device_id}",
-            system_message="Είσαι ένας έξυπνος βοηθός αγορών. Απαντάς ΜΟΝΟ με valid JSON, χωρίς markdown."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
+        system_prompt = "Είσαι ένας έξυπνος βοηθός αγορών. Απαντάς ΜΟΝΟ με valid JSON, χωρίς markdown.\n\n" + prompt
+        response_text = await generate_ai_content(system_prompt)
         
         # Try to parse JSON response
-        import json
         try:
             # Clean up response if it has markdown
-            clean_response = response.strip()
+            clean_response = response_text.strip()
             if clean_response.startswith("```"):
                 clean_response = clean_response.split("```")[1]
                 if clean_response.startswith("json"):
@@ -4922,7 +5857,7 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
             recommendations = json.loads(clean_response)
         except:
             # If JSON parsing fails, return as text
-            recommendations = [{"title": "AI Προτάσεις", "description": response, "reason": "AI-generated"}]
+            recommendations = [{"title": "AI Προτάσεις", "description": response_text, "reason": "AI-generated"}]
         
         return {
             "recommendations": recommendations[:request.limit],
@@ -4937,7 +5872,7 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
 @api_router.get("/ai/weekly-summary")
 async def get_weekly_summary(device_id: str):
     """Get AI-generated weekly shopping summary."""
-    if not EMERGENT_LLM_KEY:
+    if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
     # Get receipts from last 7 days
@@ -4980,17 +5915,11 @@ async def get_weekly_summary(device_id: str):
 3. Μια συμβουλή εξοικονόμησης"""
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"weekly_{device_id}",
-            system_message="Είσαι φιλικός οικονομικός σύμβουλος. Δίνεις σύντομες, χρήσιμες συμβουλές στα ελληνικά."
-        ).with_model("gemini", "gemini-2.5-flash")
-        
-        user_message = UserMessage(text=prompt)
-        response = await chat.send_message(user_message)
+        system_prompt = "Είσαι φιλικός οικονομικός σύμβουλος. Δίνεις σύντομες, χρήσιμες συμβουλές στα ελληνικά.\n\n" + prompt
+        response_text = await generate_ai_content(system_prompt)
         
         return {
-            "summary": response,
+            "summary": response_text,
             "stats": {
                 "total_spent": round(total, 2),
                 "receipts_count": len(receipts),
