@@ -8,6 +8,7 @@ import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
+import AdBanner from '../../src/components/AdBanner';
 
 type Tab = 'url' | 'manual';
 
@@ -133,6 +134,11 @@ export default function AddReceiptScreen() {
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.background },
     scroll: { padding: Spacing.lg, paddingBottom: Spacing['3xl'] },
+    adContainer: {
+      alignItems: 'center',
+      paddingVertical: Spacing.sm,
+      paddingHorizontal: Spacing.md,
+    },
     title: { 
       fontSize: Typography['2xl'], 
       fontWeight: Typography.extrabold, 
@@ -396,6 +402,11 @@ export default function AddReceiptScreen() {
             </View>
           )}
         </ScrollView>
+        
+        {/* Ad Banner */}
+        <View style={styles.adContainer}>
+          <AdBanner position="bottom" />
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
