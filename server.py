@@ -1429,10 +1429,21 @@ async def login(request: UserLoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     # Get or create device_id for user
-    # Use client's device_id if provided, otherwise generate or use existing
-    user_device_id = request.device_id or user.get("device_id")
+    # CRITICAL: Always use the user's stored device_id if exists, to preserve receipt history
+    # Only use client's device_id if user has no stored device_id
+    user_device_id = user.get("device_id")
+    
     if not user_device_id:
-        user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
+        # New user or user without device_id - use client's or generate new
+        user_device_id = request.device_id or f"dev_{uuid.uuid4().hex[:20]}"
+    elif request.device_id and request.device_id != user_device_id:
+        # Client has different device_id - merge receipts from client's device to user's device
+        # This ensures receipts scanned before login are preserved
+        await db.receipts.update_many(
+            {"device_id": request.device_id},
+            {"$set": {"device_id": user_device_id, "user_email": user["email"]}}
+        )
+        logger.info(f"Merged receipts from {request.device_id} to {user_device_id}")
     
     # Update last login and device_id
     await db.users.update_one(

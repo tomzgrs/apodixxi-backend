@@ -24,3 +24,5 @@ aiohttp==3.9.3
 openpyxl==3.1.5
 beautifulsoup4==4.14.3
 Jinja2==3.1.6
+google-genai==1.65.0
+lxml==5.3.2
