@@ -1993,63 +1993,25 @@ async def logout(user: dict = Depends(get_current_user)):
 # ============ FORGOT PASSWORD ============
 
 def send_new_password_email(to_email: str, new_password: str, app_name: str = "apodixxi"):
-    """Send email with new password - simple and direct."""
+    """Send email with new password - PLAIN TEXT ONLY."""
     if not SMTP_USER or not SMTP_PASSWORD:
         logger.error("SMTP credentials not configured")
         raise HTTPException(status_code=500, detail="Email service not configured")
     
     subject = f"Νέος Κωδικός - {app_name}"
     
-    html_body = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
-            .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; }}
-            .header {{ background: #007AFF; color: white; padding: 20px; text-align: center; }}
-            .content {{ padding: 30px; text-align: center; }}
-            .password {{ font-size: 28px; font-weight: bold; color: #007AFF; 
-                        background: #f0f8ff; padding: 15px 30px; border-radius: 8px; 
-                        display: inline-block; margin: 20px 0; letter-spacing: 2px; }}
-            .footer {{ background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🔐 {app_name}</h1>
-            </div>
-            <div class="content">
-                <h2>Ο νέος σας κωδικός</h2>
-                <p>Χρησιμοποιήστε τον παρακάτω κωδικό για να συνδεθείτε:</p>
-                <div class="password">{new_password}</div>
-                <p style="color: #666; font-size: 14px;">Μπορείτε να αλλάξετε τον κωδικό σας από τις Ρυθμίσεις μετά τη σύνδεση.</p>
-            </div>
-            <div class="footer">
-                <p>© 2025 {app_name}</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    text_body = f"""apodixxi - Νέος Κωδικός
+
+Ο νέος σας 6ψήφιος κωδικός είναι: {new_password}
+
+Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
+
+© 2025 apodixxi"""
     
-    text_body = f"""
-    {app_name} - Νέος Κωδικός
-    
-    Ο νέος σας κωδικός είναι: {new_password}
-    
-    Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
-    """
-    
-    msg = MIMEMultipart('alternative')
+    msg = MIMEText(text_body, 'plain', 'utf-8')
     msg['Subject'] = subject
     msg['From'] = SMTP_FROM
     msg['To'] = to_email
-    
-    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
     
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
@@ -2299,7 +2261,7 @@ async def get_subscription_status(device_id: str = Query(None), authorization: s
         "is_premium": is_premium,
         "subscription_expires_at": subscription_expires,
         "days_remaining": days_remaining,
-        "app_name": "apodixxi+" if is_premium else "apodixxi"
+        "app_name": "apodixxi*" if is_premium else "apodixxi"
     }
 
 

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const API_BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api`;
 
 interface Message {
   id: string;
@@ -100,7 +100,7 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/ai/chat`, {
+      const response = await fetch(`${API_BASE}/ai/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
