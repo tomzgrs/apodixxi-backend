@@ -4720,7 +4720,7 @@ async def admin_dashboard():
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>Email</th><th>Όνομα</th><th>Τύπος</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
+                            <thead><tr><th>Email</th><th>Όνομα</th><th>Συνδρομή</th><th>Λήξη</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="usersTable"></tbody>
                         </table>
                     </div>
@@ -5081,18 +5081,42 @@ async def admin_dashboard():
                 const res = await apiCall('/admin/users/all?limit=100');
                 const data = await res.json();
                 
-                document.getElementById('usersTable').innerHTML = data.users.map(u => `
+                document.getElementById('usersTable').innerHTML = data.users.map(u => {
+                    // Calculate subscription status
+                    let subStatus = 'Free';
+                    let subBadgeClass = 'badge-info';
+                    let expiresText = '-';
+                    
+                    if (u.account_type === 'paid' && u.subscription_expires_at) {
+                        const expiresDate = new Date(u.subscription_expires_at);
+                        const now = new Date();
+                        const daysRemaining = Math.ceil((expiresDate - now) / (1000 * 60 * 60 * 24));
+                        
+                        if (daysRemaining > 0) {
+                            subStatus = 'apodixxi+';
+                            subBadgeClass = 'badge-success';
+                            expiresText = expiresDate.toLocaleDateString('el-GR') + ' (' + daysRemaining + ' ημέρες)';
+                        } else {
+                            subStatus = 'Έληξε';
+                            subBadgeClass = 'badge-warning';
+                            expiresText = expiresDate.toLocaleDateString('el-GR') + ' (έληξε)';
+                        }
+                    }
+                    
+                    return `
                     <tr>
                         <td>${u.email || '-'}</td>
                         <td>${u.name || '-'}</td>
-                        <td><span class="badge ${u.account_type === 'paid' ? 'badge-success' : 'badge-info'}">${u.account_type === 'paid' ? 'Premium' : 'Free'}</span></td>
+                        <td><span class="badge ${subBadgeClass}">${subStatus}</span></td>
+                        <td>${expiresText}</td>
                         <td>${u.receipt_count || 0}</td>
                         <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-'}</td>
                         <td>
-                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">Αναβάθμιση</button>
+                            ${u.account_type === 'paid' ? '<button class="btn btn-danger" onclick="downgradeUser(\\'' + u._id + '\\')">Υποβάθμιση</button>' : ''}
+                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">+30 ημέρες</button>
                         </td>
                     </tr>
-                `).join('');
+                `}).join('');
             } catch (err) {
                 console.error('Error loading users:', err);
             }
@@ -5109,7 +5133,22 @@ async def admin_dashboard():
                     body: JSON.stringify({ days: parseInt(days) })
                 });
                 loadUsers();
-                alert('Ο χρήστης αναβαθμίστηκε!');
+                alert('Ο χρήστης αναβαθμίστηκε σε apodixxi+!');
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function downgradeUser(userId) {
+            if (!confirm('Είστε σίγουροι ότι θέλετε να υποβαθμίσετε αυτόν τον χρήστη σε Free;')) return;
+            
+            try {
+                await fetch(`${API_BASE}/admin/users/${userId}/downgrade?admin_token=${adminToken}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                loadUsers();
+                alert('Ο χρήστης υποβαθμίστηκε σε Free.');
             } catch (err) {
                 alert('Σφάλμα');
             }
