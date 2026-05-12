@@ -195,7 +195,7 @@ export const api = {
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
-    const res = await fetch(`${API_URL}/api/subscription/status?device_id=${deviceId}`, {
+    const res = await fetch(`${API_BASE}/subscription/status?device_id=${deviceId}`, {
       headers
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

@@ -99,14 +99,7 @@ export default function DashboardScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Καλώς ήρθατε 👋</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text testID="app-title" style={styles.appTitle}>{subscriptionStatus.app_name}</Text>
-              {subscriptionStatus.is_premium && (
-                <View style={styles.premiumBadge}>
-                  <Ionicons name="star" size={12} color="#FFD700" />
-                </View>
-              )}
-            </View>
+            <Text testID="app-title" style={styles.appTitle}>{subscriptionStatus.app_name}</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsBtn}
@@ -497,12 +490,6 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     fontWeight: Typography.bold, 
     color: theme.text,
     letterSpacing: -0.5
-  },
-  premiumBadge: {
-    marginLeft: 6,
-    padding: 4,
-    backgroundColor: 'rgba(255, 215, 0, 0.2)',
-    borderRadius: Radius.full,
   },
   settingsBtn: {
     width: 44,
