@@ -405,16 +405,23 @@ def get_clean_store_name(vat: str, raw_name: str) -> str:
     2. Then try keyword detection from name (for franchises)
     3. Fallback to raw name
     """
+    # Clean VAT - remove any non-digit characters
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    
+    logger.info(f"[store-mapping] VAT: '{vat}' -> clean: '{clean_vat}', raw_name: '{raw_name}'")
+    
     # Try VAT mapping first
-    if vat:
-        mapped = get_store_name_from_vat(vat)
+    if clean_vat:
+        mapped = get_store_name_from_vat(clean_vat)
         if mapped:
+            logger.info(f"[store-mapping] Found VAT mapping: {clean_vat} -> {mapped}")
             return mapped
     
     # Try keyword detection for franchises
     if raw_name:
         brand = detect_store_brand(raw_name)
         if brand:
+            logger.info(f"[store-mapping] Found keyword match: '{raw_name}' -> {brand}")
             return brand
     
     # Fallback to raw name (cleaned up)
@@ -424,8 +431,10 @@ def get_clean_store_name(vat: str, raw_name: str) -> str:
         for suffix in [" ΑΝΩΝΥΜΗ ΕΤΑΙΡΕΙΑ", " ΜΟΝΟΠΡΟΣΩΠΗ", " ΑΕΒΕ", " Α.Ε.", " ΑΕ", " ΕΠΕ", " ΙΚΕ"]:
             if cleaned.upper().endswith(suffix):
                 cleaned = cleaned[:-len(suffix)].strip()
+        logger.info(f"[store-mapping] Using cleaned raw name: '{cleaned}'")
         return cleaned
     
+    logger.warning(f"[store-mapping] No match found for VAT: {vat}, raw_name: {raw_name}")
     return "Άγνωστο Κατάστημα"
 
 def parse_greek_number(text: str) -> float:
