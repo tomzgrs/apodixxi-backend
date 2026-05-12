@@ -1983,17 +1983,13 @@ async def logout(user: dict = Depends(get_current_user)):
 
 # ============ FORGOT PASSWORD ============
 
-def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"):
-    """Send password reset email via Gmail SMTP."""
+def send_new_password_email(to_email: str, new_password: str, app_name: str = "apodixxi"):
+    """Send email with new password - simple and direct."""
     if not SMTP_USER or not SMTP_PASSWORD:
         logger.error("SMTP credentials not configured")
         raise HTTPException(status_code=500, detail="Email service not configured")
     
-    # Create reset link (deep link for mobile app)
-    reset_link = f"apodixxi://reset-password?token={reset_token}"
-    web_reset_link = f"https://apodixxi.gr/reset-password?token={reset_token}"
-    
-    subject = f"{app_name} - Επαναφορά Κωδικού"
+    subject = f"Νέος Κωδικός - {app_name}"
     
     html_body = f"""
     <!DOCTYPE html>
@@ -2001,41 +1997,29 @@ def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"
     <head>
         <meta charset="UTF-8">
         <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
-            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }}
-            .button {{ display: inline-block; background: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
-            .code {{ background: #e0e0e0; padding: 10px 20px; font-family: monospace; font-size: 18px; border-radius: 4px; display: inline-block; }}
-            .footer {{ text-align: center; color: #666; font-size: 12px; margin-top: 20px; }}
+            body {{ font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+            .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; }}
+            .header {{ background: #007AFF; color: white; padding: 20px; text-align: center; }}
+            .content {{ padding: 30px; text-align: center; }}
+            .password {{ font-size: 28px; font-weight: bold; color: #007AFF; 
+                        background: #f0f8ff; padding: 15px 30px; border-radius: 8px; 
+                        display: inline-block; margin: 20px 0; letter-spacing: 2px; }}
+            .footer {{ background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🧾 {app_name}</h1>
+                <h1>🔐 {app_name}</h1>
             </div>
             <div class="content">
-                <h2>Επαναφορά Κωδικού Πρόσβασης</h2>
-                <p>Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.</p>
-                
-                <p>Πατήστε το παρακάτω κουμπί για να ορίσετε νέο κωδικό:</p>
-                
-                <p style="text-align: center;">
-                    <a href="{web_reset_link}" class="button">Επαναφορά Κωδικού</a>
-                </p>
-                
-                <p>Ή αντιγράψτε αυτόν τον κωδικό στην εφαρμογή:</p>
-                <p style="text-align: center;">
-                    <span class="code">{reset_token}</span>
-                </p>
-                
-                <p><strong>Σημείωση:</strong> Ο κωδικός λήγει σε 1 ώρα.</p>
-                
-                <p>Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.</p>
+                <h2>Ο νέος σας κωδικός</h2>
+                <p>Χρησιμοποιήστε τον παρακάτω κωδικό για να συνδεθείτε:</p>
+                <div class="password">{new_password}</div>
+                <p style="color: #666; font-size: 14px;">Μπορείτε να αλλάξετε τον κωδικό σας από τις Ρυθμίσεις μετά τη σύνδεση.</p>
             </div>
             <div class="footer">
-                <p>© 2025 {app_name} - Η εφαρμογή παρακολούθησης αποδείξεων</p>
+                <p>© 2025 {app_name}</p>
             </div>
         </div>
     </body>
@@ -2043,17 +2027,11 @@ def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"
     """
     
     text_body = f"""
-    Επαναφορά Κωδικού Πρόσβασης - {app_name}
+    {app_name} - Νέος Κωδικός
     
-    Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.
+    Ο νέος σας κωδικός είναι: {new_password}
     
-    Κωδικός επαναφοράς: {reset_token}
-    
-    Link επαναφοράς: {web_reset_link}
-    
-    Ο κωδικός λήγει σε 1 ώρα.
-    
-    Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.
+    Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
     """
     
     msg = MIMEMultipart('alternative')
@@ -2069,53 +2047,50 @@ def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_FROM, to_email, msg.as_string())
-        logger.info(f"Reset email sent to {to_email}")
+        logger.info(f"New password email sent to {to_email}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send reset email: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send reset email")
+        logger.error(f"Failed to send new password email: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
 
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
-    """Request password reset email."""
+    """Generate new password and send it directly via email."""
     email = request.email.lower().strip()
     
     # Check if user exists
     user = await db.users.find_one({"email": email})
     if not user:
         # Don't reveal if email exists or not (security)
-        return {"success": True, "message": "If this email exists, a reset link has been sent"}
+        return {"success": True, "message": "Αν υπάρχει ο λογαριασμός, θα λάβετε email με τον νέο κωδικό."}
     
     # Check if user registered with social auth (can't reset password)
     if user.get("auth_provider") in ["google", "apple", "phone"]:
         raise HTTPException(
             status_code=400, 
-            detail="This account uses social login. Please sign in with Google/Apple."
+            detail="Αυτός ο λογαριασμός χρησιμοποιεί Google/Apple login."
         )
     
-    # Generate reset token (6 characters, uppercase)
-    reset_token = uuid.uuid4().hex[:6].upper()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    # Generate new random password (8 characters)
+    import random
+    import string
+    new_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
     
-    # Store reset token
-    await db.password_resets.delete_many({"email": email})  # Remove old tokens
-    await db.password_resets.insert_one({
-        "email": email,
-        "token": reset_token,
-        "expires_at": expires_at.isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "used": False
-    })
+    # Hash and update password
+    hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"password": hashed_password}}
+    )
     
-    # Send email
+    # Send email with new password
     try:
-        send_reset_email(email, reset_token)
+        send_new_password_email(email, new_password)
     except Exception as e:
-        logger.error(f"Failed to send reset email: {e}")
-        # Still return success to not reveal email existence
+        logger.error(f"Failed to send new password email: {e}")
     
-    return {"success": True, "message": "If this email exists, a reset link has been sent"}
+    return {"success": True, "message": "Ο νέος κωδικός στάλθηκε στο email σας."}
 
 
 @api_router.post("/auth/reset-password")
