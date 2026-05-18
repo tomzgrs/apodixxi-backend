@@ -384,8 +384,10 @@ STORE_BRAND_KEYWORDS = {
 
 def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
     """Get clean store name from VAT number."""
-    if vat and vat in STORE_VAT_MAPPING:
-        return STORE_VAT_MAPPING[vat]
+    # Normalize VAT - remove EL prefix and any non-digit characters
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    if clean_vat and clean_vat in STORE_VAT_MAPPING:
+        return STORE_VAT_MAPPING[clean_vat]
     return fallback
 
 def detect_store_brand(store_name: str) -> str:
@@ -2261,7 +2263,7 @@ async def get_subscription_status(device_id: str = Query(None), authorization: s
         "is_premium": is_premium,
         "subscription_expires_at": subscription_expires,
         "days_remaining": days_remaining,
-        "app_name": "apodixxi*" if is_premium else "apodixxi"
+        "app_name": "apodixxi+" if is_premium else "apodixxi"
     }
 
 

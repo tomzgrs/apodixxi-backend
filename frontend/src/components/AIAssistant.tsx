@@ -100,9 +100,21 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
     setIsLoading(true);
 
     try {
+      // Get access token for Authorization header
+      const accessToken = await AsyncStorage.getItem('accessToken');
+      
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add Authorization header if user is logged in
+      if (accessToken) {
+        headers['Authorization'] = `Bearer ${accessToken}`;
+      }
+      
       const response = await fetch(`${API_BASE}/ai/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           device_id: deviceId,
           message: userMessage.text,
@@ -111,7 +123,9 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
       });
 
       if (!response.ok) {
-        throw new Error('AI service error');
+        const errorData = await response.json().catch(() => ({}));
+        console.log('AI API Error:', response.status, errorData);
+        throw new Error(errorData.detail || 'AI service error');
       }
 
       const data = await response.json();
@@ -128,6 +142,7 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
       setSessionId(data.session_id);
       saveChatHistory(updatedMessages, data.session_id);
     } catch (error) {
+      console.log('AI Chat Error:', error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: 'Συγγνώμη, κάτι πήγε στραβά. Δοκίμασε ξανά.',
