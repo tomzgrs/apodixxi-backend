@@ -118,7 +118,7 @@ export default function SettingsScreen() {
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.background },
-    scroll: { padding: Spacing.lg, paddingBottom: Spacing['3xl'] },
+    scroll: { padding: Spacing.lg, paddingBottom: 80 },  // Extra padding for sticky AdBanner
     adContainer: {
       alignItems: 'center',
       paddingVertical: Spacing.sm,
@@ -518,12 +518,10 @@ export default function SettingsScreen() {
             </View>
           </View>
         </View>
-        
-        {/* Ad Banner */}
-        <View style={styles.adContainer}>
-          <AdBanner useTestAds={true} position="bottom" />
-        </View>
       </ScrollView>
+      
+      {/* Sticky Ad Banner */}
+      <AdBanner useTestAds={true} position="bottom" />
     </SafeAreaView>
   );
 }

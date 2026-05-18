@@ -405,17 +405,15 @@ export default function CompareScreen() {
         </View>
       </Modal>
       
-      {/* Ad Banner */}
-      <View style={styles.adContainer}>
-        <AdBanner useTestAds={true} position="bottom" />
-      </View>
+      {/* Sticky Ad Banner */}
+      <AdBanner useTestAds={true} position="bottom" />
     </SafeAreaView>
   );
 }
 
 const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.background },
-  scroll: { padding: Spacing.base, paddingBottom: Spacing['3xl'] },
+  scroll: { padding: Spacing.base, paddingBottom: 80 },  // Extra padding for sticky AdBanner
   adContainer: {
     alignItems: 'center',
     paddingVertical: Spacing.sm,

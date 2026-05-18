@@ -133,7 +133,7 @@ export default function AddReceiptScreen() {
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.background },
-    scroll: { padding: Spacing.lg, paddingBottom: Spacing['3xl'] },
+    scroll: { padding: Spacing.lg, paddingBottom: 80 },  // Extra padding for sticky AdBanner
     adContainer: {
       alignItems: 'center',
       paddingVertical: Spacing.sm,
@@ -402,12 +402,10 @@ export default function AddReceiptScreen() {
             </View>
           )}
         </ScrollView>
-        
-        {/* Ad Banner */}
-        <View style={styles.adContainer}>
-          <AdBanner position="bottom" />
-        </View>
       </KeyboardAvoidingView>
+      
+      {/* Sticky Ad Banner */}
+      <AdBanner position="bottom" />
     </SafeAreaView>
   );
 }

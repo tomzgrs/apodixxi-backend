@@ -426,10 +426,10 @@ export default function DashboardScreen() {
             )}
           </>
         )}
-        
-        {/* AdBanner for Free Users */}
-        <AdBanner position="bottom" />
       </ScrollView>
+      
+      {/* Sticky AdBanner for Free Users */}
+      <AdBanner position="bottom" />
 
       {/* AI Assistant Floating Button */}
       {deviceId && hasData && (
@@ -465,7 +465,7 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
   },
   scroll: { 
     padding: Spacing.base,
-    paddingBottom: Spacing['3xl']
+    paddingBottom: 80  // Extra padding for sticky AdBanner
   },
   center: { 
     flex: 1, 
