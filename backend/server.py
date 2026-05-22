@@ -1992,78 +1992,141 @@ async def logout(user: dict = Depends(get_current_user)):
     return {"success": True, "message": "Logged out successfully"}
 
 
-# ============ FORGOT PASSWORD ============
+# ============ FORGOT PASSWORD (Restored from commit 70402b2) ============
 
-def send_new_password_email(to_email: str, new_password: str, app_name: str = "apodixxi"):
-    """Send email with new password - PLAIN TEXT ONLY."""
+def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"):
+    """Send password reset email via Gmail SMTP."""
     if not SMTP_USER or not SMTP_PASSWORD:
         logger.error("SMTP credentials not configured")
         raise HTTPException(status_code=500, detail="Email service not configured")
     
-    subject = f"Νέος Κωδικός - {app_name}"
+    # Create reset link (deep link for mobile app)
+    reset_link = f"apodixxi://reset-password?token={reset_token}"
+    web_reset_link = f"https://apodixxi.gr/reset-password?token={reset_token}"
     
-    text_body = f"""apodixxi - Νέος Κωδικός
-
-Ο νέος σας 6ψήφιος κωδικός είναι: {new_password}
-
-Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
-
-© 2025 apodixxi"""
+    subject = f"{app_name} - Επαναφορά Κωδικού"
     
-    msg = MIMEText(text_body, 'plain', 'utf-8')
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
+            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }}
+            .button {{ display: inline-block; background: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+            .code {{ background: #e0e0e0; padding: 10px 20px; font-family: monospace; font-size: 18px; border-radius: 4px; display: inline-block; }}
+            .footer {{ text-align: center; color: #666; font-size: 12px; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🧾 {app_name}</h1>
+            </div>
+            <div class="content">
+                <h2>Επαναφορά Κωδικού Πρόσβασης</h2>
+                <p>Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.</p>
+                
+                <p>Πατήστε το παρακάτω κουμπί για να ορίσετε νέο κωδικό:</p>
+                
+                <p style="text-align: center;">
+                    <a href="{web_reset_link}" class="button">Επαναφορά Κωδικού</a>
+                </p>
+                
+                <p>Ή αντιγράψτε αυτόν τον κωδικό στην εφαρμογή:</p>
+                <p style="text-align: center;">
+                    <span class="code">{reset_token}</span>
+                </p>
+                
+                <p><strong>Σημείωση:</strong> Ο κωδικός λήγει σε 1 ώρα.</p>
+                
+                <p>Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.</p>
+            </div>
+            <div class="footer">
+                <p>© 2025 {app_name} - Η εφαρμογή παρακολούθησης αποδείξεων</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    text_body = f"""
+    Επαναφορά Κωδικού Πρόσβασης - {app_name}
+    
+    Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.
+    
+    Κωδικός επαναφοράς: {reset_token}
+    
+    Link επαναφοράς: {web_reset_link}
+    
+    Ο κωδικός λήγει σε 1 ώρα.
+    
+    Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.
+    """
+    
+    msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From'] = SMTP_FROM
     msg['To'] = to_email
+    
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
     
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_FROM, to_email, msg.as_string())
-        logger.info(f"New password email sent to {to_email}")
+        logger.info(f"Reset email sent to {to_email}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send new password email: {e}")
+        logger.error(f"Failed to send reset email: {e}")
         raise HTTPException(status_code=500, detail="Failed to send email")
 
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
-    """Generate new password and send it directly via email."""
+    """Request password reset email."""
     email = request.email.lower().strip()
     
     # Check if user exists
     user = await db.users.find_one({"email": email})
     if not user:
         # Don't reveal if email exists or not (security)
-        return {"success": True, "message": "Αν υπάρχει ο λογαριασμός, θα λάβετε email με τον νέο κωδικό."}
+        return {"success": True, "message": "If this email exists, a reset link has been sent"}
     
     # Check if user registered with social auth (can't reset password)
     if user.get("auth_provider") in ["google", "apple", "phone"]:
         raise HTTPException(
             status_code=400, 
-            detail="Αυτός ο λογαριασμός χρησιμοποιεί Google/Apple login."
+            detail="This account uses social login. Please sign in with Google/Apple."
         )
     
-    # Generate new random password (8 characters)
-    import random
-    import string
-    new_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    # Generate reset token (6 characters, uppercase)
+    reset_token = uuid.uuid4().hex[:6].upper()
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     
-    # Hash and update password
-    hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    await db.users.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"password": hashed_password}}
-    )
+    # Store reset token
+    await db.password_resets.delete_many({"email": email})  # Remove old tokens
+    await db.password_resets.insert_one({
+        "email": email,
+        "token": reset_token,
+        "expires_at": expires_at.isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "used": False
+    })
     
-    # Send email with new password
+    # Send email
     try:
-        send_new_password_email(email, new_password)
+        send_reset_email(email, reset_token)
     except Exception as e:
-        logger.error(f"Failed to send new password email: {e}")
+        logger.error(f"Failed to send reset email: {e}")
+        # Still return success to not reveal email existence
     
-    return {"success": True, "message": "Ο νέος κωδικός στάλθηκε στο email σας."}
+    return {"success": True, "message": "If this email exists, a reset link has been sent"}
 
 
 @api_router.post("/auth/reset-password")
