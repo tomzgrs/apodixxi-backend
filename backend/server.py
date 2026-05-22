@@ -14,6 +14,7 @@ import smtplib
 import httpx
 import io
 import json
+import bcrypt
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
