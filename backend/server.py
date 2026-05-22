@@ -1999,7 +1999,7 @@ def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"
     """Send password reset email via Gmail SMTP."""
     if not SMTP_USER or not SMTP_PASSWORD:
         logger.error("SMTP credentials not configured")
-        raise HTTPException(status_code=500, detail="Email service not configured")
+        return False  # Don't crash, just return False
     
     # Create reset link (deep link for mobile app)
     reset_link = f"apodixxi://reset-password?token={reset_token}"
@@ -2085,7 +2085,7 @@ def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"
         return True
     except Exception as e:
         logger.error(f"Failed to send reset email: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send email")
+        return False  # Don't raise, let caller handle it
 
 
 @api_router.post("/auth/forgot-password")
