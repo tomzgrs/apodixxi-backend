@@ -104,3 +104,4 @@ credentials.json
 *.pem
 *.key
 .credentials
+app_backup.zip
