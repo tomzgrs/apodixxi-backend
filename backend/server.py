@@ -6498,3 +6498,4 @@ async def root():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+# Force redeploy Mon May 25 11:26:59 UTC 2026
