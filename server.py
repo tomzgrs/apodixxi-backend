@@ -384,8 +384,10 @@ STORE_BRAND_KEYWORDS = {
 
 def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
     """Get clean store name from VAT number."""
-    if vat and vat in STORE_VAT_MAPPING:
-        return STORE_VAT_MAPPING[vat]
+    # Normalize VAT - remove EL prefix and any non-digit characters
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    if clean_vat and clean_vat in STORE_VAT_MAPPING:
+        return STORE_VAT_MAPPING[clean_vat]
     return fallback
 
 def detect_store_brand(store_name: str) -> str:
@@ -405,16 +407,23 @@ def get_clean_store_name(vat: str, raw_name: str) -> str:
     2. Then try keyword detection from name (for franchises)
     3. Fallback to raw name
     """
+    # Clean VAT - remove any non-digit characters
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    
+    logger.info(f"[store-mapping] VAT: '{vat}' -> clean: '{clean_vat}', raw_name: '{raw_name}'")
+    
     # Try VAT mapping first
-    if vat:
-        mapped = get_store_name_from_vat(vat)
+    if clean_vat:
+        mapped = get_store_name_from_vat(clean_vat)
         if mapped:
+            logger.info(f"[store-mapping] Found VAT mapping: {clean_vat} -> {mapped}")
             return mapped
     
     # Try keyword detection for franchises
     if raw_name:
         brand = detect_store_brand(raw_name)
         if brand:
+            logger.info(f"[store-mapping] Found keyword match: '{raw_name}' -> {brand}")
             return brand
     
     # Fallback to raw name (cleaned up)
@@ -424,8 +433,10 @@ def get_clean_store_name(vat: str, raw_name: str) -> str:
         for suffix in [" ΑΝΩΝΥΜΗ ΕΤΑΙΡΕΙΑ", " ΜΟΝΟΠΡΟΣΩΠΗ", " ΑΕΒΕ", " Α.Ε.", " ΑΕ", " ΕΠΕ", " ΙΚΕ"]:
             if cleaned.upper().endswith(suffix):
                 cleaned = cleaned[:-len(suffix)].strip()
+        logger.info(f"[store-mapping] Using cleaned raw name: '{cleaned}'")
         return cleaned
     
+    logger.warning(f"[store-mapping] No match found for VAT: {vat}, raw_name: {raw_name}")
     return "Άγνωστο Κατάστημα"
 
 def parse_greek_number(text: str) -> float:
@@ -1984,63 +1995,25 @@ async def logout(user: dict = Depends(get_current_user)):
 # ============ FORGOT PASSWORD ============
 
 def send_new_password_email(to_email: str, new_password: str, app_name: str = "apodixxi"):
-    """Send email with new password - simple and direct."""
+    """Send email with new password - PLAIN TEXT ONLY."""
     if not SMTP_USER or not SMTP_PASSWORD:
         logger.error("SMTP credentials not configured")
         raise HTTPException(status_code=500, detail="Email service not configured")
     
     subject = f"Νέος Κωδικός - {app_name}"
     
-    html_body = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
-            .container {{ max-width: 500px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden; }}
-            .header {{ background: #007AFF; color: white; padding: 20px; text-align: center; }}
-            .content {{ padding: 30px; text-align: center; }}
-            .password {{ font-size: 28px; font-weight: bold; color: #007AFF; 
-                        background: #f0f8ff; padding: 15px 30px; border-radius: 8px; 
-                        display: inline-block; margin: 20px 0; letter-spacing: 2px; }}
-            .footer {{ background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🔐 {app_name}</h1>
-            </div>
-            <div class="content">
-                <h2>Ο νέος σας κωδικός</h2>
-                <p>Χρησιμοποιήστε τον παρακάτω κωδικό για να συνδεθείτε:</p>
-                <div class="password">{new_password}</div>
-                <p style="color: #666; font-size: 14px;">Μπορείτε να αλλάξετε τον κωδικό σας από τις Ρυθμίσεις μετά τη σύνδεση.</p>
-            </div>
-            <div class="footer">
-                <p>© 2025 {app_name}</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    text_body = f"""apodixxi - Νέος Κωδικός
+
+Ο νέος σας 6ψήφιος κωδικός είναι: {new_password}
+
+Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
+
+© 2025 apodixxi"""
     
-    text_body = f"""
-    {app_name} - Νέος Κωδικός
-    
-    Ο νέος σας κωδικός είναι: {new_password}
-    
-    Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
-    """
-    
-    msg = MIMEMultipart('alternative')
+    msg = MIMEText(text_body, 'plain', 'utf-8')
     msg['Subject'] = subject
     msg['From'] = SMTP_FROM
     msg['To'] = to_email
-    
-    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
     
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
@@ -2078,10 +2051,10 @@ async def forgot_password(request: ForgotPasswordRequest):
     new_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
     
     # Hash and update password
-    hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    hashed_password = hash_password(new_password)
     await db.users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"password": hashed_password}}
+        {"$set": {"password_hash": hashed_password}}
     )
     
     # Send email with new password
@@ -2123,7 +2096,7 @@ async def reset_password(request: ResetPasswordRequest):
     
     result = await db.users.update_one(
         {"email": email},
-        {"$set": {"password": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {"password_hash": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
     
     if result.modified_count == 0:
@@ -4720,7 +4693,7 @@ async def admin_dashboard():
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>Email</th><th>Όνομα</th><th>Τύπος</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
+                            <thead><tr><th>Email</th><th>Όνομα</th><th>Συνδρομή</th><th>Λήξη</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="usersTable"></tbody>
                         </table>
                     </div>
@@ -5081,18 +5054,42 @@ async def admin_dashboard():
                 const res = await apiCall('/admin/users/all?limit=100');
                 const data = await res.json();
                 
-                document.getElementById('usersTable').innerHTML = data.users.map(u => `
+                document.getElementById('usersTable').innerHTML = data.users.map(u => {
+                    // Calculate subscription status
+                    let subStatus = 'Free';
+                    let subBadgeClass = 'badge-info';
+                    let expiresText = '-';
+                    
+                    if (u.account_type === 'paid' && u.subscription_expires_at) {
+                        const expiresDate = new Date(u.subscription_expires_at);
+                        const now = new Date();
+                        const daysRemaining = Math.ceil((expiresDate - now) / (1000 * 60 * 60 * 24));
+                        
+                        if (daysRemaining > 0) {
+                            subStatus = 'apodixxi+';
+                            subBadgeClass = 'badge-success';
+                            expiresText = expiresDate.toLocaleDateString('el-GR') + ' (' + daysRemaining + ' ημέρες)';
+                        } else {
+                            subStatus = 'Έληξε';
+                            subBadgeClass = 'badge-warning';
+                            expiresText = expiresDate.toLocaleDateString('el-GR') + ' (έληξε)';
+                        }
+                    }
+                    
+                    return `
                     <tr>
                         <td>${u.email || '-'}</td>
                         <td>${u.name || '-'}</td>
-                        <td><span class="badge ${u.account_type === 'paid' ? 'badge-success' : 'badge-info'}">${u.account_type === 'paid' ? 'Premium' : 'Free'}</span></td>
+                        <td><span class="badge ${subBadgeClass}">${subStatus}</span></td>
+                        <td>${expiresText}</td>
                         <td>${u.receipt_count || 0}</td>
                         <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-'}</td>
                         <td>
-                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">Αναβάθμιση</button>
+                            ${u.account_type === 'paid' ? '<button class="btn btn-danger" onclick="downgradeUser(\\'' + u._id + '\\')">Υποβάθμιση</button>' : ''}
+                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">+30 ημέρες</button>
                         </td>
                     </tr>
-                `).join('');
+                `}).join('');
             } catch (err) {
                 console.error('Error loading users:', err);
             }
@@ -5109,7 +5106,22 @@ async def admin_dashboard():
                     body: JSON.stringify({ days: parseInt(days) })
                 });
                 loadUsers();
-                alert('Ο χρήστης αναβαθμίστηκε!');
+                alert('Ο χρήστης αναβαθμίστηκε σε apodixxi+!');
+            } catch (err) {
+                alert('Σφάλμα');
+            }
+        }
+        
+        async function downgradeUser(userId) {
+            if (!confirm('Είστε σίγουροι ότι θέλετε να υποβαθμίσετε αυτόν τον χρήστη σε Free;')) return;
+            
+            try {
+                await fetch(`${API_BASE}/admin/users/${userId}/downgrade?admin_token=${adminToken}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                loadUsers();
+                alert('Ο χρήστης υποβαθμίστηκε σε Free.');
             } catch (err) {
                 alert('Σφάλμα');
             }
