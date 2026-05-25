@@ -2029,87 +2029,66 @@ def send_new_password_email(to_email: str, new_password: str, app_name: str = "a
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
-    """Generate new password and send it directly via email."""
+    """Generate a 6-digit OTP and send it via email so the user can reset their password."""
+    import random
     email = request.email.lower().strip()
-    
-    # Check if user exists
+
     user = await db.users.find_one({"email": email})
     if not user:
-        # Don't reveal if email exists or not (security)
-        return {"success": True, "message": "Αν υπάρχει ο λογαριασμός, θα λάβετε email με τον νέο κωδικό."}
-    
-    # Check if user registered with social auth (can't reset password)
+        return {"success": True, "message": "Αν υπάρχει ο λογαριασμός, θα λάβετε email με κωδικό επαναφοράς."}
+
     if user.get("auth_provider") in ["google", "apple", "phone"]:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Αυτός ο λογαριασμός χρησιμοποιεί Google/Apple login."
         )
-    
-    # Generate new random password (8 characters)
-    import random
-    import string
-    new_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-    
-    # Hash and update password
-    hashed_password = hash_password(new_password)
+
+    otp = str(random.randint(100000, 999999))
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+
     await db.users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"password_hash": hashed_password}}
+        {"$set": {"reset_otp": otp, "reset_otp_expires": expires_at}}
     )
-    
-    # Send email with new password
+
     try:
-        send_new_password_email(email, new_password)
+        send_new_password_email(email, otp)
     except Exception as e:
-        logger.error(f"Failed to send new password email: {e}")
-    
-    return {"success": True, "message": "Ο νέος κωδικός στάλθηκε στο email σας."}
+        logger.error(f"Failed to send OTP email: {e}")
+
+    return {"success": True, "message": "Κωδικός επαναφοράς στάλθηκε στο email σας."}
 
 
 @api_router.post("/auth/reset-password")
 async def reset_password(request: ResetPasswordRequest):
-    """Reset password using token from email."""
-    token = request.token.upper().strip()
+    """Verify the 6-digit OTP stored on the user and update their password."""
+    otp = request.token.strip()
     new_password = request.new_password
-    
-    # Validate password
+
     if len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    
-    # Find valid token
-    reset_doc = await db.password_resets.find_one({
-        "token": token,
-        "used": False
+        raise HTTPException(status_code=400, detail="Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    user = await db.users.find_one({
+        "reset_otp": otp,
+        "reset_otp_expires": {"$gt": now_iso}
     })
-    
-    if not reset_doc:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
-    
-    # Check expiration
-    expires_at = datetime.fromisoformat(reset_doc["expires_at"].replace('Z', '+00:00'))
-    if datetime.now(timezone.utc) > expires_at:
-        raise HTTPException(status_code=400, detail="Reset code has expired")
-    
-    # Update password
-    email = reset_doc["email"]
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Μη έγκυρος ή ληγμένος κωδικός επαναφοράς")
+
     hashed_password = hash_password(new_password)
-    
-    result = await db.users.update_one(
-        {"email": email},
-        {"$set": {"password_hash": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
+
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {"password_hash": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()},
+            "$unset": {"reset_otp": "", "reset_otp_expires": ""}
+        }
     )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Failed to update password")
-    
-    # Mark token as used
-    await db.password_resets.update_one(
-        {"_id": reset_doc["_id"]},
-        {"$set": {"used": True}}
-    )
-    
-    logger.info(f"Password reset successful for {email}")
-    return {"success": True, "message": "Password has been reset successfully"}
+
+    logger.info(f"Password reset successful for {user['email']}")
+    return {"success": True, "message": "Ο κωδικός σας άλλαξε επιτυχώς"}
 
 
 @api_router.post("/auth/verify-reset-token")
