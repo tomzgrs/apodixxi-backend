@@ -14,7 +14,6 @@ import smtplib
 import httpx
 import io
 import json
-import bcrypt
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -60,6 +59,20 @@ JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "apodixxi-secret-key-change-me
 JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+# ============ GOOGLE AUTH ============
+
+GOOGLE_WEB_CLIENT_ID = os.environ.get(
+    "GOOGLE_WEB_CLIENT_ID",
+    "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com"
+)
+
+try:
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+    GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    GOOGLE_AUTH_AVAILABLE = False
 
 # ============ SMTP CONFIGURATION ============
 
@@ -154,11 +167,7 @@ class UserLoginRequest(BaseModel):
     device_id: Optional[str] = None  # Client's device_id to link with user
 
 class GoogleAuthRequest(BaseModel):
-    google_id: Optional[str] = None
-    id_token: Optional[str] = None
-    email: str
-    name: str = ""
-    picture: Optional[str] = None
+    id_token: str
 
 class AppleAuthRequest(BaseModel):
     apple_id: Optional[str] = None
@@ -1490,81 +1499,91 @@ async def login(request: UserLoginRequest):
 
 @api_router.post("/auth/google")
 async def google_auth(request: GoogleAuthRequest):
-    """Authenticate with Google."""
-    google_email = request.email.lower()
-    
-    # If google_id is provided directly (from mobile app), use it
-    if request.google_id:
-        # The user is authenticated via Google OAuth on mobile
-        # We trust the data since it came from Google's API
-        google_data = {
-            "sub": request.google_id,
-            "email": google_email,
-            "name": request.name,
-            "picture": request.picture
-        }
-    elif request.id_token:
-        # Verify Google ID token (for web flow)
+    """
+    Verify Google id_token on the server, then find or create the user.
+    The frontend never sends raw user data — only the signed id_token.
+    """
+    # ── 1. Verify the id_token with Google ──────────────────────────────────
+    if GOOGLE_AUTH_AVAILABLE:
+        try:
+            payload = google_id_token.verify_oauth2_token(
+                request.id_token,
+                google_requests.Request(),
+                GOOGLE_WEB_CLIENT_ID
+            )
+        except Exception as e:
+            logger.error(f"Google id_token verification failed: {e}")
+            raise HTTPException(status_code=401, detail="Μη έγκυρο Google token")
+    else:
+        # Fallback: verify via Google's tokeninfo endpoint
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(
+                resp = await client.get(
                     "https://oauth2.googleapis.com/tokeninfo",
                     params={"id_token": request.id_token}
                 )
-                if response.status_code != 200:
-                    raise HTTPException(status_code=401, detail="Invalid Google token")
-                
-                google_data = response.json()
-                google_email = google_data.get("email", request.email).lower()
+            if resp.status_code != 200:
+                raise HTTPException(status_code=401, detail="Μη έγκυρο Google token")
+            payload = resp.json()
+            if payload.get("aud") != GOOGLE_WEB_CLIENT_ID:
+                raise HTTPException(status_code=401, detail="Token audience mismatch")
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Google token verification failed: {e}")
-            google_data = {"email": google_email, "name": request.name}
-    else:
-        raise HTTPException(status_code=400, detail="Either google_id or id_token is required")
-    
-    # Create device_id for user
+            logger.error(f"Google tokeninfo fallback failed: {e}")
+            raise HTTPException(status_code=401, detail="Αποτυχία επαλήθευσης Google token")
+
+    # ── 2. Extract verified user data from payload ──────────────────────────
+    google_email = payload.get("email", "").lower()
+    google_name  = payload.get("name", "")
+    google_pic   = payload.get("picture")
+    google_sub   = payload.get("sub", "")
+
+    if not google_email:
+        raise HTTPException(status_code=400, detail="Δεν βρέθηκε email στο Google token")
+
+    # ── 3. Find or create user ──────────────────────────────────────────────
     user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
-    
-    # Check if user exists
     user = await db.users.find_one({"email": google_email})
-    
+
     if user:
-        # Update auth provider, device_id and last login
         user_device_id = user.get("device_id", user_device_id)
         await db.users.update_one(
             {"_id": user["_id"]},
             {"$set": {
                 "auth_provider": "google",
-                "name": request.name or user.get("name", ""),
-                "picture": request.picture or user.get("picture"),
+                "google_id": google_sub,
+                "name": google_name or user.get("name", ""),
+                "picture": google_pic or user.get("picture"),
                 "device_id": user_device_id,
                 "last_login": datetime.now(timezone.utc).isoformat()
             }}
         )
     else:
-        # Create new user
+        # New user — set an unusable password_hash so they can only log in via Google
         user_id = str(uuid.uuid4())
         user = {
             "_id": user_id,
             "email": google_email,
-            "name": request.name,
-            "picture": request.picture,
-            "password_hash": None,
+            "name": google_name,
+            "picture": google_pic,
+            "google_id": google_sub,
+            "password_hash": hash_password(uuid.uuid4().hex + uuid.uuid4().hex),
             "phone": None,
             "auth_provider": "google",
             "account_type": "free",
             "subscription_expires_at": None,
-            "is_email_verified": True,  # Google emails are verified
+            "is_email_verified": True,
             "device_id": user_device_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "last_login": datetime.now(timezone.utc).isoformat()
         }
         await db.users.insert_one(user)
-    
-    # Generate tokens
-    access_token = create_access_token(user["_id"], user["email"])
+
+    # ── 4. Issue our own JWT ─────────────────────────────────────────────────
+    access_token  = create_access_token(user["_id"], user["email"])
     refresh_token = create_refresh_token(user["_id"])
-    
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -1993,187 +2012,103 @@ async def logout(user: dict = Depends(get_current_user)):
     return {"success": True, "message": "Logged out successfully"}
 
 
-# ============ FORGOT PASSWORD (Restored from commit 70402b2) ============
+# ============ FORGOT PASSWORD ============
 
-def send_reset_email(to_email: str, reset_token: str, app_name: str = "apodixxi"):
-    """Send password reset email via Gmail SMTP."""
+def send_new_password_email(to_email: str, new_password: str, app_name: str = "apodixxi"):
+    """Send email with new password - PLAIN TEXT ONLY."""
     if not SMTP_USER or not SMTP_PASSWORD:
         logger.error("SMTP credentials not configured")
-        return False  # Don't crash, just return False
+        raise HTTPException(status_code=500, detail="Email service not configured")
     
-    # Create reset link (deep link for mobile app)
-    reset_link = f"apodixxi://reset-password?token={reset_token}"
-    web_reset_link = f"https://apodixxi.gr/reset-password?token={reset_token}"
+    subject = f"Νέος Κωδικός - {app_name}"
     
-    subject = f"{app_name} - Επαναφορά Κωδικού"
+    text_body = f"""apodixxi - Νέος Κωδικός
+
+Ο νέος σας 6ψήφιος κωδικός είναι: {new_password}
+
+Χρησιμοποιήστε τον για να συνδεθείτε στην εφαρμογή.
+
+© 2025 apodixxi"""
     
-    html_body = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
-            .content {{ background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }}
-            .button {{ display: inline-block; background: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
-            .code {{ background: #e0e0e0; padding: 10px 20px; font-family: monospace; font-size: 18px; border-radius: 4px; display: inline-block; }}
-            .footer {{ text-align: center; color: #666; font-size: 12px; margin-top: 20px; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🧾 {app_name}</h1>
-            </div>
-            <div class="content">
-                <h2>Επαναφορά Κωδικού Πρόσβασης</h2>
-                <p>Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.</p>
-                
-                <p>Πατήστε το παρακάτω κουμπί για να ορίσετε νέο κωδικό:</p>
-                
-                <p style="text-align: center;">
-                    <a href="{web_reset_link}" class="button">Επαναφορά Κωδικού</a>
-                </p>
-                
-                <p>Ή αντιγράψτε αυτόν τον κωδικό στην εφαρμογή:</p>
-                <p style="text-align: center;">
-                    <span class="code">{reset_token}</span>
-                </p>
-                
-                <p><strong>Σημείωση:</strong> Ο κωδικός λήγει σε 1 ώρα.</p>
-                
-                <p>Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.</p>
-            </div>
-            <div class="footer">
-                <p>© 2025 {app_name} - Η εφαρμογή παρακολούθησης αποδείξεων</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    text_body = f"""
-    Επαναφορά Κωδικού Πρόσβασης - {app_name}
-    
-    Λάβαμε αίτημα για επαναφορά του κωδικού πρόσβασης του λογαριασμού σας.
-    
-    Κωδικός επαναφοράς: {reset_token}
-    
-    Link επαναφοράς: {web_reset_link}
-    
-    Ο κωδικός λήγει σε 1 ώρα.
-    
-    Αν δεν ζητήσατε επαναφορά κωδικού, αγνοήστε αυτό το email.
-    """
-    
-    msg = MIMEMultipart('alternative')
+    msg = MIMEText(text_body, 'plain', 'utf-8')
     msg['Subject'] = subject
     msg['From'] = SMTP_FROM
     msg['To'] = to_email
-    
-    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
     
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_FROM, to_email, msg.as_string())
-        logger.info(f"Reset email sent to {to_email}")
+        logger.info(f"New password email sent to {to_email}")
         return True
     except Exception as e:
-        logger.error(f"Failed to send reset email: {e}")
-        return False  # Don't raise, let caller handle it
+        logger.error(f"Failed to send new password email: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
 
 
 @api_router.post("/auth/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest):
-    """Request password reset email."""
+    """Generate a 6-digit OTP and send it via email so the user can reset their password."""
+    import random
     email = request.email.lower().strip()
-    
-    # Check if user exists
+
     user = await db.users.find_one({"email": email})
     if not user:
-        # Don't reveal if email exists or not (security)
-        return {"success": True, "message": "If this email exists, a reset link has been sent"}
-    
-    # Check if user registered with social auth (can't reset password)
+        return {"success": True, "message": "Αν υπάρχει ο λογαριασμός, θα λάβετε email με κωδικό επαναφοράς."}
+
     if user.get("auth_provider") in ["google", "apple", "phone"]:
         raise HTTPException(
-            status_code=400, 
-            detail="This account uses social login. Please sign in with Google/Apple."
+            status_code=400,
+            detail="Αυτός ο λογαριασμός χρησιμοποιεί Google/Apple login."
         )
-    
-    # Generate reset token (6 characters, uppercase)
-    reset_token = uuid.uuid4().hex[:6].upper()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    
-    # Store reset token
-    await db.password_resets.delete_many({"email": email})  # Remove old tokens
-    await db.password_resets.insert_one({
-        "email": email,
-        "token": reset_token,
-        "expires_at": expires_at.isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "used": False
-    })
-    
-    # Send email
+
+    otp = str(random.randint(100000, 999999))
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"reset_otp": otp, "reset_otp_expires": expires_at}}
+    )
+
     try:
-        send_reset_email(email, reset_token)
+        send_new_password_email(email, otp)
     except Exception as e:
-        logger.error(f"Failed to send reset email: {e}")
-        # Still return success to not reveal email existence
-    
-    return {"success": True, "message": "If this email exists, a reset link has been sent"}
+        logger.error(f"Failed to send OTP email: {e}")
+
+    return {"success": True, "message": "Κωδικός επαναφοράς στάλθηκε στο email σας."}
 
 
 @api_router.post("/auth/reset-password")
 async def reset_password(request: ResetPasswordRequest):
-    """Reset password using token from email."""
-    token = request.token.upper().strip()
+    """Verify the 6-digit OTP stored on the user and update their password."""
+    otp = request.token.strip()
     new_password = request.new_password
-    
-    # Validate password
+
     if len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    
-    # Find valid token
-    reset_doc = await db.password_resets.find_one({
-        "token": token,
-        "used": False
+        raise HTTPException(status_code=400, detail="Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    user = await db.users.find_one({
+        "reset_otp": otp,
+        "reset_otp_expires": {"$gt": now_iso}
     })
-    
-    if not reset_doc:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
-    
-    # Check expiration
-    expires_at = datetime.fromisoformat(reset_doc["expires_at"].replace('Z', '+00:00'))
-    if datetime.now(timezone.utc) > expires_at:
-        raise HTTPException(status_code=400, detail="Reset code has expired")
-    
-    # Update password
-    email = reset_doc["email"]
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Μη έγκυρος ή ληγμένος κωδικός επαναφοράς")
+
     hashed_password = hash_password(new_password)
-    
-    result = await db.users.update_one(
-        {"email": email},
-        {"$set": {"password": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()}}
+
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {
+            "$set": {"password_hash": hashed_password, "updated_at": datetime.now(timezone.utc).isoformat()},
+            "$unset": {"reset_otp": "", "reset_otp_expires": ""}
+        }
     )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Failed to update password")
-    
-    # Mark token as used
-    await db.password_resets.update_one(
-        {"_id": reset_doc["_id"]},
-        {"$set": {"used": True}}
-    )
-    
-    logger.info(f"Password reset successful for {email}")
-    return {"success": True, "message": "Password has been reset successfully"}
+
+    logger.info(f"Password reset successful for {user['email']}")
+    return {"success": True, "message": "Ο κωδικός σας άλλαξε επιτυχώς"}
 
 
 @api_router.post("/auth/verify-reset-token")
@@ -6498,4 +6433,3 @@ async def root():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-# Force redeploy Mon May 25 11:26:59 UTC 2026
