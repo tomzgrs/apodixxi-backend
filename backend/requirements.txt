@@ -20,6 +20,10 @@ httpx==0.28.1
 requests==2.32.5
 aiohttp==3.9.3
 
+# Google Auth
+google-auth==2.29.0
+google-auth-httplib2==0.2.0
+
 # Data Processing
 openpyxl==3.1.5
 beautifulsoup4==4.14.3
