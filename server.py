@@ -536,10 +536,10 @@ def parse_entersoft(html: str, source_url: str) -> dict:
 
     for div in soup.find_all('div', class_='fontSize8pt'):
         txt = div.get_text(strip=True)
-        if 'Α.Φ.Μ' in txt:
-            match = re.search(r'Α\.Φ\.Μ:\s*(\d+)', txt)
+        if 'Α.Φ.Μ' in txt or 'ΑΦΜ' in txt:
+            match = re.search(r'Α\.?Φ\.?Μ\.?:?\s*(\d{9,12})', txt)
             if match:
-                data["store_vat"] = match.group(1)
+                data["store_vat"] = re.sub(r'\D', '', match.group(1))[:9]
             if ',' in txt and 'Α.Φ.Μ' in txt:
                 addr_part = txt.split('Α.Φ.Μ')[0].strip().rstrip(',')
                 if not data["store_address"]:
@@ -1246,9 +1246,9 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         if not line:
             continue
         # VAT
-        afm_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)[:\s]*(\d{9})', line)
+        afm_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)\.?:?\s*(\d[\d\s\.]{7,11}\d)', line)
         if afm_match:
-            data["store_vat"] = afm_match.group(1)
+            data["store_vat"] = re.sub(r'\D', '', afm_match.group(1))[:9]
         # Date
         date_match = re.search(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})', line)
         if date_match and not data["date"]:
