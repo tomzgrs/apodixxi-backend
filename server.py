@@ -861,11 +861,9 @@ def parse_mydata_xml(xml_content: str) -> dict:
 
 def detect_provider(url: str) -> str:
     if 'e-invoicing.gr' in url:
-        # Check if it's PEPPOL format (either explicit or alternative format with /-1/)
-        if 'ct=PEPPOL' in url or 'contentType=PEPPOL' in url:
+        # /edocuments/ViewInvoice/ URLs are PEPPOL format (confirmed from HTML structure)
+        if 'ct=PEPPOL' in url or 'contentType=PEPPOL' in url or '/edocuments/ViewInvoice/' in url or '/edocuments/viewinvoice/' in url.lower():
             return 'peppol'
-        # Alternative format with /-1/uuid often returns HTML-rendered PEPPOL
-        # We'll try the entersoft parser first, and fallback to PEPPOL if needed
         return 'entersoft'
     elif 'einvoice.impact.gr' in url:
         return 'impact'
@@ -1134,10 +1132,10 @@ def parse_peppol_html(html: str, source_url: str) -> dict:
     # VAT and other info
     for div in soup.find_all('div'):
         txt = div.get_text(strip=True)
-        if 'Α.Φ.Μ:' in txt:
-            match = re.search(r'Α\.Φ\.Μ:\s*(\d+)', txt)
+        if 'Α.Φ.Μ' in txt or 'ΑΦΜ' in txt:
+            match = re.search(r'Α\.?Φ\.?Μ\.?:?\s*(\d[\d\s\.]{7,11}\d)', txt)
             if match:
-                data["store_vat"] = match.group(1)
+                data["store_vat"] = re.sub(r'\D', '', match.group(1))[:9]
         elif 'Αρ. Παραστατικού' in txt or 'Αρ. Τιμολ' in txt:
             # Try to extract receipt number
             match = re.search(r'[\d]+$', txt.split(':')[-1].strip() if ':' in txt else txt)
