@@ -5567,14 +5567,14 @@ async def generate_ai_content(prompt: str) -> str:
             # Use sync client in thread to avoid event-loop issues
             response = await _asyncio.to_thread(
                 genai_client.models.generate_content,
-                model='gemini-2.0-flash',
+                model='gemini-2.0-flash-lite',
                 contents=prompt
             )
             return response.text
         else:
             # Legacy google.generativeai API — run in thread to avoid blocking
             import google.generativeai as genai_module
-            model = genai_module.GenerativeModel('gemini-2.0-flash')
+            model = genai_module.GenerativeModel('gemini-2.0-flash-lite')
             response = await _asyncio.to_thread(model.generate_content, prompt)
             return response.text
     except Exception as e:
