@@ -5516,34 +5516,16 @@ def send_admin_notification(subject: str, body: str):
         return False
 
 
-# ============ AI INTEGRATION WITH GEMINI ============
+# ============ AI INTEGRATION WITH GROQ ============
 
-# Gemini API Configuration
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-AI_AVAILABLE = False
-genai_client = None
+# Groq API Configuration
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+AI_AVAILABLE = bool(GROQ_API_KEY)
 
-try:
-    from google import genai
-    from google.genai import types
-    if GEMINI_API_KEY:
-        genai_client = genai.Client(api_key=GEMINI_API_KEY)
-        AI_AVAILABLE = True
-        logger.info("Gemini AI enabled successfully with google.genai")
-    else:
-        logger.warning("GEMINI_API_KEY not set - AI features disabled")
-except ImportError as e:
-    logger.warning(f"google-genai not installed, trying google-generativeai: {e}")
-    try:
-        import google.generativeai as genai_module
-        if GEMINI_API_KEY:
-            genai_module.configure(api_key=GEMINI_API_KEY)
-            AI_AVAILABLE = True
-            logger.info("Gemini AI enabled with legacy google.generativeai")
-    except ImportError:
-        logger.warning("No Gemini AI package available")
-except Exception as e:
-    logger.warning(f"AI features disabled: {e}")
+if AI_AVAILABLE:
+    logger.info("Groq AI enabled successfully")
+else:
+    logger.warning("GROQ_API_KEY not set - AI features disabled")
 
 # Master Categories for AI Classification
 MASTER_CATEGORIES = [
@@ -5557,28 +5539,33 @@ MASTER_CATEGORIES = [
 ]
 
 async def generate_ai_content(prompt: str) -> str:
-    """Generate content using Gemini AI."""
+    """Generate content using Groq AI."""
     if not AI_AVAILABLE:
         raise HTTPException(status_code=503, detail="AI service not available")
     
     try:
-        import asyncio as _asyncio
-        if genai_client:
-            # Use sync client in thread to avoid event-loop issues
-            response = await _asyncio.to_thread(
-                genai_client.models.generate_content,
-                model='gemini-2.0-flash-lite',
-                contents=prompt
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1024,
+                    "temperature": 0.7
+                }
             )
-            return response.text
-        else:
-            # Legacy google.generativeai API — run in thread to avoid blocking
-            import google.generativeai as genai_module
-            model = genai_module.GenerativeModel('gemini-2.0-flash-lite')
-            response = await _asyncio.to_thread(model.generate_content, prompt)
-            return response.text
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Groq AI HTTP error: {e.response.status_code} {e.response.text}")
+        raise HTTPException(status_code=500, detail=f"AI error: {e.response.status_code}: {e.response.text}")
     except Exception as e:
-        logger.error(f"Gemini AI error: {e}")
+        logger.error(f"Groq AI error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
 async def classify_product_with_ai(product_name: str, store_name: str = "") -> str:
