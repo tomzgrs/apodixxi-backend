@@ -1217,6 +1217,10 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
             detected_store = "BAZAAR"
         elif 'sklavenitis' in url_lower:
             detected_store = "ΣΚΛΑΒΕΝΙΤΗΣ"
+        elif 'discountmarkt' in url_lower:
+            detected_store = "DISCOUNT MARKT"
+        elif 'kritikos' in url_lower or 'kretikos' in url_lower:
+            detected_store = "ΚΡΗΤΙΚΟΣ"
     
     data = {
         "store_name": detected_store,
