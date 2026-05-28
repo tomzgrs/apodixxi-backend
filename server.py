@@ -3607,6 +3607,77 @@ async def get_stats(
     }
 
 
+@api_router.get("/stats/categories")
+async def get_category_stats(device_id: str = Query(...)):
+    """Return spending breakdown by mainCategory → subCategory for this device."""
+    from collections import defaultdict
+
+    receipts = await db.receipts.find(
+        {"device_id": device_id},
+        {"_id": 0, "items": 1}
+    ).to_list(10000)
+
+    # main_cat → sub_cat → total
+    tree: dict = defaultdict(lambda: defaultdict(float))
+
+    for receipt in receipts:
+        for item in receipt.get("items", []):
+            main = item.get("mainCategory") or "Τρόφιμα"
+            sub = item.get("subCategory") or "Γενικά"
+            val = float(item.get("total_value", 0) or 0)
+            if val <= 0:
+                continue
+            tree[main][sub] += val
+
+    if not tree:
+        return {"categories": [], "grand_total": 0}
+
+    grand_total = sum(
+        sum(subs.values()) for subs in tree.values()
+    )
+
+    # Palette for up to 15 main categories (same order as categories.py)
+    PALETTE = [
+        "#0D9488", "#6366F1", "#F59E0B", "#EF4444", "#10B981",
+        "#8B5CF6", "#EC4899", "#3B82F6", "#F97316", "#14B8A6",
+        "#A855F7", "#84CC16", "#06B6D4", "#F43F5E", "#64748B",
+    ]
+    SUB_PALETTE = [
+        "#2DD4BF", "#818CF8", "#FCD34D", "#FCA5A5", "#6EE7B7",
+        "#C4B5FD", "#F9A8D4", "#93C5FD", "#FDBA74", "#5EEAD4",
+        "#D8B4FE", "#BEF264", "#67E8F9", "#FDA4AF", "#CBD5E1",
+    ]
+
+    sorted_main = sorted(tree.items(), key=lambda x: sum(x[1].values()), reverse=True)
+
+    categories = []
+    for idx, (main_cat, subs) in enumerate(sorted_main):
+        main_total = sum(subs.values())
+        main_pct = (main_total / grand_total * 100) if grand_total > 0 else 0
+        color = PALETTE[idx % len(PALETTE)]
+
+        sorted_subs = sorted(subs.items(), key=lambda x: x[1], reverse=True)
+        subcategories = []
+        for sidx, (sub_name, sub_total) in enumerate(sorted_subs):
+            sub_pct = (sub_total / main_total * 100) if main_total > 0 else 0
+            subcategories.append({
+                "name": sub_name,
+                "total": round(sub_total, 2),
+                "percentage": round(sub_pct, 1),
+                "color": SUB_PALETTE[sidx % len(SUB_PALETTE)],
+            })
+
+        categories.append({
+            "name": main_cat,
+            "total": round(main_total, 2),
+            "percentage": round(main_pct, 1),
+            "color": color,
+            "subcategories": subcategories,
+        })
+
+    return {"categories": categories, "grand_total": round(grand_total, 2)}
+
+
 @api_router.get("/stats/analytics")
 async def get_analytics(device_id: str = Query(...), months: int = Query(default=6, ge=1, le=12)):
     """Get spending analytics: monthly breakdown and store distribution."""
