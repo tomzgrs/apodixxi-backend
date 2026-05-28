@@ -502,16 +502,19 @@ async def fetch_html(url: str) -> str:
             return await resp.text()
 
 async def fetch_entersoft_invoice(url: str) -> str:
-    """Fetch Entersoft invoice by first getting the page, extracting iframe src, then fetching iframe content."""
+    """Fetch Entersoft invoice by first getting the page, extracting iframe src, then fetching iframe content.
+    Falls back to using the page HTML directly if no iframe is found (some stores serve the receipt directly)."""
     html = await fetch_html(url)
     soup = BeautifulSoup(html, 'lxml')
     iframe = soup.find('iframe', id='iframeContent')
-    if not iframe or not iframe.get('src'):
-        raise HTTPException(status_code=400, detail="Could not find invoice iframe in page")
-    iframe_src = iframe['src']
-    if iframe_src.startswith('/'):
-        iframe_src = 'https://e-invoicing.gr' + iframe_src
-    return await fetch_html(iframe_src)
+    if iframe and iframe.get('src'):
+        iframe_src = iframe['src']
+        if iframe_src.startswith('/'):
+            iframe_src = 'https://e-invoicing.gr' + iframe_src
+        return await fetch_html(iframe_src)
+    # No iframe found — the page itself may already be the receipt HTML
+    logger.info(f"[entersoft] No iframe found at {url}, using page HTML directly")
+    return html
 
 def parse_entersoft(html: str, source_url: str) -> dict:
     soup = BeautifulSoup(html, 'lxml')
@@ -532,14 +535,16 @@ def parse_entersoft(html: str, source_url: str) -> dict:
         "source_type": "entersoft",
         "provider": "Entersoft"
     }
-    header = soup.find('div', class_='BoldBlueHeader fontSize12pt')
+    header = (soup.find('div', class_='BoldBlueHeader fontSize12pt')
+              or soup.find('div', class_='fontSize12pt BoldBlueHeader')
+              or soup.find('div', class_='BoldBlueHeader'))
     if header:
         data["store_name"] = header.get_text(strip=True)
 
     for div in soup.find_all('div', class_='fontSize8pt'):
         txt = div.get_text(strip=True)
         if 'Α.Φ.Μ' in txt or 'ΑΦΜ' in txt:
-            match = re.search(r'Α\.?Φ\.?Μ\.?:?\s*(\d{9,12})', txt)
+            match = re.search(r'Α\.?Φ\.?Μ\.?[^0-9]*?(\d{9,12})', txt)
             if match:
                 data["store_vat"] = re.sub(r'\D', '', match.group(1))[:9]
             if ',' in txt and 'Α.Φ.Μ' in txt:
@@ -574,13 +579,18 @@ def parse_entersoft(html: str, source_url: str) -> dict:
             for row in rows.find_all('tr'):
                 cells = row.find_all('td')
                 if len(cells) >= 9:
+                    _qty = parse_greek_number(cells[3].get_text(strip=True)) or 1.0
+                    _pre_disc = parse_greek_number(cells[5].get_text(strip=True))
+                    # cells[4] = Τιμή τεμαχίου (unit price); cells[5] = Αξία προ έκπτ. (total pre-discount)
+                    _unit_price_raw = parse_greek_number(cells[4].get_text(strip=True))
+                    _unit_price = _unit_price_raw if _unit_price_raw > 0 else round(_pre_disc / _qty, 5)
                     item = {
                         "code": cells[0].get_text(strip=True),
                         "description": cells[1].get_text(strip=True),
                         "unit": cells[2].get_text(strip=True),
-                        "quantity": parse_greek_number(cells[3].get_text(strip=True)),
-                        "unit_price": parse_greek_number(cells[5].get_text(strip=True)),  # ΑΞΙΑ ΠΡΟ ΕΚΠΤ. (shelf price with VAT)
-                        "pre_discount_value": parse_greek_number(cells[5].get_text(strip=True)),
+                        "quantity": _qty,
+                        "unit_price": _unit_price,
+                        "pre_discount_value": _pre_disc,
                         "discount": parse_greek_number(cells[6].get_text(strip=True)),
                         "vat_percent": parse_greek_number(cells[7].get_text(strip=True).replace('%', '')),
                         "total_value": parse_greek_number(cells[8].get_text(strip=True)),
@@ -1989,6 +1999,8 @@ async def get_me(
                 {"$set": {"account_type": "free", "subscription_expires_at": None}}
             )
     
+    is_premium = account_type == "paid"
+
     return {
         "id": user["_id"],
         "email": user["email"],
@@ -1996,6 +2008,7 @@ async def get_me(
         "phone": user.get("phone"),
         "auth_provider": user.get("auth_provider", "email"),
         "account_type": account_type,
+        "is_premium": is_premium,
         "subscription_expires_at": subscription_expires,
         "is_email_verified": user.get("is_email_verified", False),
         "created_at": user.get("created_at")
@@ -2675,7 +2688,8 @@ async def get_recommendations(
     promotions = await db.promotions.find({
         "is_active": True,
         "$or": [
-            {"start_date": None},
+            {"start_date": {"$in": [None, ""]}},
+            {"start_date": {"$exists": False}},
             {"start_date": {"$lte": now}}
         ]
     }).sort("priority", -1).limit(limit * 3).to_list(limit * 3)
@@ -3261,7 +3275,7 @@ async def index_products_with_categories(
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    await index_products_with_categories(
+    enriched = await index_products_with_categories(
         items=receipt_data["items"],
         store_name=receipt_data["store_name"],
         store_vat=receipt_data["store_vat"],
@@ -3269,6 +3283,8 @@ async def index_products_with_categories(
         receipt_id=doc["id"],
         user_email=user_email,
     )
+    if enriched:
+        await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -3287,13 +3303,15 @@ async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile =
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    await index_products_with_categories(
+    enriched = await index_products_with_categories(
         items=receipt_data["items"],
         store_name=receipt_data["store_name"],
         store_vat=receipt_data["store_vat"],
         receipt_date=receipt_data["date"],
         receipt_id=doc["id"],
     )
+    if enriched:
+        await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -3317,13 +3335,15 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    await index_products_with_categories(
+    enriched = await index_products_with_categories(
         items=receipt_data["items"],
         store_name=receipt_data["store_name"],
         store_vat=receipt_data["store_vat"],
         receipt_date=receipt_data["date"],
         receipt_id=doc["id"],
     )
+    if enriched:
+        await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -3352,13 +3372,15 @@ async def create_manual_receipt(input: ManualReceiptInput):
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    await index_products_with_categories(
+    enriched = await index_products_with_categories(
         items=receipt_data["items"],
         store_name=input.store_name,
         store_vat="",
         receipt_date=input.date,
         receipt_id=doc["id"],
     )
+    if enriched:
+        await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
