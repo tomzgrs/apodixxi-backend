@@ -3431,6 +3431,125 @@ async def compare_product_prices(q: str = Query(..., min_length=2)):
     return {"query": q, "stores": stores, "total_products": len(products)}
 
 
+# ── Phase 2: Price Comparison API with Free / Paid tiers ──────────────────────
+
+@api_router.get("/products/prices")
+async def get_product_prices(
+    description: str = Query(..., min_length=2),
+    authorization: str = Header(None),
+):
+    """
+    Free tier  → min_price, max_price over last 6 months (no store names, no dates).
+    Paid tier  → full price history per store for last 3 months (store name + date).
+    Auth is optional — unauthenticated = Free.
+    """
+    six_months_ago = (datetime.now(timezone.utc) - timedelta(days=182)).strftime("%Y-%m-%d")
+    three_months_ago = (datetime.now(timezone.utc) - timedelta(days=91)).strftime("%Y-%m-%d")
+
+    # Determine tier
+    is_paid = False
+    if authorization and authorization.startswith("Bearer "):
+        token_str = authorization.split(" ", 1)[1]
+        try:
+            payload = verify_token(token_str)
+            user_id = payload.get("sub")
+            if user_id:
+                user = await db.users.find_one({"_id": user_id}) or \
+                       await db.users.find_one({"id": user_id})
+                if user and check_user_is_paid(user):
+                    is_paid = True
+        except Exception:
+            pass
+
+    # Find matching products (fuzzy: case-insensitive contains)
+    products = await db.products.find(
+        {"description": {"$regex": re.escape(description), "$options": "i"}},
+        {"_id": 0}
+    ).to_list(200)
+
+    if not products:
+        return {
+            "description": description,
+            "tier": "paid" if is_paid else "free",
+            "found": False,
+            "results": [],
+        }
+
+    if is_paid:
+        # Paid: full history per store, last 3 months
+        store_map: dict = {}
+        for p in products:
+            store = p.get("store_name", "")
+            if not store:
+                continue
+            history = [
+                e for e in p.get("price_history", [])
+                if e.get("date", "") >= three_months_ago
+            ]
+            if not history and p.get("last_date", "") >= three_months_ago:
+                history = [{
+                    "price": p.get("last_price", 0),
+                    "unit_price": p.get("last_unit_price", 0),
+                    "date": p.get("last_date", ""),
+                    "quantity": 1,
+                }]
+            if not history:
+                continue
+            # Sort newest first
+            history.sort(key=lambda e: e.get("date", ""), reverse=True)
+            if store not in store_map:
+                store_map[store] = {
+                    "store_name": store,
+                    "last_price": history[0]["price"],
+                    "last_date": history[0]["date"],
+                    "mainCategory": p.get("mainCategory", ""),
+                    "subCategory": p.get("subCategory", ""),
+                    "price_history": [],
+                }
+            store_map[store]["price_history"].extend([
+                {"price": e["price"], "unit_price": e.get("unit_price", 0), "date": e["date"]}
+                for e in history
+            ])
+
+        # Sort by last_price ascending (cheapest first)
+        results = sorted(store_map.values(), key=lambda x: x["last_price"])
+        return {
+            "description": description,
+            "tier": "paid",
+            "found": True,
+            "store_count": len(results),
+            "results": results,
+        }
+
+    else:
+        # Free: only min/max price over last 6 months — no store names
+        all_prices: list[float] = []
+        for p in products:
+            for e in p.get("price_history", []):
+                if e.get("date", "") >= six_months_ago and e.get("price", 0) > 0:
+                    all_prices.append(float(e["price"]))
+            # Also include last_price if within window
+            if p.get("last_date", "") >= six_months_ago and p.get("last_price", 0) > 0:
+                all_prices.append(float(p["last_price"]))
+
+        if not all_prices:
+            return {
+                "description": description,
+                "tier": "free",
+                "found": False,
+                "results": [],
+            }
+
+        return {
+            "description": description,
+            "tier": "free",
+            "found": True,
+            "min_price": round(min(all_prices), 2),
+            "max_price": round(max(all_prices), 2),
+            "sample_count": len(all_prices),
+        }
+
+
 @api_router.get("/stats")
 async def get_stats(
     device_id: str = Query(...),
