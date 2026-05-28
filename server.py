@@ -244,6 +244,8 @@ class ProductItem(BaseModel):
     discount: float = 0.0
     vat_percent: float = 0.0
     total_value: float = 0.0
+    mainCategory: str = ""
+    subCategory: str = ""
 
 class ReceiptData(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -3104,6 +3106,104 @@ async def import_receipt_from_url(
     if provider == 'unknown':
         raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: e-invoicing.gr, einvoice.impact.gr")
 
+
+# ── Helper: index products into the products collection with AI categories ──
+
+async def index_products_with_categories(
+    items: list,
+    store_name: str,
+    store_vat: str,
+    receipt_date: str,
+    receipt_id: str,
+    user_email: str = "",
+) -> list:
+    """Batch-classify all items and upsert them in the products collection.
+    Returns the items list with mainCategory / subCategory filled in.
+    """
+    descriptions = [
+        item.get("description", "") if isinstance(item, dict) else getattr(item, "description", "")
+        for item in items
+        if (item.get("description", "") if isinstance(item, dict) else getattr(item, "description", ""))
+    ]
+
+    # Batch AI classification (one call for up to 30 items)
+    cat_map: dict = {}
+    if descriptions and AI_AVAILABLE:
+        try:
+            cat_map = await batch_classify_products(descriptions)
+        except Exception as e:
+            logger.warning(f"Batch classification failed, using defaults: {e}")
+
+    enriched_items: list = []
+    for item in items:
+        if isinstance(item, dict):
+            desc = item.get("description", "")
+            total_val = item.get("total_value", 0)
+            unit_price_val = item.get("unit_price", 0)
+            qty = item.get("quantity", 1)
+            code = item.get("code", "")
+            unit = item.get("unit", "")
+            vat_pct = item.get("vat_percent", 0)
+        else:
+            desc = getattr(item, "description", "")
+            total_val = getattr(item, "total_value", 0)
+            unit_price_val = getattr(item, "unit_price", 0)
+            qty = getattr(item, "quantity", 1)
+            code = getattr(item, "code", "")
+            unit = getattr(item, "unit", "")
+            vat_pct = getattr(item, "vat_percent", 0)
+
+        cats = cat_map.get(desc, {"mainCategory": DEFAULT_MAIN_CATEGORY, "subCategory": DEFAULT_SUB_CATEGORY})
+        main_cat = cats.get("mainCategory", DEFAULT_MAIN_CATEGORY)
+        sub_cat = cats.get("subCategory", DEFAULT_SUB_CATEGORY)
+
+        # Write mainCategory/subCategory back into the item dict
+        if isinstance(item, dict):
+            item["mainCategory"] = main_cat
+            item["subCategory"] = sub_cat
+        else:
+            item.mainCategory = main_cat
+            item.subCategory = sub_cat
+
+        enriched_items.append(item)
+
+        # Upsert into products collection
+        set_doc: dict = {
+            "description": desc,
+            "code": code,
+            "store_name": store_name,
+            "store_vat": store_vat,
+            "last_price": total_val,
+            "last_unit_price": unit_price_val,
+            "last_date": receipt_date,
+            "unit": unit,
+            "vat_percent": vat_pct,
+            "mainCategory": main_cat,
+            "subCategory": sub_cat,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if user_email:
+            set_doc["user_email"] = user_email
+
+        await db.products.update_one(
+            {"description": desc, "store_name": store_name},
+            {
+                "$set": set_doc,
+                "$push": {
+                    "price_history": {
+                        "price": total_val,
+                        "unit_price": unit_price_val,
+                        "date": receipt_date,
+                        "quantity": qty,
+                        "receipt_id": receipt_id,
+                    }
+                },
+            },
+            upsert=True,
+        )
+
+    return enriched_items
+
     # Check for duplicate receipt by URL
     if not input.force_import:
         existing = await db.receipts.find_one({"source_url": url, "device_id": input.device_id})
@@ -3140,26 +3240,14 @@ async def import_receipt_from_url(
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    # Index products with user_email
-    for item in receipt_data["items"]:
-        await db.products.update_one(
-            {"description": item["description"], "store_name": receipt_data["store_name"]},
-            {"$set": {
-                "description": item["description"],
-                "code": item["code"],
-                "store_name": receipt_data["store_name"],
-                "store_vat": receipt_data["store_vat"],
-                "last_price": item["total_value"],
-                "last_unit_price": item["unit_price"],
-                "last_date": receipt_data["date"],
-                "unit": item["unit"],
-                "user_email": user_email,  # Track which user added this product
-                "vat_percent": item["vat_percent"],
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            },
-            "$push": {"price_history": {"price": item["total_value"], "unit_price": item["unit_price"], "date": receipt_data["date"], "quantity": item["quantity"], "receipt_id": doc["id"]}}},
-            upsert=True
-        )
+    await index_products_with_categories(
+        items=receipt_data["items"],
+        store_name=receipt_data["store_name"],
+        store_vat=receipt_data["store_vat"],
+        receipt_date=receipt_data["date"],
+        receipt_id=doc["id"],
+        user_email=user_email,
+    )
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -3178,24 +3266,13 @@ async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile =
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    for item in receipt_data["items"]:
-        await db.products.update_one(
-            {"description": item["description"], "store_name": receipt_data["store_name"]},
-            {"$set": {
-                "description": item["description"],
-                "code": item["code"],
-                "store_name": receipt_data["store_name"],
-                "store_vat": receipt_data["store_vat"],
-                "last_price": item["total_value"],
-                "last_unit_price": item["unit_price"],
-                "last_date": receipt_data["date"],
-                "unit": item["unit"],
-                "vat_percent": item["vat_percent"],
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            },
-            "$push": {"price_history": {"price": item["total_value"], "unit_price": item["unit_price"], "date": receipt_data["date"], "quantity": item["quantity"], "receipt_id": doc["id"]}}},
-            upsert=True
-        )
+    await index_products_with_categories(
+        items=receipt_data["items"],
+        store_name=receipt_data["store_name"],
+        store_vat=receipt_data["store_vat"],
+        receipt_date=receipt_data["date"],
+        receipt_id=doc["id"],
+    )
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -3219,23 +3296,13 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    for item in receipt_data["items"]:
-        await db.products.update_one(
-            {"description": item["description"], "store_name": receipt_data["store_name"]},
-            {"$set": {
-                "description": item["description"],
-                "code": item["code"],
-                "store_name": receipt_data["store_name"],
-                "store_vat": receipt_data["store_vat"],
-                "last_price": item["total_value"],
-                "last_unit_price": item["unit_price"],
-                "last_date": receipt_data["date"],
-                "unit": item["unit"],
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            },
-            "$push": {"price_history": {"price": item["total_value"], "unit_price": item["unit_price"], "date": receipt_data["date"], "quantity": item["quantity"], "receipt_id": doc["id"]}}},
-            upsert=True
-        )
+    await index_products_with_categories(
+        items=receipt_data["items"],
+        store_name=receipt_data["store_name"],
+        store_vat=receipt_data["store_vat"],
+        receipt_date=receipt_data["date"],
+        receipt_id=doc["id"],
+    )
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -3264,22 +3331,13 @@ async def create_manual_receipt(input: ManualReceiptInput):
     doc = receipt.dict()
     await db.receipts.insert_one(doc)
 
-    for item in input.items:
-        await db.products.update_one(
-            {"description": item.description, "store_name": input.store_name},
-            {"$set": {
-                "description": item.description,
-                "code": item.code,
-                "store_name": input.store_name,
-                "last_price": item.total_value,
-                "last_unit_price": item.unit_price,
-                "last_date": input.date,
-                "unit": item.unit,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            },
-            "$push": {"price_history": {"price": item.total_value, "unit_price": item.unit_price, "date": input.date, "quantity": item.quantity, "receipt_id": doc["id"]}}},
-            upsert=True
-        )
+    await index_products_with_categories(
+        items=receipt_data["items"],
+        store_name=input.store_name,
+        store_vat="",
+        receipt_date=input.date,
+        receipt_id=doc["id"],
+    )
 
     doc.pop("_id", None)
     return {"status": "success", "receipt": doc}
@@ -5533,15 +5591,11 @@ else:
     logger.warning("GROQ_API_KEY not set - AI features disabled")
 
 # Master Categories for AI Classification
-MASTER_CATEGORIES = [
-    "Τρόφιμα & Ποτά",
-    "Προσωπική Φροντίδα",
-    "Καθαριότητα & Σπίτι",
-    "Βρεφικά Είδη",
-    "Κατοικίδια",
-    "Είδη Bazaar / Σπιτιού",
-    "Άλλο"
-]
+from categories import CATEGORIES, MAIN_CATEGORIES, validate_category, build_ai_category_list, DEFAULT_MAIN_CATEGORY, DEFAULT_SUB_CATEGORY
+
+MASTER_CATEGORIES = MAIN_CATEGORIES  # 15 main categories — kept for backward compat
+
+_AI_CATEGORY_LIST = build_ai_category_list()  # built once at startup
 
 async def generate_ai_content(prompt: str) -> str:
     """Generate content using Groq AI."""
@@ -5573,85 +5627,95 @@ async def generate_ai_content(prompt: str) -> str:
         logger.error(f"Groq AI error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
-async def classify_product_with_ai(product_name: str, store_name: str = "") -> str:
-    """Classify a product into one of the master categories using Gemini AI."""
+async def classify_product_with_ai(product_name: str, store_name: str = "") -> dict:
+    """Classify a product into one of the 15 main + 68 sub categories.
+    Returns {"mainCategory": str, "subCategory": str}.
+    """
+    fallback = {"mainCategory": DEFAULT_MAIN_CATEGORY, "subCategory": DEFAULT_SUB_CATEGORY}
     if not AI_AVAILABLE:
-        return "Άλλο"
-    
+        return fallback
+
     try:
-        prompt = f"""Κατηγοριοποίησε το παρακάτω προϊόν supermarket σε ΜΙΑ από τις εξής κατηγορίες:
-1. Τρόφιμα & Ποτά (Γαλακτοκομικά, Αλλαντικά, Κρεοπωλείο, Μαναβική, Κατεψυγμένα, Σνακ, Ποτά/Αναψυκτικά)
-2. Προσωπική Φροντίδα (Σαμπουάν, Αφρόλουτρα, Στοματική Υγιεινή, Καλλυντικά)
-3. Καθαριότητα & Σπίτι (Απορρυπαντικά, Χαρτικά, Εργαλεία καθαρισμού)
-4. Βρεφικά Είδη (Πάνες, Βρεφικές Τροφές)
-5. Κατοικίδια (Τροφές ζώων, Άμμος γάτας)
-6. Είδη Bazaar / Σπιτιού (Κουζινικά, Ηλεκτρικές συσκευές, Ένδυση)
-7. Άλλο
+        prompt = f"""Είσαι σύστημα κατηγοριοποίησης προϊόντων ελληνικού supermarket.
+Κατηγοριοποίησε το παρακάτω προϊόν επιλέγοντας ΑΚΡΙΒΩΣ μία Κύρια Κατηγορία και μία Υποκατηγορία από τη λίστα.
+
+ΛΙΣΤΑ ΚΑΤΗΓΟΡΙΩΝ:
+{_AI_CATEGORY_LIST}
 
 Προϊόν: {product_name}
 {f'Κατάστημα: {store_name}' if store_name else ''}
 
-Απάντησε ΜΟΝΟ με το όνομα της κατηγορίας, χωρίς εξηγήσεις."""
+Απάντησε ΜΟΝΟ σε μορφή JSON χωρίς εξηγήσεις:
+{{"mainCategory": "<Κύρια Κατηγορία>", "subCategory": "<Υποκατηγορία>"}}"""
 
         response_text = await generate_ai_content(prompt)
-        category = response_text.strip()
-        
-        # Validate response is one of our categories
-        for master_cat in MASTER_CATEGORIES:
-            if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
-                return master_cat
-        
-        return "Άλλο"
+
+        json_match = re.search(r'\{[^{}]+\}', response_text, re.DOTALL)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            main_cat = parsed.get("mainCategory", "").strip()
+            sub_cat = parsed.get("subCategory", "").strip()
+            main_cat, sub_cat = validate_category(main_cat, sub_cat)
+            return {"mainCategory": main_cat, "subCategory": sub_cat}
+
+        return fallback
     except Exception as e:
         logger.error(f"AI classification error: {e}")
-        return "Άλλο"
+        return fallback
+
 
 async def batch_classify_products(products: list) -> dict:
-    """Classify multiple products in a single AI call for efficiency."""
+    """Classify up to 30 products in a single AI call.
+    Returns {description: {"mainCategory": str, "subCategory": str}}.
+    """
+    fallback_entry = {"mainCategory": DEFAULT_MAIN_CATEGORY, "subCategory": DEFAULT_SUB_CATEGORY}
     if not AI_AVAILABLE or not products:
-        return {p: "Άλλο" for p in products}
-    
-    try:
-        products_list = "\n".join([f"- {p}" for p in products[:50]])  # Limit to 50 products
-        
-        prompt = f"""Κατηγοριοποίησε τα παρακάτω προϊόντα supermarket. Για κάθε προϊόν, δώσε ΜΙΑ από τις κατηγορίες:
-- Τρόφιμα & Ποτά
-- Προσωπική Φροντίδα
-- Καθαριότητα & Σπίτι
-- Βρεφικά Είδη
-- Κατοικίδια
-- Είδη Bazaar / Σπιτιού
-- Άλλο
+        return {p: fallback_entry for p in products}
 
-Προϊόντα:
+    try:
+        batch = products[:30]
+        products_list = "\n".join([f'"{p}"' for p in batch])
+
+        prompt = f"""Είσαι σύστημα κατηγοριοποίησης προϊόντων ελληνικού supermarket.
+Κατηγοριοποίησε ΚΑΘΕ προϊόν από τη λίστα επιλέγοντας ΑΚΡΙΒΩΣ μία Κύρια Κατηγορία και μία Υποκατηγορία.
+
+ΛΙΣΤΑ ΚΑΤΗΓΟΡΙΩΝ:
+{_AI_CATEGORY_LIST}
+
+ΠΡΟΪΟΝΤΑ:
 {products_list}
 
-Απάντησε σε μορφή JSON: {{"product_name": "category", ...}}
-Μόνο JSON, χωρίς εξηγήσεις."""
+Απάντησε ΜΟΝΟ σε μορφή JSON χωρίς εξηγήσεις:
+{{
+  "<προϊόν>": {{"mainCategory": "<Κύρια Κατηγορία>", "subCategory": "<Υποκατηγορία>"}},
+  ...
+}}"""
 
         response_text = await generate_ai_content(prompt)
-        
-        # Try to parse JSON response
-        import re
-        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
         if json_match:
-            result = json.loads(json_match.group())
-            # Validate categories
-            validated = {}
-            for product, category in result.items():
-                matched = False
-                for master_cat in MASTER_CATEGORIES:
-                    if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
-                        validated[product] = master_cat
-                        matched = True
-                        break
-                if not matched:
-                    validated[product] = "Άλλο"
+            raw = json.loads(json_match.group())
+            validated: dict = {}
+            for product, cats in raw.items():
+                if isinstance(cats, dict):
+                    main_cat, sub_cat = validate_category(
+                        cats.get("mainCategory", "").strip(),
+                        cats.get("subCategory", "").strip()
+                    )
+                    validated[product] = {"mainCategory": main_cat, "subCategory": sub_cat}
+                else:
+                    validated[product] = fallback_entry
+            # Fill in any products that the AI skipped
+            for p in batch:
+                if p not in validated:
+                    validated[p] = fallback_entry
             return validated
-        return {p: "Άλλο" for p in products}
+
+        return {p: fallback_entry for p in batch}
     except Exception as e:
         logger.error(f"Batch AI classification error: {e}")
-        return {p: "Άλλο" for p in products}
+        return {p: fallback_entry for p in products}
 
 class AIInsightRequest(BaseModel):
     device_id: str
@@ -5690,7 +5754,7 @@ async def get_ai_insights(request: AIInsightRequest):
         stores[store] = stores.get(store, 0) + receipt.get("total_amount", receipt.get("total", 0))
         
         for item in receipt.get("items", []):
-            cat = item.get("category", "Άλλο")
+            cat = item.get("mainCategory") or item.get("category", "Τρόφιμα")
             categories[cat] = categories.get(cat, 0) + item.get("total_price", 0)
             
             name = item.get("name", "")
@@ -5822,7 +5886,7 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
         stores.add(receipt.get("store_name", ""))
         for item in receipt.get("items", []):
             name = item.get("name", "")
-            cat = item.get("category", "Άλλο")
+            cat = item.get("mainCategory") or item.get("category", "Τρόφιμα")
             price = item.get("unit_price", 0)
             
             if name:
