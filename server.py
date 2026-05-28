@@ -2678,12 +2678,33 @@ async def get_recommendations(
             {"start_date": None},
             {"start_date": {"$lte": now}}
         ]
-    }).sort("priority", -1).limit(limit).to_list(limit)
+    }).sort("priority", -1).limit(limit * 3).to_list(limit * 3)
+
+    # Collect user's purchased mainCategories for category-targeted promotions
+    user_receipts = await db.receipts.find(
+        {"device_id": device_id},
+        {"items.mainCategory": 1}
+    ).to_list(200)
+    user_categories: set = set()
+    for receipt in user_receipts:
+        for item in receipt.get("items", []):
+            cat = item.get("mainCategory")
+            if cat:
+                user_categories.add(cat)
     
     for promo in promotions:
+        if len(recommendations) >= limit:
+            break
         # Check end date
         if promo.get("end_date") and promo["end_date"] < now:
             continue
+        # Category targeting: if target_categories is set, only show when user
+        # has bought at least one item in those categories. target_all_users
+        # overrides this filter (shown to everyone regardless).
+        target_cats = promo.get("target_categories", [])
+        if target_cats and not promo.get("target_all_users", True):
+            if not user_categories.intersection(set(target_cats)):
+                continue
         
         recommendations.append({
             "id": promo["_id"],
