@@ -5861,6 +5861,15 @@ if AI_AVAILABLE:
 else:
     logger.warning("GROQ_API_KEY not set - AI features disabled")
 
+@api_router.get("/ai/status")
+async def get_ai_status():
+    """Diagnostic endpoint: check if Groq AI is configured and available."""
+    return {
+        "available": AI_AVAILABLE,
+        "model": "llama-3.3-70b-versatile" if AI_AVAILABLE else None,
+        "key_configured": bool(GROQ_API_KEY),
+    }
+
 # Master Categories for AI Classification
 from categories import CATEGORIES, MAIN_CATEGORIES, validate_category, build_ai_category_list, DEFAULT_MAIN_CATEGORY, DEFAULT_SUB_CATEGORY
 
@@ -5964,9 +5973,22 @@ async def batch_classify_products(products: list) -> dict:
 
         response_text = await generate_ai_content(prompt)
 
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        # Strip markdown code fences that some models add
+        response_clean = re.sub(r'```(?:json)?\s*|\s*```', '', response_text).strip()
+
+        json_match = re.search(r'\{.*\}', response_clean, re.DOTALL)
         if json_match:
-            raw = json.loads(json_match.group())
+            json_str = json_match.group()
+            try:
+                raw = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Fix trailing commas
+                json_str = re.sub(r',\s*}', '}', re.sub(r',\s*]', ']', json_str))
+                try:
+                    raw = json.loads(json_str)
+                except json.JSONDecodeError as je:
+                    logger.warning(f"Could not parse AI JSON: {je}")
+                    return {p: fallback_entry for p in batch}
             validated: dict = {}
             for product, cats in raw.items():
                 if isinstance(cats, dict):
@@ -5977,12 +5999,16 @@ async def batch_classify_products(products: list) -> dict:
                     validated[product] = {"mainCategory": main_cat, "subCategory": sub_cat}
                 else:
                     validated[product] = fallback_entry
-            # Fill in any products that the AI skipped
+            # Build normalized lookup for fuzzy matching (AI may slightly rename products)
+            norm_lookup = {k.strip().lower(): v for k, v in validated.items()}
+            # Fill in any products that the AI skipped or renamed
             for p in batch:
                 if p not in validated:
-                    validated[p] = fallback_entry
+                    fuzzy = norm_lookup.get(p.strip().lower())
+                    validated[p] = fuzzy if fuzzy else fallback_entry
             return validated
 
+        logger.warning("AI response did not contain valid JSON object")
         return {p: fallback_entry for p in batch}
     except Exception as e:
         logger.error(f"Batch AI classification error: {e}")
