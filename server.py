@@ -872,7 +872,7 @@ def parse_mydata_xml(xml_content: str) -> dict:
 
 
 def detect_provider(url: str) -> str:
-    if 'e-invoicing.gr' in url:
+    if 'e-invoicing.gr' in url or 'entersoftone.gr' in url:
         # /edocuments/ViewInvoice/ URLs are PEPPOL format (confirmed from HTML structure)
         if 'ct=PEPPOL' in url or 'contentType=PEPPOL' in url or '/edocuments/ViewInvoice/' in url or '/edocuments/viewinvoice/' in url.lower():
             return 'peppol'
@@ -3139,7 +3139,61 @@ async def import_receipt_from_url(
         return {"status": "webview_required", "url": url, "message": "This receipt requires WebView import. Opening in-app browser..."}
 
     if provider == 'unknown':
-        raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: e-invoicing.gr, einvoice.impact.gr")
+        raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: e-invoicing.gr, entersoftone.gr, einvoice.impact.gr")
+
+    # Check for duplicate receipt by URL
+    if not input.force_import:
+        existing = await db.receipts.find_one({"source_url": url, "device_id": input.device_id})
+        if existing:
+            existing.pop("_id", None)
+            return {
+                "status": "duplicate",
+                "message": "Αυτή η απόδειξη έχει ήδη εισαχθεί.",
+                "existing_receipt": existing,
+                "url": url
+            }
+
+    try:
+        if provider == 'entersoft':
+            html = await fetch_entersoft_invoice(url)
+            receipt_data = parse_entersoft(html, url)
+        elif provider == 'peppol':
+            html_content = await fetch_peppol_invoice(url)
+            receipt_data = parse_peppol_html(html_content, url)
+        elif provider == 'impact':
+            html = await fetch_html(url)
+            receipt_data = parse_impact(html, url)
+        else:
+            raise HTTPException(status_code=400, detail="Parser not available for this provider")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[import-url] Parser error for provider={provider}: {e}")
+        raise HTTPException(status_code=422, detail=f"Σφάλμα ανάλυσης απόδειξης ({provider}): {str(e)}")
+
+    if not receipt_data or not receipt_data.get("items"):
+        raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
+
+    receipt_data["user_email"] = user_email
+    receipt_data["receipt_url"] = url
+
+    receipt = ReceiptData(device_id=input.device_id, **receipt_data)
+    doc = receipt.dict()
+    await db.receipts.insert_one(doc)
+
+    enriched = await index_products_with_categories(
+        items=receipt_data["items"],
+        store_name=receipt_data["store_name"],
+        store_vat=receipt_data["store_vat"],
+        receipt_date=receipt_data["date"],
+        receipt_id=doc["id"],
+        user_email=user_email,
+    )
+    if enriched:
+        await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
+
+    doc.pop("_id", None)
+    return {"status": "success", "receipt": doc}
 
 
 # ── Helper: index products into the products collection with AI categories ──
@@ -3238,56 +3292,6 @@ async def index_products_with_categories(
         )
 
     return enriched_items
-
-    # Check for duplicate receipt by URL
-    if not input.force_import:
-        existing = await db.receipts.find_one({"source_url": url, "device_id": input.device_id})
-        if existing:
-            existing.pop("_id", None)
-            return {
-                "status": "duplicate",
-                "message": "Αυτή η απόδειξη έχει ήδη εισαχθεί.",
-                "existing_receipt": existing,
-                "url": url
-            }
-
-    if provider == 'entersoft':
-        html = await fetch_entersoft_invoice(url)
-        receipt_data = parse_entersoft(html, url)
-    elif provider == 'peppol':
-        # PEPPOL URLs return HTML (like Entersoft) when isPreview=True is added
-        html_content = await fetch_peppol_invoice(url)
-        receipt_data = parse_peppol_html(html_content, url)
-    elif provider == 'impact':
-        html = await fetch_html(url)
-        receipt_data = parse_impact(html, url)
-    else:
-        raise HTTPException(status_code=400, detail="Parser not available for this provider")
-
-    if not receipt_data["items"]:
-        raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
-
-    # Add user_email and receipt_url to receipt data
-    receipt_data["user_email"] = user_email
-    receipt_data["receipt_url"] = url
-    
-    receipt = ReceiptData(device_id=input.device_id, **receipt_data)
-    doc = receipt.dict()
-    await db.receipts.insert_one(doc)
-
-    enriched = await index_products_with_categories(
-        items=receipt_data["items"],
-        store_name=receipt_data["store_name"],
-        store_vat=receipt_data["store_vat"],
-        receipt_date=receipt_data["date"],
-        receipt_id=doc["id"],
-        user_email=user_email,
-    )
-    if enriched:
-        await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
-
-    doc.pop("_id", None)
-    return {"status": "success", "receipt": doc}
 
 
 @api_router.post("/receipts/import-xml")
