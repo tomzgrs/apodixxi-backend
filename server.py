@@ -1303,6 +1303,13 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
         if any(k in line for k in ['POS', 'Μετρητ', 'Κάρτα', 'ΠΛΗΡΩΜ']):
             data["payment_method"] = line.strip()
 
+    # Fallback: if store name still empty, scan raw_text for known brand keywords
+    if not data["store_name"] and raw_text:
+        brand = detect_store_brand(raw_text[:3000])
+        if brand:
+            data["store_name"] = brand
+            logger.info(f"[parse_webview_extracted] Store detected from raw_text: {brand}")
+
     # Use clean store name (VAT mapping or keyword detection)
     data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
 
