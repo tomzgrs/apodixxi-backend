@@ -541,10 +541,20 @@ def parse_entersoft(html: str, source_url: str) -> dict:
     if header:
         data["store_name"] = header.get_text(strip=True)
 
+    # Fallback: try title/h1/h2 for store name
+    if not data["store_name"]:
+        for tag in ['title', 'h1', 'h2']:
+            el = soup.find(tag)
+            if el:
+                t = el.get_text(strip=True)
+                if t and len(t) < 80:
+                    data["store_name"] = t
+                    break
+
     for div in soup.find_all('div', class_='fontSize8pt'):
         txt = div.get_text(strip=True)
         if 'Α.Φ.Μ' in txt or 'ΑΦΜ' in txt:
-            match = re.search(r'Α\.?Φ\.?Μ\.?[^0-9]*?(\d{9,12})', txt)
+            match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)\.?:?\s*(?:EL)?(\d{9,12})', txt)
             if match:
                 data["store_vat"] = re.sub(r'\D', '', match.group(1))[:9]
             if ',' in txt and 'Α.Φ.Μ' in txt:
@@ -555,6 +565,23 @@ def parse_entersoft(html: str, source_url: str) -> dict:
             data["receipt_number"] = txt.replace('Αρ. Παραστατικού:', '').strip()
         elif txt.startswith('Ημ/νία έκδοσης'):
             data["date"] = txt.replace('Ημ/νία έκδοσης:', '').strip()
+
+    # Fallback VAT scan: search ALL elements if not found in fontSize8pt divs
+    if not data["store_vat"]:
+        full_text = soup.get_text(separator=' ')
+        vat_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)\.?:?\s*(?:EL)?(\d{9,12})', full_text)
+        if vat_match:
+            data["store_vat"] = re.sub(r'\D', '', vat_match.group(1))[:9]
+            logger.info(f"[parse_entersoft] VAT found via full-page fallback: {data['store_vat']}")
+
+    # Fallback receipt number / date: scan ALL divs if missing
+    if not data["receipt_number"] or not data["date"]:
+        for el in soup.find_all(['div', 'span', 'td', 'p']):
+            txt = el.get_text(strip=True)
+            if not data["receipt_number"] and txt.startswith('Αρ. Παραστατικού'):
+                data["receipt_number"] = txt.replace('Αρ. Παραστατικού:', '').strip()
+            if not data["date"] and txt.startswith('Ημ/νία έκδοσης'):
+                data["date"] = txt.replace('Ημ/νία έκδοσης:', '').strip()
 
     # Try address from a specific div
     addr_divs = soup.find_all('div', class_='fontSize8pt')
