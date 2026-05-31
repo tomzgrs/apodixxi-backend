@@ -2740,20 +2740,25 @@ async def get_recommendations(
             if cat:
                 user_categories.add(cat)
     
+    # Split promotions into two buckets: matching (user's categories) and general
+    # All promotions are shown to ALL users — matching ones appear first (higher priority)
+    matching_promos = []
+    general_promos = []
     for promo in promotions:
-        if len(recommendations) >= limit:
-            break
         # Check end date
         if promo.get("end_date") and promo["end_date"] < now:
             continue
-        # Category targeting: if target_categories is set, only show when user
-        # has bought at least one item in those categories. target_all_users
-        # overrides this filter (shown to everyone regardless).
         target_cats = promo.get("target_categories", [])
-        if target_cats and not promo.get("target_all_users", True):
-            if not user_categories.intersection(set(target_cats)):
-                continue
-        
+        # A promotion "matches" if it has specific categories and the user bought in them
+        if target_cats and user_categories.intersection(set(target_cats)):
+            matching_promos.append(promo)
+        else:
+            general_promos.append(promo)
+
+    # Show matching promotions first, then general ones — all users see all promotions
+    for promo in matching_promos + general_promos:
+        if len(recommendations) >= limit:
+            break
         recommendations.append({
             "id": promo["_id"],
             "type": "promotion",
