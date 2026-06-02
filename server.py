@@ -671,6 +671,15 @@ def parse_entersoft(html: str, source_url: str) -> dict:
     # Use clean store name (VAT mapping or keyword detection)
     data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
 
+    # Sklavenitis, Masoutis, Jumbo: receipt shows unit_price WITHOUT VAT — add VAT
+    _NET_UNIT_STORES_ENTERSOFT = {"ΣΚΛΑΒΕΝΙΤΗΣ", "ΜΑΣΟΥΤΗΣ", "JUMBO"}
+    if data["store_name"] in _NET_UNIT_STORES_ENTERSOFT:
+        for _item in data["items"]:
+            _vat = _item.get("vat_percent", 0.0)
+            _up = _item.get("unit_price", 0.0)
+            if _vat > 0 and _up > 0:
+                _item["unit_price"] = round(_up * (1.0 + _vat / 100.0), 5)
+
     return data
 
 
@@ -802,6 +811,24 @@ def parse_impact(html: str, source_url: str) -> dict:
     # Use clean store name (VAT mapping or keyword detection)
     data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
 
+    # Lidl: for packaged products (qty>1) the parser reads the line-total as unit_price
+    # Fix: recalculate unit_price = total_value / quantity
+    if data["store_name"] == "LIDL":
+        for _item in data["items"]:
+            _qty = _item.get("quantity", 1.0)
+            _total = _item.get("total_value", 0.0)
+            _up = _item.get("unit_price", 0.0)
+            if _qty > 1.0 and abs(_up - _total) < 0.01:
+                _item["unit_price"] = round(_total / _qty, 5)
+
+    # Jumbo (if using Impact/Entersoft-One parser): unit_price is net (without VAT) — add VAT
+    if data["store_name"] == "JUMBO":
+        for _item in data["items"]:
+            _vat = _item.get("vat_percent", 0.0)
+            _up = _item.get("unit_price", 0.0)
+            if _vat > 0 and _up > 0:
+                _item["unit_price"] = round(_up * (1.0 + _vat / 100.0), 5)
+
     return data
 
 
@@ -877,6 +904,15 @@ def parse_mydata_xml(xml_content: str) -> dict:
             "total_value": total,
         }
         data["items"].append(item)
+
+    # AB Vasilopoulos, Market In, Egnatia, Kretikos:
+    # XML netValue is WITHOUT VAT — correct unit_price to include VAT = total_value / qty
+    _AB_GROUP_VATS = {"094025817", "998771189", "094357707", "094247924"}
+    if data.get("store_vat") in _AB_GROUP_VATS:
+        for _item in data["items"]:
+            _qty = _item.get("quantity", 1.0)
+            _total = _item.get("total_value", 0.0)
+            _item["unit_price"] = round(_total / _qty, 5) if _qty else _total
 
     if data["items"]:
         data["total"] = round(sum(i["total_value"] for i in data["items"]), 2)
