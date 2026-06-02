@@ -1409,7 +1409,18 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
                 "vat_percent": 0.0,
                 "total_value": round(total_val, 2),
             }
-            data["items"].append(item)
+                        # Epsilon Digital / Blazor: weight products may arrive with qty=1 and weight
+              # embedded in description (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG"). Extract actual weight.
+              _unit_up = item["unit"].upper().strip()
+              if _unit_up in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(item["quantity"] - 1.0) < 0.001 and item["total_value"] > 0:
+                  _wm = re.search(r'(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)', item["description"], re.IGNORECASE)
+                  if _wm:
+                      _wt = float(_wm.group(1).replace(',', '.'))
+                      if 0.001 < _wt < 100:
+                          item["description"] = re.sub(r'\s*\d+[,.]\d{1,3}\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ[αάό]?)', '', item["description"], flags=re.IGNORECASE).strip()
+                          item["quantity"] = _wt
+                          item["unit_price"] = round(item["total_value"] / _wt, 5)
+              data["items"].append(item)
 
     # If no items from DOM, try parsing raw text for tab/space-separated product lines
     if not data["items"] and raw_text:
@@ -6859,12 +6870,34 @@ async def fix_unit_prices_migration():
                     changed = True
 
             # AB group: unit_price = total_value / qty
-            elif store_vat in AB_GROUP_VATS and qty > 0 and total > 0:
-                correct_up = round(total / qty, 5)
-                if abs(up - correct_up) > 0.005:
-                    item["unit_price"] = correct_up
-                    changed = True
-
+              # Also fixes weight products where description contains embedded weight (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG")
+              elif store_vat in AB_GROUP_VATS and qty > 0 and total > 0:
+                  _unit_m = str(item.get("unit", "")).upper().strip()
+                  if _unit_m in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(qty - 1.0) < 0.001 and abs(up - total) < 0.015:
+                      _wm2 = re.search(r'(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)', str(item.get("description", "")), re.IGNORECASE)
+                      if _wm2:
+                          _wt2 = float(_wm2.group(1).replace(',', '.'))
+                          if 0.001 < _wt2 < 100 and abs(_wt2 - 1.0) > 0.005:
+                              item["description"] = re.sub(r'\s*\d+[,.]\d{1,3}\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ[αάό]?)', '', str(item.get("description", "")), flags=re.IGNORECASE).strip()
+                              item["quantity"] = _wt2
+                              item["unit_price"] = round(total / _wt2, 5)
+                              changed = True
+                          else:
+                              correct_up = round(total / qty, 5)
+                              if abs(up - correct_up) > 0.005:
+                                  item["unit_price"] = correct_up
+                                  changed = True
+                      else:
+                          correct_up = round(total / qty, 5)
+                          if abs(up - correct_up) > 0.005:
+                              item["unit_price"] = correct_up
+                              changed = True
+                  else:
+                      correct_up = round(total / qty, 5)
+                      if abs(up - correct_up) > 0.005:
+                          item["unit_price"] = correct_up
+                          changed = True
+  
             new_items.append(item)
 
         if changed:
