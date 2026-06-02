@@ -6807,6 +6807,83 @@ async def delete_account_page():
     return HTMLResponse(content=html_content)
 
 
+@api_router.post("/admin/fix-unit-prices")
+async def fix_unit_prices_migration():
+    """
+    One-time migration: recalculate unit_price for all existing receipts
+    where the stored value is wrong due to old parser bugs.
+
+    Rules applied (same as current parsers):
+    - LIDL: packaged qty>1 where unit_price ≈ total_value → unit_price = total/qty
+    - ΣΚΛΑΒΕΝΙΤΗΣ / ΜΑΣΟΥΤΗΣ / JUMBO (entersoft): unit_price is net → multiply by (1+vat%)
+    - AB group VATs (094025817,998771189,094357707,094247924): unit_price = total_value/qty
+    """
+    NET_UNIT_STORES = {"ΣΚΛΑΒΕΝΙΤΗΣ", "ΜΑΣΟΥΤΗΣ", "JUMBO"}
+    AB_GROUP_VATS   = {"094025817", "998771189", "094357707", "094247924"}
+
+    updated = 0
+    skipped = 0
+
+    cursor = db.receipts.find({}, {"_id": 1, "id": 1, "store_name": 1, "store_vat": 1, "items": 1, "total": 1})
+    async for receipt in cursor:
+        store_name = receipt.get("store_name", "")
+        store_vat  = receipt.get("store_vat", "")
+        items      = receipt.get("items", [])
+        if not items:
+            skipped += 1
+            continue
+
+        changed = False
+        new_items = []
+        for item in items:
+            item = dict(item)
+            qty    = float(item.get("quantity", 1.0) or 1.0)
+            total  = float(item.get("total_value", 0.0) or 0.0)
+            up     = float(item.get("unit_price", 0.0) or 0.0)
+            vat    = float(item.get("vat_percent", 0.0) or 0.0)
+
+            # LIDL: packaged qty>1 where unit_price was set to total_value
+            if store_name == "LIDL" and qty > 1.0 and total > 0 and abs(up - total) < 0.015:
+                item["unit_price"] = round(total / qty, 5)
+                changed = True
+
+            # Sklavenitis / Masoutis / Jumbo: unit_price was net (without VAT)
+            # Detect: unit_price * qty ≈ net portion of total (i.e. up * qty < total * 0.98)
+            elif store_name in NET_UNIT_STORES and vat > 0 and up > 0:
+                gross_up = round(up * (1.0 + vat / 100.0), 5)
+                # Only fix if not already grossed-up (gross_up would overshoot total)
+                expected_total_with_current = round(up * qty, 2)
+                expected_total_with_gross   = round(gross_up * qty, 2)
+                if abs(expected_total_with_gross - total) < abs(expected_total_with_current - total):
+                    item["unit_price"] = gross_up
+                    changed = True
+
+            # AB group: unit_price = total_value / qty
+            elif store_vat in AB_GROUP_VATS and qty > 0 and total > 0:
+                correct_up = round(total / qty, 5)
+                if abs(up - correct_up) > 0.005:
+                    item["unit_price"] = correct_up
+                    changed = True
+
+            new_items.append(item)
+
+        if changed:
+            new_total = round(sum(float(i.get("total_value", 0) or 0) for i in new_items), 2)
+            await db.receipts.update_one(
+                {"_id": receipt["_id"]},
+                {"$set": {"items": new_items, "total": new_total}}
+            )
+            updated += 1
+        else:
+            skipped += 1
+
+    return {
+        "status": "done",
+        "receipts_updated": updated,
+        "receipts_skipped": skipped
+    }
+
+
 # Mount API router with /api prefix (for Kubernetes/development)
 app.include_router(api_router)
 
