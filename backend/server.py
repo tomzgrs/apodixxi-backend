@@ -3613,7 +3613,159 @@ async def get_analytics(device_id: str = Query(...), months: int = Query(default
     }
 
 
-@api_router.get("/backup/export")
+
+
+  @api_router.get("/stats/categories")
+  async def get_category_stats(device_id: str = Query(...)):
+      """Category/subcategory breakdown for drill-down chart."""
+      from collections import defaultdict
+      receipts = await db.receipts.find(
+          {"device_id": device_id}, {"items": 1}
+      ).to_list(10000)
+
+      overrides = {}
+      async for ov in db.user_category_overrides.find({"device_id": device_id}, {"_id": 0}):
+          overrides[ov["item_name_normalized"]] = {
+              "category": ov["custom_category"],
+              "subcategory": ov.get("custom_subcategory", ""),
+          }
+
+      cat_totals: dict = defaultdict(float)
+      subcat_totals: dict = defaultdict(lambda: defaultdict(float))
+
+      for receipt in receipts:
+          for item in receipt.get("items", []):
+              raw_name = (item.get("name") or item.get("description") or "").strip().lower()
+              cat = item.get("category", "Άλλο") or "Άλλο"
+              subcat = item.get("subcategory", "") or ""
+              price = float(item.get("total_price") or item.get("total_value") or 0)
+              if raw_name in overrides:
+                  cat = overrides[raw_name]["category"]
+                  subcat = overrides[raw_name].get("subcategory", subcat)
+              cat_totals[cat] += price
+              if subcat:
+                  subcat_totals[cat][subcat] += price
+
+      grand_total = sum(cat_totals.values())
+      if grand_total == 0:
+          return {"categories": [], "grand_total": 0}
+
+      COLORS = ["#6366F1","#8B5CF6","#EC4899","#F59E0B","#10B981","#3B82F6","#EF4444","#14B8A6","#F97316","#84CC16","#06B6D4","#A855F7","#E11D48","#0EA5E9","#22C55E"]
+      categories = []
+      for idx, (cat, total) in enumerate(sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)):
+          color = COLORS[idx % len(COLORS)]
+          subcats = subcat_totals.get(cat, {})
+          subcat_grand = sum(subcats.values()) or total
+          subcategories = [
+              {
+                  "name": sc,
+                  "total": round(v, 2),
+                  "percentage": round((v / subcat_grand) * 100, 1),
+                  "color": COLORS[(idx * 3 + si) % len(COLORS)],
+              }
+              for si, (sc, v) in enumerate(sorted(subcats.items(), key=lambda x: x[1], reverse=True))
+          ]
+          categories.append({
+              "name": cat,
+              "total": round(total, 2),
+              "percentage": round((total / grand_total) * 100, 1),
+              "color": color,
+              "subcategories": subcategories,
+          })
+
+      return {"categories": categories, "grand_total": round(grand_total, 2)}
+
+
+  @api_router.get("/stats/category-products")
+  async def get_category_products_inline(
+      device_id: str = Query(...),
+      category: str = Query(...),
+      subcategory: str = Query(None),
+      month: str = Query(None),
+  ):
+      """Drill-down to product level within a category/subcategory."""
+      from collections import defaultdict
+      receipts = await db.receipts.find({"device_id": device_id}).to_list(10000)
+      product_totals: dict = defaultdict(float)
+      product_count: dict = defaultdict(int)
+
+      for receipt in receipts:
+          if month:
+              date_str = receipt.get("date", receipt.get("created_at", "")) or ""
+              try:
+                  ds = date_str[:7] if isinstance(date_str, str) else date_str.strftime("%Y-%m")
+                  if ds != month:
+                      continue
+              except Exception:
+                  pass
+          for item in receipt.get("items", []):
+              item_cat = item.get("category", "Άλλο") or "Άλλο"
+              item_subcat = item.get("subcategory", "") or ""
+              if item_cat != category:
+                  continue
+              if subcategory and item_subcat != subcategory:
+                  continue
+              name = (item.get("name") or item.get("description") or "Άγνωστο").strip()
+              if not name:
+                  continue
+              price = float(item.get("total_price") or item.get("total_value") or 0)
+              product_totals[name] += price
+              product_count[name] += 1
+
+      products = [
+          {"name": k, "total": round(v, 2), "count": product_count[k]}
+          for k, v in sorted(product_totals.items(), key=lambda x: x[1], reverse=True)
+      ]
+      return {"category": category, "subcategory": subcategory, "month": month,
+              "products": products, "total": round(sum(product_totals.values()), 2)}
+
+
+  @api_router.put("/overrides")
+  async def set_category_override(
+      device_id: str = Query(...),
+      item_name: str = Query(...),
+      category: str = Query(...),
+      subcategory: str = Query(default=""),
+  ):
+      """Set a manual category override for a product."""
+      import unicodedata as _ud, re as _re
+      def _norm(s):
+          s = _ud.normalize('NFD', s.lower())
+          s = ''.join(c for c in s if _ud.category(c) != 'Mn')
+          return _re.sub(r'\s+', ' ', s).strip()
+      name_norm = _norm(item_name)
+      await db.user_category_overrides.update_one(
+          {"device_id": device_id, "item_name_normalized": name_norm},
+          {"$set": {"item_name_original": item_name, "custom_category": category,
+                    "custom_subcategory": subcategory, "updated_at": datetime.now(timezone.utc)}},
+          upsert=True,
+      )
+      return {"ok": True, "item": item_name, "category": category, "subcategory": subcategory}
+
+
+  @api_router.get("/overrides")
+  async def get_category_overrides(device_id: str = Query(...)):
+      """Get all manual category overrides for a device."""
+      overrides = await db.user_category_overrides.find(
+          {"device_id": device_id}, {"_id": 0}
+      ).to_list(1000)
+      return {"overrides": overrides}
+
+
+  @api_router.delete("/overrides")
+  async def delete_category_override(device_id: str = Query(...), item_name: str = Query(...)):
+      """Delete override and revert product to default category."""
+      import unicodedata as _ud, re as _re
+      def _norm(s):
+          s = _ud.normalize('NFD', s.lower())
+          s = ''.join(c for c in s if _ud.category(c) != 'Mn')
+          return _re.sub(r'\s+', ' ', s).strip()
+      result = await db.user_category_overrides.delete_one(
+          {"device_id": device_id, "item_name_normalized": _norm(item_name)}
+      )
+      return {"ok": result.deleted_count > 0}
+
+  @api_router.get("/backup/export")
 async def export_data(device_id: str = Query(...)):
     receipts = await db.receipts.find({"device_id": device_id}, {"_id": 0}).to_list(10000)
     return {
