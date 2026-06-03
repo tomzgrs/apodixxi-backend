@@ -6897,7 +6897,13 @@ async def fix_unit_prices_migration():
                     if abs(up - correct_up) > 0.005:
                         item["unit_price"] = correct_up
                         changed = True
-                          new_items.append(item)
+            # General fallback: for any other store fix unit_price = total_value / qty
+            elif qty > 0 and total > 0:
+                correct_up = round(total / qty, 5)
+                if abs(up - correct_up) > 0.01:
+                    item["unit_price"] = correct_up
+                    changed = True
+            new_items.append(item)
 
         if changed:
             new_total = round(sum(float(i.get("total_value", 0) or 0) for i in new_items), 2)
