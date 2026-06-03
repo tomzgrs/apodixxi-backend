@@ -6870,7 +6870,7 @@ async def fix_unit_prices_migration():
                     changed = True
 
             # AB group: unit_price = total_value / qty
-              # Also fixes weight products where description contains embedded weight (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG")
+              # Also fixes weight products with embedded weight in description (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG")
               elif store_vat in AB_GROUP_VATS and qty > 0 and total > 0:
                   _unit_m = str(item.get("unit", "")).upper().strip()
                   if _unit_m in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(qty - 1.0) < 0.001 and abs(up - total) < 0.015:
@@ -6897,8 +6897,8 @@ async def fix_unit_prices_migration():
                       if abs(up - correct_up) > 0.005:
                           item["unit_price"] = correct_up
                           changed = True
-  
-            new_items.append(item)
+
+                          new_items.append(item)
 
         if changed:
             new_total = round(sum(float(i.get("total_value", 0) or 0) for i in new_items), 2)
