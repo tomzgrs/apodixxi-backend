@@ -6870,34 +6870,33 @@ async def fix_unit_prices_migration():
                     changed = True
 
             # AB group: unit_price = total_value / qty
-              # Also fixes weight products with embedded weight in description (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG")
-              elif store_vat in AB_GROUP_VATS and qty > 0 and total > 0:
-                  _unit_m = str(item.get("unit", "")).upper().strip()
-                  if _unit_m in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(qty - 1.0) < 0.001 and abs(up - total) < 0.015:
-                      _wm2 = re.search(r'(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)', str(item.get("description", "")), re.IGNORECASE)
-                      if _wm2:
-                          _wt2 = float(_wm2.group(1).replace(',', '.'))
-                          if 0.001 < _wt2 < 100 and abs(_wt2 - 1.0) > 0.005:
-                              item["description"] = re.sub(r'\s*\d+[,.]\d{1,3}\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ[αάό]?)', '', str(item.get("description", "")), flags=re.IGNORECASE).strip()
-                              item["quantity"] = _wt2
-                              item["unit_price"] = round(total / _wt2, 5)
-                              changed = True
-                          else:
-                              correct_up = round(total / qty, 5)
-                              if abs(up - correct_up) > 0.005:
-                                  item["unit_price"] = correct_up
-                                  changed = True
-                      else:
-                          correct_up = round(total / qty, 5)
-                          if abs(up - correct_up) > 0.005:
-                              item["unit_price"] = correct_up
-                              changed = True
-                  else:
-                      correct_up = round(total / qty, 5)
-                      if abs(up - correct_up) > 0.005:
-                          item["unit_price"] = correct_up
-                          changed = True
-
+            # Also fixes weight-based products with embedded weight in description (e.g. "ΜΠΑΝΑΝΕΣ 0,500 KG")
+            elif store_vat in AB_GROUP_VATS and qty > 0 and total > 0:
+                _unit_m = str(item.get("unit", "")).upper().strip()
+                if _unit_m in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(qty - 1.0) < 0.001 and abs(up - total) < 0.015:
+                    _wm2 = re.search(r'(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)', str(item.get("description", "")), re.IGNORECASE)
+                    if _wm2:
+                        _wt2 = float(_wm2.group(1).replace(',', '.'))
+                        if 0.001 < _wt2 < 100 and abs(_wt2 - 1.0) > 0.005:
+                            item["description"] = re.sub(r'\s*\d+[,.]\d{1,3}\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ[αάό]?)', '', str(item.get("description", "")), flags=re.IGNORECASE).strip()
+                            item["quantity"] = _wt2
+                            item["unit_price"] = round(total / _wt2, 5)
+                            changed = True
+                        else:
+                            correct_up = round(total / qty, 5)
+                            if abs(up - correct_up) > 0.005:
+                                item["unit_price"] = correct_up
+                                changed = True
+                    else:
+                        correct_up = round(total / qty, 5)
+                        if abs(up - correct_up) > 0.005:
+                            item["unit_price"] = correct_up
+                            changed = True
+                else:
+                    correct_up = round(total / qty, 5)
+                    if abs(up - correct_up) > 0.005:
+                        item["unit_price"] = correct_up
+                        changed = True
                           new_items.append(item)
 
         if changed:
