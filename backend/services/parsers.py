@@ -509,7 +509,16 @@ def parse_impact(html: str, source_url: str) -> dict:
     return data
 
 
-def parse_mydata_xml(xml_content: str) -> dict:
+
+def _is_valid_ean13(code: str) -> bool:
+      """Validate an EAN-13 barcode using check digit."""
+      if not code or len(code) != 13 or not code.isdigit():
+          return False
+      total = sum(int(d) * (1 if i % 2 == 0 else 3) for i, d in enumerate(code[:12]))
+      return (10 - total % 10) % 10 == int(code[12])
+
+
+  def parse_mydata_xml(xml_content: str) -> dict:
     data = {
         "store_name": "",
         "store_address": "",
@@ -568,9 +577,10 @@ def parse_mydata_xml(xml_content: str) -> dict:
         net_val = float(net_text.replace(',', '.')) if net_text else 0.0
         vat_val = float(vat_text.replace(',', '.')) if vat_text else 0.0
         total = net_val + vat_val
-
+        barcode = code_text if _is_valid_ean13(code_text) else ""
         item = {
             "code": code_text,
+            "barcode": barcode,
             "description": desc,
             "unit": find_text(detail, ['{*}measurementUnit', 'measurementUnit']) or "ΤΕΜ",
             "quantity": qty,
