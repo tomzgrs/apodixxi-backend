@@ -1409,18 +1409,18 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
                 "vat_percent": 0.0,
                 "total_value": round(total_val, 2),
             }
-                        # Epsilon Digital / Blazor: weight products may arrive with qty=1 and weight
-              # embedded in description (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG"). Extract actual weight.
-              _unit_up = item["unit"].upper().strip()
-              if _unit_up in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(item["quantity"] - 1.0) < 0.001 and item["total_value"] > 0:
-                  _wm = re.search(r'(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)', item["description"], re.IGNORECASE)
-                  if _wm:
-                      _wt = float(_wm.group(1).replace(',', '.'))
-                      if 0.001 < _wt < 100:
-                          item["description"] = re.sub(r'\s*\d+[,.]\d{1,3}\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ[αάό]?)', '', item["description"], flags=re.IGNORECASE).strip()
-                          item["quantity"] = _wt
-                          item["unit_price"] = round(item["total_value"] / _wt, 5)
-              data["items"].append(item)
+            # Epsilon Digital / Blazor: weight products may arrive with qty=1 and weight
+            # embedded in description (e.g. "ΜΠΑΝΑΝΕΣ\n0,500 KG"). Extract actual weight.
+            _unit_up = item["unit"].upper().strip()
+            if _unit_up in ('ΚΙΛΑ', 'ΚΙΛΆ', 'KG', 'ΚΙΛΟ') and abs(item["quantity"] - 1.0) < 0.001 and item["total_value"] > 0:
+                _wm = re.search(r'(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)', item["description"], re.IGNORECASE)
+                if _wm:
+                    _wt = float(_wm.group(1).replace(',', '.'))
+                    if 0.001 < _wt < 100:
+                        item["description"] = re.sub(r'\s*\d+[,.]\d{1,3}\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ[αάό]?)', '', item["description"], flags=re.IGNORECASE).strip()
+                        item["quantity"] = _wt
+                        item["unit_price"] = round(item["total_value"] / _wt, 5)
+            data["items"].append(item)
 
     # If no items from DOM, try parsing raw text for tab/space-separated product lines
     if not data["items"] and raw_text:
