@@ -37,7 +37,63 @@ async def get_stats(device_id: str = Query(...)):
         "average_receipt": round(total_spent / len(receipts), 2) if receipts else 0
     }
 
-@router.get("/analytics")
+@router.get("/category-products")
+  async def get_category_products(
+      device_id: str = Query(...),
+      category: str = Query(...),
+      subcategory: str = Query(None),
+      month: str = Query(None),
+  ):
+      """Drill-down: return all products within a category/subcategory for a device."""
+      receipts = await db.receipts.find({"device_id": device_id}).to_list(10000)
+      product_totals: dict = {}
+      product_count: dict = {}
+
+      for receipt in receipts:
+          # Optional month filter (YYYY-MM)
+          if month:
+              receipt_date = receipt.get("date", receipt.get("created_at", "")) or ""
+              try:
+                  date_str = receipt_date[:7] if isinstance(receipt_date, str) else receipt_date.strftime("%Y-%m")
+                  if date_str != month:
+                      continue
+              except Exception:
+                  pass
+
+          for item in receipt.get("items", []):
+              item_cat = item.get("category", "Άλλο") or "Άλλο"
+              item_subcat = item.get("subcategory", "") or ""
+
+              # Match main category
+              if item_cat != category:
+                  continue
+
+              # Match subcategory if given
+              if subcategory and item_subcat != subcategory:
+                  continue
+
+              name = (item.get("name") or item.get("description") or "Άγνωστο").strip()
+              if not name:
+                  continue
+              price = float(item.get("total_price") or item.get("total_value") or 0)
+              product_totals[name] = product_totals.get(name, 0.0) + price
+              product_count[name] = product_count.get(name, 0) + 1
+
+      products = [
+          {"name": k, "total": round(v, 2), "count": product_count[k]}
+          for k, v in sorted(product_totals.items(), key=lambda x: x[1], reverse=True)
+      ]
+
+      return {
+          "category": category,
+          "subcategory": subcategory,
+          "month": month,
+          "products": products,
+          "total": round(sum(product_totals.values()), 2),
+      }
+
+
+  @router.get("/analytics")
 async def get_analytics(device_id: str = Query(...), months: int = Query(default=6, ge=1, le=12)):
     """Get detailed analytics for a device."""
     # Calculate date range
