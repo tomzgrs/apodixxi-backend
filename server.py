@@ -3810,6 +3810,78 @@ async def get_category_stats(device_id: str = Query(...)):
 
     return {"categories": categories, "grand_total": round(grand_total, 2)}
 
+  @api_router.get("/stats/category-products")
+  async def get_category_products(
+      device_id: str = Query(...),
+      category: str = Query(...),
+      subcategory: Optional[str] = Query(default=None),
+      month: Optional[str] = Query(default=None),
+  ):
+      """Return products for a given mainCategory / subCategory."""
+      from collections import defaultdict
+
+      receipts = await db.receipts.find(
+          {"device_id": device_id},
+          {"_id": 0, "items": 1, "store_name": 1, "date": 1}
+      ).to_list(10000)
+
+      products: dict = defaultdict(lambda: {"count": 0, "total": 0.0, "stores": set(), "unit_price": 0.0})
+
+      for receipt in receipts:
+          # Optional month filter (YYYY-MM)
+          if month:
+              date_str = receipt.get("date", "") or ""
+              receipt_month = None
+              for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"]:
+                  try:
+                      receipt_month = datetime.strptime(date_str[:10], fmt).strftime("%Y-%m")
+                      break
+                  except (ValueError, TypeError):
+                      continue
+              if receipt_month != month:
+                  continue
+
+          store = receipt.get("store_name", "")
+
+          for item in receipt.get("items", []):
+              main = (item.get("mainCategory") or "").strip()
+              sub = (item.get("subCategory") or "").strip()
+
+              if main != category.strip():
+                  continue
+              if subcategory and sub != subcategory.strip():
+                  continue
+
+              name = (item.get("name") or item.get("description") or "Άγνωστο").strip()
+              val = float(item.get("total_value") or 0)
+              unit = float(item.get("unit_price") or 0)
+
+              products[name]["count"] += 1
+              products[name]["total"] += val
+              if store:
+                  products[name]["stores"].add(store)
+              if unit > 0:
+                  products[name]["unit_price"] = unit
+
+      if not products:
+          raise HTTPException(status_code=404, detail="Not Found")
+
+      result = [
+          {
+              "name": name,
+              "count": d["count"],
+              "total": round(d["total"], 2),
+              "avg_price": round(d["total"] / max(d["count"], 1), 2),
+              "stores": list(d["stores"]),
+              "unit_price": round(d["unit_price"], 2),
+          }
+          for name, d in sorted(products.items(), key=lambda x: x[1]["total"], reverse=True)
+      ]
+
+      return {"products": result, "category": category, "subcategory": subcategory or ""}
+
+  
+
 
 @api_router.get("/stats/analytics")
 async def get_analytics(device_id: str = Query(...), months: int = Query(default=6, ge=1, le=12)):
