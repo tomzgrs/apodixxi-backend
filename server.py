@@ -3750,13 +3750,24 @@ async def get_category_stats(device_id: str = Query(...)):
         {"_id": 0, "items": 1}
     ).to_list(10000)
 
+    # Load overrides: item_name → {category, subcategory}
+    overrides_list = await db.overrides.find(
+        {"device_id": device_id}, {"_id": 0, "item_name": 1, "category": 1, "subcategory": 1}
+    ).to_list(1000)
+    overrides = {o["item_name"]: o for o in overrides_list}
+
     # main_cat → sub_cat → total
     tree: dict = defaultdict(lambda: defaultdict(float))
 
     for receipt in receipts:
         for item in receipt.get("items", []):
-            main = item.get("mainCategory") or "Τρόφιμα"
-            sub = item.get("subCategory") or "Γενικά"
+            name = (item.get("name") or item.get("description") or "").strip()
+            if name in overrides:
+                main = overrides[name].get("category") or "Τρόφιμα"
+                sub = overrides[name].get("subcategory") or "Γενικά"
+            else:
+                main = item.get("mainCategory") or "Τρόφιμα"
+                sub = item.get("subCategory") or "Γενικά"
             val = float(item.get("total_value", 0) or 0)
             if val <= 0:
                 continue
@@ -3825,6 +3836,12 @@ async def get_category_products(
         {"_id": 0, "items": 1, "store_name": 1, "date": 1}
     ).to_list(10000)
 
+    # Load overrides: item_name → {category, subcategory}
+    overrides_list = await db.overrides.find(
+        {"device_id": device_id}, {"_id": 0, "item_name": 1, "category": 1, "subcategory": 1}
+    ).to_list(1000)
+    overrides = {o["item_name"]: o for o in overrides_list}
+
     products: dict = defaultdict(lambda: {"count": 0, "total": 0.0, "stores": set(), "unit_price": 0.0})
 
     for receipt in receipts:
@@ -3844,15 +3861,20 @@ async def get_category_products(
         store = receipt.get("store_name", "")
 
         for item in receipt.get("items", []):
-            main = (item.get("mainCategory") or "").strip()
-            sub = (item.get("subCategory") or "").strip()
+            item_name_raw = (item.get("name") or item.get("description") or "Αγνωστο").strip()
+            if item_name_raw in overrides:
+                main = (overrides[item_name_raw].get("category") or "").strip()
+                sub = (overrides[item_name_raw].get("subcategory") or "").strip()
+            else:
+                main = (item.get("mainCategory") or "").strip()
+                sub = (item.get("subCategory") or "").strip()
 
             if main != category.strip():
                 continue
             if subcategory and sub != subcategory.strip():
                 continue
 
-            name = (item.get("name") or item.get("description") or "Άγνωστο").strip()
+            name = item_name_raw
             val = float(item.get("total_value") or 0)
             unit = float(item.get("unit_price") or 0)
 
