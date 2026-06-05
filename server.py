@@ -3937,6 +3937,93 @@ async def delete_override(device_id: str = Query(...), item_name: str = Query(..
 
 
 
+  # ── Custom Categories ──────────────────────────────────────────────
+  class CustomCategoryCreate(BaseModel):
+      device_id: str
+      name: str
+      subcategories: list[str] = []
+
+  @api_router.get("/categories/custom")
+  async def get_custom_categories(device_id: str = Query(...)):
+      """Get user's custom categories."""
+      cats = await db.custom_categories.find(
+          {"device_id": device_id},
+          {"_id": 0, "device_id": 0}
+      ).to_list(100)
+      return {"categories": cats}
+
+  @api_router.post("/categories/custom")
+  async def add_custom_category(body: CustomCategoryCreate):
+      """Add or update a custom category for a user."""
+      existing = await db.custom_categories.find_one(
+          {"device_id": body.device_id, "name": body.name}
+      )
+      if existing:
+          await db.custom_categories.update_one(
+              {"device_id": body.device_id, "name": body.name},
+              {"$addToSet": {"subcategories": {"$each": body.subcategories}}}
+          )
+      else:
+          await db.custom_categories.insert_one({
+              "device_id": body.device_id,
+              "name": body.name,
+              "subcategories": body.subcategories,
+              "created_at": datetime.now(timezone.utc).isoformat()
+          })
+      return {"ok": True}
+
+  @api_router.delete("/categories/custom/{cat_name}")
+  async def delete_custom_category(cat_name: str, device_id: str = Query(...)):
+      """Delete a custom category."""
+      result = await db.custom_categories.delete_one(
+          {"device_id": device_id, "name": cat_name}
+      )
+      return {"ok": result.deleted_count > 0}
+
+
+  # ── Best Price from Shared Pool ────────────────────────────────────
+  @api_router.get("/products/best-price")
+  async def get_best_price(name: str = Query(..., min_length=2)):
+      """Search all users' receipts for the best price of a product."""
+      try:
+          pattern = re.compile(re.escape(name), re.IGNORECASE)
+      except re.error:
+          raise HTTPException(status_code=400, detail="Invalid search term")
+
+      pipeline = [
+          {"$unwind": "$items"},
+          {"$match": {
+              "items.description": {"$regex": pattern},
+              "items.unit_price": {"$gt": 0}
+          }},
+          {"$group": {
+              "_id": "$store_name",
+              "min_price": {"$min": "$items.unit_price"},
+              "avg_price": {"$avg": "$items.unit_price"},
+              "count": {"$sum": 1},
+              "last_seen": {"$max": "$date"},
+              "product_name": {"$first": "$items.description"}
+          }},
+          {"$sort": {"min_price": 1}},
+          {"$limit": 5}
+      ]
+      results = await db.receipts.aggregate(pipeline).to_list(5)
+      formatted = [
+          {
+              "store_name": r["_id"] or "Άγνωστο",
+              "best_price": round(r["min_price"], 2),
+              "avg_price": round(r["avg_price"], 2),
+              "count": r["count"],
+              "last_seen": r.get("last_seen", ""),
+              "product_name": r.get("product_name", name)
+          }
+          for r in results
+      ]
+      return {"query": name, "results": formatted, "total": len(formatted)}
+
+  
+
+
 
 
 @api_router.get("/stats/analytics")
@@ -6308,6 +6395,35 @@ async def ai_chat(request: AIChatRequest):
 - Πρόσφατες αγορές: {', '.join([r.get('store_name', 'Άγνωστο') for r in recent_receipts])}
 """
     
+    # Best-price lookup from community pool for price-related queries
+    price_keywords = ["τιμ", "φθην", "φτην", "καλύτερ", "ακριβ", "κοστ", "που αγορ"]
+    message_lower = request.message.lower()
+    if any(kw in message_lower for kw in price_keywords):
+        stop_words = {"που", "το", "την", "τον", "τα", "για", "τιμη", "τιμες", "βρω",
+                      "να", "στο", "στη", "στα", "πιο", "μου", "σου", "ειναι", "ειναι"}
+        words = [w for w in re.sub(r'[^\w\s]', ' ', request.message).split()
+                 if len(w) > 2 and w.lower() not in stop_words]
+        if words:
+            product_query = ' '.join(words[:2])
+            try:
+                pattern_bp = re.compile(re.escape(product_query), re.IGNORECASE)
+                bp_pipeline = [
+                    {"$unwind": "$items"},
+                    {"$match": {"items.description": {"$regex": pattern_bp}, "items.unit_price": {"$gt": 0}}},
+                    {"$group": {"_id": "$store_name", "min_price": {"$min": "$items.unit_price"}, "count": {"$sum": 1}}},
+                    {"$sort": {"min_price": 1}},
+                    {"$limit": 3}
+                ]
+                bp_results = await db.receipts.aggregate(bp_pipeline).to_list(3)
+                if bp_results:
+                    price_lines = "\n".join(
+                        f"  - {r['_id'] or 'Άγνωστο'}: {r['min_price']:.2f}€ ({r['count']} αγορές)"
+                        for r in bp_results
+                    )
+                    context += f"\nΤιμές κοινότητας για '{product_query}':\n{price_lines}\n"
+            except Exception:
+                pass
+
     session_id = request.session_id or f"chat_{request.device_id}_{uuid.uuid4().hex[:8]}"
     
     try:
