@@ -3881,6 +3881,40 @@ async def get_category_products(
     return {"products": result, "category": category, "subcategory": subcategory or ""}
 
 
+@api_router.get("/overrides")
+async def get_overrides(device_id: str = Query(...)):
+    """Get all category overrides for a device."""
+    overrides = await db.overrides.find(
+        {"device_id": device_id},
+        {"_id": 0, "item_name": 1, "category": 1, "subcategory": 1}
+    ).to_list(10000)
+    return {"overrides": overrides}
+
+
+@api_router.put("/overrides")
+async def set_override(
+    device_id: str = Query(...),
+    item_name: str = Query(...),
+    category: str = Query(...),
+    subcategory: str = Query(default=""),
+):
+    """Set or update a category override for a product."""
+    await db.overrides.update_one(
+        {"device_id": device_id, "item_name": item_name},
+        {"$set": {"category": category, "subcategory": subcategory}},
+        upsert=True
+    )
+    return {"ok": True}
+
+
+@api_router.delete("/overrides")
+async def delete_override(device_id: str = Query(...), item_name: str = Query(...)):
+    """Delete a category override."""
+    await db.overrides.delete_one({"device_id": device_id, "item_name": item_name})
+    return {"ok": True}
+
+
+
 
 
 @api_router.get("/stats/analytics")
