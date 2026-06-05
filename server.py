@@ -7188,3 +7188,5 @@ async def root():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+# trigger-deploy
