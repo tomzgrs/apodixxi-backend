@@ -3810,6 +3810,8 @@ async def get_category_stats(device_id: str = Query(...)):
 
     return {"categories": categories, "grand_total": round(grand_total, 2)}
 
+
+
   @api_router.get("/stats/category-products")
   async def get_category_products(
       device_id: str = Query(...),
@@ -3881,7 +3883,6 @@ async def get_category_stats(device_id: str = Query(...)):
       return {"products": result, "category": category, "subcategory": subcategory or ""}
 
   
-
 
 @api_router.get("/stats/analytics")
 async def get_analytics(device_id: str = Query(...), months: int = Query(default=6, ge=1, le=12)):
