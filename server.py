@@ -3867,7 +3867,7 @@ async def get_category_products(
                 sub = (overrides[item_name_raw].get("subcategory") or "").strip()
             else:
                 main = (item.get("mainCategory") or "").strip()
-                sub = (item.get("subCategory") or "").strip()
+                sub = (item.get("subCategory") or "Γενικά").strip()
 
             if main != category.strip():
                 continue
@@ -3900,7 +3900,8 @@ async def get_category_products(
         for name, d in sorted(products.items(), key=lambda x: x[1]["total"], reverse=True)
     ]
 
-    return {"products": result, "category": category, "subcategory": subcategory or ""}
+    grand_total = round(sum(p["total"] for p in result), 2)
+    return {"products": result, "category": category, "subcategory": subcategory or "", "total": grand_total}
 
 
 @api_router.get("/overrides")
