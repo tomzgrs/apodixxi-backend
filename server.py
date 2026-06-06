@@ -1,67 +1,5 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException, Query, Body, Depends, Header
-from fastapi.
-
-          async function editPromotion(id) {
-              try {
-                  const res = await apiCall('/admin/promotions');
-                  const data = await res.json();
-                  const p = (data.promotions || []).find(x => x._id === id);
-                  if (!p) return alert('Δεν βρέθηκε η προώθηση');
-                  
-                  document.getElementById('editPromoId').value = p._id;
-                  document.getElementById('editPromoTitle').value = p.title || '';
-                  document.getElementById('editPromoDescription').value = p.description || '';
-                  document.getElementById('editPromoProductName').value = p.product_name || '';
-                  document.getElementById('editPromoPrice').value = p.price || '';
-                  document.getElementById('editPromoOriginalPrice').value = p.original_price || '';
-                  document.getElementById('editPromoStore').value = p.store_name || '';
-                  document.getElementById('editPromoBarcodeCode').value = p.barcode_code || '';
-                  document.getElementById('editPromoImageUrl').value = p.image_url || '';
-                  document.getElementById('editPromoUrl').value = p.url || '';
-                  document.getElementById('editPromoStartDate').value = p.start_date ? p.start_date.split('T')[0] : '';
-                  document.getElementById('editPromoEndDate').value = p.end_date ? p.end_date.split('T')[0] : '';
-                  document.getElementById('editPromoPriority').value = p.priority ?? 10;
-                  document.getElementById('editPromoActive').checked = p.is_active !== false;
-                  
-                  document.getElementById('editPromoModal').style.display = 'flex';
-              } catch (err) {
-                  alert('Σφάλμα φόρτωσης: ' + err.message);
-              }
-          }
-
-          async function savePromoEdit() {
-              const id = document.getElementById('editPromoId').value;
-              const startVal = document.getElementById('editPromoStartDate').value;
-              const endVal = document.getElementById('editPromoEndDate').value;
-              const updates = {
-                  title: document.getElementById('editPromoTitle').value,
-                  description: document.getElementById('editPromoDescription').value,
-                  product_name: document.getElementById('editPromoProductName').value,
-                  price: parseFloat(document.getElementById('editPromoPrice').value) || null,
-                  original_price: parseFloat(document.getElementById('editPromoOriginalPrice').value) || null,
-                  store_name: document.getElementById('editPromoStore').value,
-                  barcode_code: document.getElementById('editPromoBarcodeCode').value,
-                  image_url: document.getElementById('editPromoImageUrl').value,
-                  url: document.getElementById('editPromoUrl').value || null,
-                  start_date: startVal ? new Date(startVal).toISOString() : null,
-                  end_date: endVal ? new Date(endVal).toISOString() : null,
-                  priority: parseInt(document.getElementById('editPromoPriority').value) || 10,
-                  is_active: document.getElementById('editPromoActive').checked,
-              };
-              try {
-                  const res = await fetch(`${API_BASE}/admin/promotions/${id}?admin_token=${adminToken}`, {
-                      method: 'PATCH',
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify(updates)
-                  });
-                  if (!res.ok) throw new Error(await res.text());
-                  document.getElementById('editPromoModal').style.display = 'none';
-                  loadPromotions();
-              } catch (err) {
-                  alert('Σφάλμα αποθήκευσης: ' + err.message);
-              }
-          }
-  responses import HTMLResponse, StreamingResponse, FileResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -5477,7 +5415,7 @@ async def admin_dashboard():
         </div>
     </div>
     
-    <!-- Edit Promotion Modal -->
+        <!-- Edit Promotion Modal -->
       <div class="modal-overlay" id="editPromoModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
           <div class="modal" style="max-height:90vh;overflow-y:auto;width:600px;max-width:95%;">
               <div class="modal-header">
@@ -5486,58 +5424,22 @@ async def admin_dashboard():
               </div>
               <div class="modal-body">
                   <input type="hidden" id="editPromoId">
-                  <div class="form-group">
-                      <label>Τίτλος *</label>
-                      <input type="text" id="editPromoTitle" required placeholder="π.χ. Μεγάλη Προσφορά!">
-                  </div>
-                  <div class="form-group">
-                      <label>Περιγραφή</label>
-                      <input type="text" id="editPromoDescription" placeholder="Περιγραφή προσφοράς...">
-                  </div>
-                  <div class="form-group">
-                      <label>Όνομα Προϊόντος</label>
-                      <input type="text" id="editPromoProductName" placeholder="π.χ. ΓΑΛΑ ΦΑΡΜΑ 1L">
-                  </div>
+                  <div class="form-group"><label>Τίτλος *</label><input type="text" id="editPromoTitle" required placeholder="π.χ. Μεγάλη Προσφορά!"></div>
+                  <div class="form-group"><label>Περιγραφή</label><input type="text" id="editPromoDescription" placeholder="Περιγραφή..."></div>
+                  <div class="form-group"><label>Όνομα Προϊόντος</label><input type="text" id="editPromoProductName" placeholder="π.χ. ΓΑΛΑ ΦΑΡΜΑ 1L"></div>
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                      <div class="form-group">
-                          <label>Τιμή Προσφοράς (€)</label>
-                          <input type="number" id="editPromoPrice" step="0.01" placeholder="0.00">
-                      </div>
-                      <div class="form-group">
-                          <label>Αρχική Τιμή (€)</label>
-                          <input type="number" id="editPromoOriginalPrice" step="0.01" placeholder="0.00">
-                      </div>
+                      <div class="form-group"><label>Τιμή Προσφοράς (€)</label><input type="number" id="editPromoPrice" step="0.01" placeholder="0.00"></div>
+                      <div class="form-group"><label>Αρχική Τιμή (€)</label><input type="number" id="editPromoOriginalPrice" step="0.01" placeholder="0.00"></div>
                   </div>
-                  <div class="form-group">
-                      <label>Κατάστημα</label>
-                      <input type="text" id="editPromoStore" placeholder="π.χ. Sklavenitis">
-                  </div>
-                  <div class="form-group">
-                      <label>Barcode</label>
-                      <input type="text" id="editPromoBarcodeCode" placeholder="1234567890">
-                  </div>
-                  <div class="form-group">
-                      <label>URL Εικόνας</label>
-                      <input type="url" id="editPromoImageUrl" placeholder="https://...">
-                  </div>
-                  <div class="form-group">
-                      <label>URL Προσφοράς</label>
-                      <input type="url" id="editPromoUrl" placeholder="https://...">
-                  </div>
+                  <div class="form-group"><label>Κατάστημα</label><input type="text" id="editPromoStore" placeholder="π.χ. Sklavenitis"></div>
+                  <div class="form-group"><label>Barcode</label><input type="text" id="editPromoBarcodeCode" placeholder="1234567890"></div>
+                  <div class="form-group"><label>URL Εικόνας</label><input type="url" id="editPromoImageUrl" placeholder="https://..."></div>
+                  <div class="form-group"><label>URL Προσφοράς</label><input type="url" id="editPromoUrl" placeholder="https://..."></div>
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                      <div class="form-group">
-                          <label>Ημ/νία Έναρξης</label>
-                          <input type="date" id="editPromoStartDate">
-                      </div>
-                      <div class="form-group">
-                          <label>Ημ/νία Λήξης</label>
-                          <input type="date" id="editPromoEndDate">
-                      </div>
+                      <div class="form-group"><label>Ημ/νία Έναρξης</label><input type="date" id="editPromoStartDate"></div>
+                      <div class="form-group"><label>Ημ/νία Λήξης</label><input type="date" id="editPromoEndDate"></div>
                   </div>
-                  <div class="form-group">
-                      <label>Προτεραιότητα</label>
-                      <input type="number" id="editPromoPriority" value="10" min="0" max="100">
-                  </div>
+                  <div class="form-group"><label>Προτεραιότητα</label><input type="number" id="editPromoPriority" value="10" min="0" max="100"></div>
                   <div class="form-group" style="display:flex;align-items:center;gap:8px;">
                       <input type="checkbox" id="editPromoActive" style="width:auto;">
                       <label for="editPromoActive" style="margin:0;">Ενεργή</label>
@@ -5886,8 +5788,8 @@ async def admin_dashboard():
                         <td>${p.clicks_count || 0}</td>
                         <td>
                             <button class="btn btn-secondary" onclick="togglePromotion('${p._id}', ${!p.is_active})">${p.is_active ? 'Απενεργ.' : 'Ενεργ.'}</button>
-                            <button class="btn btn-primary" style="margin:0 4px;" onclick="editPromotion('${p._id}')">✏️ Επεξεργασία</button>
-                            <button class="btn btn-danger" onclick="deletePromotion('${p._id}')">🗑️ Διαγραφή</button>
+                            <button class="btn btn-primary" style="margin:0 4px;" onclick="editPromotion('${p._id}')">✏️ Επεξ/σία</button>
+                              <button class="btn btn-danger" onclick="deletePromotion('${p._id}')">🗑️ Διαγραφή</button>
                         </td>
                     </tr>
                 `).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν προωθήσεις</td></tr>';
@@ -5986,6 +5888,65 @@ async def admin_dashboard():
                 alert('Σφάλμα');
             }
         }
+
+          async function editPromotion(id) {
+              try {
+                  const res = await apiCall('/admin/promotions');
+                  const data = await res.json();
+                  const p = (data.promotions || []).find(x => x._id === id);
+                  if (!p) return alert('Δεν βρέθηκε η προώθηση');
+                  document.getElementById('editPromoId').value = p._id;
+                  document.getElementById('editPromoTitle').value = p.title || '';
+                  document.getElementById('editPromoDescription').value = p.description || '';
+                  document.getElementById('editPromoProductName').value = p.product_name || '';
+                  document.getElementById('editPromoPrice').value = p.price || '';
+                  document.getElementById('editPromoOriginalPrice').value = p.original_price || '';
+                  document.getElementById('editPromoStore').value = p.store_name || '';
+                  document.getElementById('editPromoBarcodeCode').value = p.barcode_code || '';
+                  document.getElementById('editPromoImageUrl').value = p.image_url || '';
+                  document.getElementById('editPromoUrl').value = p.url || '';
+                  document.getElementById('editPromoStartDate').value = p.start_date ? p.start_date.split('T')[0] : '';
+                  document.getElementById('editPromoEndDate').value = p.end_date ? p.end_date.split('T')[0] : '';
+                  document.getElementById('editPromoPriority').value = p.priority ?? 10;
+                  document.getElementById('editPromoActive').checked = p.is_active !== false;
+                  document.getElementById('editPromoModal').style.display = 'flex';
+              } catch (err) {
+                  alert('Σφάλμα φόρτωσης: ' + err.message);
+              }
+          }
+
+          async function savePromoEdit() {
+              const id = document.getElementById('editPromoId').value;
+              const startVal = document.getElementById('editPromoStartDate').value;
+              const endVal = document.getElementById('editPromoEndDate').value;
+              const updates = {
+                  title: document.getElementById('editPromoTitle').value,
+                  description: document.getElementById('editPromoDescription').value,
+                  product_name: document.getElementById('editPromoProductName').value,
+                  price: parseFloat(document.getElementById('editPromoPrice').value) || null,
+                  original_price: parseFloat(document.getElementById('editPromoOriginalPrice').value) || null,
+                  store_name: document.getElementById('editPromoStore').value,
+                  barcode_code: document.getElementById('editPromoBarcodeCode').value,
+                  image_url: document.getElementById('editPromoImageUrl').value,
+                  url: document.getElementById('editPromoUrl').value || null,
+                  start_date: startVal ? new Date(startVal).toISOString() : null,
+                  end_date: endVal ? new Date(endVal).toISOString() : null,
+                  priority: parseInt(document.getElementById('editPromoPriority').value) || 10,
+                  is_active: document.getElementById('editPromoActive').checked,
+              };
+              try {
+                  const res = await fetch(`${API_BASE}/admin/promotions/${id}?admin_token=${adminToken}`, {
+                      method: 'PATCH',
+                      headers: {'Content-Type': 'application/json'},
+                      body: JSON.stringify(updates)
+                  });
+                  if (!res.ok) throw new Error(await res.text());
+                  document.getElementById('editPromoModal').style.display = 'none';
+                  loadPromotions();
+              } catch (err) {
+                  alert('Σφάλμα αποθήκευσης: ' + err.message);
+              }
+          }
         
         async function savePromoCode() {
             const code = document.getElementById('pcCode').value.toUpperCase();
