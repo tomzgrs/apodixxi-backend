@@ -3865,10 +3865,10 @@ async def get_category_products(
         for item in receipt.get("items", []):
             item_name_raw = (item.get("name") or item.get("description") or "Αγνωστο").strip()
             if item_name_raw in overrides:
-                main = (overrides[item_name_raw].get("category") or "").strip()
-                sub = (overrides[item_name_raw].get("subcategory") or "").strip()
+                main = (overrides[item_name_raw].get("category") or "Τρόφιμα").strip()
+                sub = (overrides[item_name_raw].get("subcategory") or "Γενικά").strip()
             else:
-                main = (item.get("mainCategory") or "").strip()
+                main = (item.get("mainCategory") or "Τρόφιμα").strip()
                 sub = (item.get("subCategory") or "Γενικά").strip()
 
             if main != category.strip():
