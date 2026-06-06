@@ -5387,6 +5387,10 @@ async def admin_dashboard():
                         <label>URL Εικόνας</label>
                         <input type="text" id="promoImageUrl" placeholder="https://...">
                     </div>
+                    <div class="form-group">
+                        <label>URL Προσφοράς <small style="color:#888;">(link που ανοίγει η εφαρμογή)</small></label>
+                        <input type="text" id="promoUrl" placeholder="https://www.lidl-hellas.gr/el/current-offers">
+                    </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                         <div class="form-group">
                             <label>Ημ/νία Έναρξης</label>
@@ -5802,6 +5806,7 @@ async def admin_dashboard():
                 store_name: document.getElementById('promoStoreName').value,
                 barcode_code: document.getElementById('promoBarcodeCode').value,
                 image_url: document.getElementById('promoImageUrl').value,
+                url: document.getElementById('promoUrl').value || null,
                 start_date: document.getElementById('promoStartDate').value || null,
                 end_date: document.getElementById('promoEndDate').value || null,
                 priority: parseInt(document.getElementById('promoPriority').value) || 10,
