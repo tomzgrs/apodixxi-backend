@@ -5176,7 +5176,19 @@ async def admin_dashboard():
             to { transform: rotate(360deg); }
         }
         
-        /* Responsive */
+        /* Table scrollable on small screens */
+          .card { overflow: visible; }
+          .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          table { min-width: 700px; border-collapse: collapse; width: 100%; }
+          table th, table td { white-space: nowrap; padding: 10px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+          table th { background: #f8fafc; font-weight: 600; font-size: 13px; color: #64748b; }
+          .btn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 500; }
+          .btn-primary { background: #3b82f6; color: #fff; }
+          .btn-secondary { background: #e2e8f0; color: #374151; }
+          .btn-danger { background: #ef4444; color: #fff; }
+          .btn-warning { background: #f59e0b; color: #fff; }
+
+          /* Responsive */
         @media (max-width: 1024px) {
             .sidebar { width: 80px; padding: 10px; }
             .sidebar-logo h1 span, .nav-item span, .logout-btn span { display: none; }
@@ -5316,10 +5328,10 @@ async def admin_dashboard():
                 </div>
                 <div class="card">
                     <div class="card-body">
-                        <table>
-                            <thead><tr><th>Τίτλος</th><th>Προϊόν</th><th>Τιμή</th><th>Κατάστημα</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
+                        <div class="table-wrap"><table>
+                            <thead><tr><th>Τίτλος</th><th>Προϊόν</th><th>Τιμή</th><th>Κατάστημα</th><th>URL</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="promotionsTable"></tbody>
-                        </table>
+                        </table></div>
                     </div>
                 </div>
             </div>
@@ -5783,6 +5795,7 @@ async def admin_dashboard():
                         <td>${p.product_name || '-'}</td>
                         <td>${p.price ? '€' + p.price.toFixed(2) : '-'} ${p.original_price ? '<small style="text-decoration:line-through;color:#999">€' + p.original_price.toFixed(2) + '</small>' : ''}</td>
                         <td>${p.store_name || '-'}</td>
+                        <td>${p.url ? '<a href="' + p.url + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:12px;">🔗 Link</a>' : '<span style="color:#94a3b8;font-size:12px;">—</span>'}</td>
                         <td><span class="badge ${p.is_active ? 'badge-success' : 'badge-warning'}">${p.is_active ? 'Ενεργή' : 'Ανενεργή'}</span></td>
                         <td>${p.views_count || 0}</td>
                         <td>${p.clicks_count || 0}</td>
