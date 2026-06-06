@@ -2747,6 +2747,7 @@ class PromotionCreate(BaseModel):
     image_url: str = ""
     barcode_code: str = ""
     barcode_image_url: str = ""
+    url: str = ""  # External link (store offer page)
     target_categories: List[str] = []
     target_stores: List[str] = []
     target_all_users: bool = True
@@ -2818,6 +2819,7 @@ async def get_recommendations(
             "image_url": promo.get("image_url", ""),
             "barcode_code": promo.get("barcode_code", ""),
             "barcode_image_url": promo.get("barcode_image_url", ""),
+            "url": promo.get("url", ""),
             "is_sponsored": True
         })
     
