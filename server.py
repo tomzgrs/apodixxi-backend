@@ -2595,7 +2595,6 @@ async def upgrade_user(user_id: str, days: int = Body(..., embed=True), admin_ke
       if result.matched_count == 0:
           raise HTTPException(status_code=404, detail="User not found")
       return {"success": True}
-
   
 
 
