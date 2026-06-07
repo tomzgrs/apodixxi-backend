@@ -2474,7 +2474,6 @@ async def toggle_promo_code(
           is_valid = await verify_admin_token(admin_token)
       if not is_valid:
           raise HTTPException(status_code=403, detail="Unauthorized")
-      
       users = await db.users.find().sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
       now = datetime.now(timezone.utc)
       warning_threshold = now + timedelta(days=7)
@@ -5391,7 +5390,7 @@ async def admin_dashboard():
                     <p>Διαχείριση χρηστών</p>
                 </div>
                 <div class="expiring-alert" id="expiringAlert" style="display:none;">
-                    <h4>⚠️ Premium Ενεργοποιήσεις προς Λήξη (≤7 ημέρες)</h4>
+                    <h4>&#9888;&#65039; Premium Ενεργοποιήσεις προς Λήξη (&le;7 ημέρες)</h4>
                     <table><tbody id="expiringTable"></tbody></table>
                 </div>
                 <div class="card">
@@ -5572,34 +5571,7 @@ async def admin_dashboard():
         </div>
     </div>
     
-    <!-- Grant Premium Modal -->
-      <div class="modal-overlay" id="grantModal" style="display:none;" onclick="if(event.target===this)closeGrantModal()">
-          <div class="modal" style="max-width:480px;width:90%;">
-              <div class="modal-header">
-                  <h3 id="grantModalTitle">Grant Premium</h3>
-                  <button class="modal-close" onclick="closeGrantModal()">&times;</button>
-              </div>
-              <div class="modal-body">
-                  <div class="modal-date-row">
-                      <div class="form-group">
-                          <label>📅 Έναρξη Premium</label>
-                          <input type="date" id="grantStartDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
-                      </div>
-                      <div class="form-group">
-                          <label>📅 Λήξη Premium</label>
-                          <input type="date" id="grantEndDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
-                      </div>
-                  </div>
-                  <p style="font-size:12px;color:#888;margin-top:12px;">Αποθηκεύει <code>premium_start_date</code> και <code>subscription_expires_at</code> στο MongoDB.</p>
-              </div>
-              <div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid #e5e7eb;">
-                  <button class="btn btn-secondary" onclick="closeGrantModal()">Άκυρο</button>
-                  <button class="btn-grant" style="padding:10px 24px;font-size:14px;border-radius:8px;" onclick="submitGrantPremium()">✅ Ενεργοποίηση</button>
-              </div>
-          </div>
-      </div>
-
-      <!-- Promo Code Modal -->
+    <!-- Promo Code Modal -->
     <div class="modal-overlay" id="promoCodeModal">
         <div class="modal">
             <div class="modal-header">
@@ -5836,7 +5808,7 @@ async def admin_dashboard():
                           const cls = dl <= 2 ? 'crit' : 'warn';
                           return '<tr><td><strong>' + (u.email||'-') + '</strong></td>' +
                               '<td>' + (u.name||'-') + '</td>' +
-                              '<td><span class="expiry-badge ' + cls + '">Λήγει σε ' + dl + ' μέρ.</span></td>' +
+                              '<td><span class="expiry-badge ' + cls + '">&#955;&#942;&#947;&#949;&#953; ' + dl + ' &#956;&#941;&#961;.</span></td>' +
                               '<td>' + (u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString('el-GR') : '-') + '</td></tr>';
                       }).join('');
                   } else {
@@ -5848,16 +5820,16 @@ async def admin_dashboard():
                       const dl = u.days_left;
                       let badge = '';
                       if (isPaid && dl !== null) {
-                          if (dl <= 2)      badge = '<span class="expiry-badge crit">🔴 ' + dl + ' μέρ.</span>';
-                          else if (dl <= 7) badge = '<span class="expiry-badge warn">⚠️ ' + dl + ' μέρ.</span>';
+                          if (dl <= 2)      badge = '<span class="expiry-badge crit">&#128308; ' + dl + ' &#956;&#941;&#961;.</span>';
+                          else if (dl <= 7) badge = '<span class="expiry-badge warn">&#9888; ' + dl + ' &#956;&#941;&#961;.</span>';
                       }
-                      const startStr = u.premium_start_date ? new Date(u.premium_start_date).toLocaleDateString('el-GR') : (isPaid ? '—' : '');
+                      const startStr = u.premium_start_date ? new Date(u.premium_start_date).toLocaleDateString('el-GR') : (isPaid ? '-' : '');
                       const endStr   = u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString('el-GR') : '';
                       const period   = isPaid
-                          ? '<span style="font-size:12px;">' + startStr + ' → ' + endStr + '</span>' + badge
-                          : '<span style="color:#999;font-size:12px;">—</span>';
+                          ? '<span style="font-size:12px;">' + startStr + ' &#8594; ' + endStr + '</span>' + badge
+                          : '<span style="color:#999;font-size:12px;">-</span>';
                       const eid = u._id || '';
-                      const em  = (u.email || '').replace(/'/g, "\\'");
+                      const em  = (u.email || '').replace(/\\/g, '').replace(/'/g, '');
                       return '<tr>' +
                           '<td>' + (u.email||'-') + '</td>' +
                           '<td>' + (u.name||'-') + '</td>' +
@@ -5866,8 +5838,8 @@ async def admin_dashboard():
                           '<td>' + (u.receipt_count||0) + '</td>' +
                           '<td>' + (u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-') + '</td>' +
                           '<td style="white-space:nowrap;">' +
-                              '<button class="btn-grant" onclick="openGrantModal(\'' + eid + '\',\'' + em + '\')">🎁 Grant</button> ' +
-                              (isPaid ? '<button class="btn-revoke" onclick="revokePremium(\'' + eid + '\')">✖ Revoke</button>' : '') +
+                              '<button class="btn-grant" onclick="openGrantModal(this)" data-uid="' + eid + '" data-email="' + em + '">&#127873; Grant</button> ' +
+                              (isPaid ? '<button class="btn-revoke" onclick="revokePremium(this)" data-uid="' + eid + '">&#10006; Revoke</button>' : '') +
                           '</td>' +
                           '</tr>';
                   }).join('');
@@ -5875,11 +5847,11 @@ async def admin_dashboard():
                   console.error('Error loading users:', err);
               }
           }
-          
         let _grantUserId = null;
-          function openGrantModal(userId, email) {
-              _grantUserId = userId;
-              document.getElementById('grantModalTitle').textContent = 'Grant Premium — ' + email;
+          function openGrantModal(btn) {
+              _grantUserId = btn.getAttribute('data-uid');
+              const email = btn.getAttribute('data-email');
+              document.getElementById('grantModalTitle').textContent = 'Grant Premium - ' + email;
               const today = new Date();
               const in30  = new Date(today); in30.setDate(today.getDate() + 30);
               document.getElementById('grantStartDate').value = today.toISOString().slice(0,10);
@@ -5901,22 +5873,22 @@ async def admin_dashboard():
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ start_date: startDate, end_date: endDate })
                   });
-                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  if (!res.ok) { const e = await res.json(); alert('Error: ' + (e.detail || res.status)); return; }
                   closeGrantModal();
                   loadUsers();
-              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+              } catch (err) { alert('Connection error'); }
           }
-          async function revokePremium(userId) {
-              if (!confirm('Αφαίρεση Premium από αυτόν τον χρήστη;')) return;
+          async function revokePremium(btn) {
+              const userId = btn.getAttribute('data-uid');
+              if (!confirm('Αφαίρεση Premium;')) return;
               try {
                   const res = await fetch(API_BASE + '/admin/users/' + userId + '/revoke-premium?admin_token=' + adminToken, {
                       method: 'POST'
                   });
-                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  if (!res.ok) { const e = await res.json(); alert('Error: ' + (e.detail || res.status)); return; }
                   loadUsers();
-              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+              } catch (err) { alert('Connection error'); }
           }
-          
         async function downgradeUser(userId) {
             if (!confirm('Είστε σίγουροι ότι θέλετε να υποβαθμίσετε αυτόν τον χρήστη σε Free;')) return;
             
@@ -6183,6 +6155,33 @@ async def admin_dashboard():
             openPromotionModal();
         }
     </script>
+
+      <!-- Grant Premium Modal -->
+      <div class="modal-overlay" id="grantModal" style="display:none;" onclick="if(event.target===this)closeGrantModal()">
+          <div class="modal" style="max-width:480px;width:90%;">
+              <div class="modal-header">
+                  <h3 id="grantModalTitle">Grant Premium</h3>
+                  <button class="modal-close" onclick="closeGrantModal()">&times;</button>
+              </div>
+              <div class="modal-body">
+                  <div class="modal-date-row">
+                      <div class="form-group">
+                          <label>Έναρξη Premium</label>
+                          <input type="date" id="grantStartDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
+                      </div>
+                      <div class="form-group">
+                          <label>Λήξη Premium</label>
+                          <input type="date" id="grantEndDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
+                      </div>
+                  </div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid #e5e7eb;">
+                  <button class="btn btn-secondary" onclick="closeGrantModal()">Ακυρο</button>
+                  <button class="btn-grant" style="padding:10px 24px;font-size:14px;border-radius:8px;" onclick="submitGrantPremium()">Ενεργοποίηση</button>
+              </div>
+          </div>
+      </div>
+  
 </body>
 </html>'''
     return html_content
