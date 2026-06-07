@@ -411,7 +411,21 @@
             .sidebar-logo h1 span, .nav-item span, .logout-btn span { display: none; }
             .main-content { margin-left: 80px; }
         }
-    </style>
+    
+          .expiry-badge { display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:6px;white-space:nowrap; }
+          .expiry-badge.warn { background:#fef3c7;color:#b45309;border:1px solid #fcd34d; }
+          .expiry-badge.crit { background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5; }
+          .expiring-alert { background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:16px 20px;margin-bottom:20px; }
+          .expiring-alert h4 { font-size:14px;font-weight:600;color:#92400e;margin-bottom:10px;display:flex;align-items:center;gap:6px; }
+          .expiring-alert table { width:100%;font-size:13px; }
+          .expiring-alert td { padding:4px 10px; }
+          .btn-grant { background:#059669;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:500; }
+          .btn-grant:hover { background:#047857; }
+          .btn-revoke { background:#dc2626;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:500; }
+          .btn-revoke:hover { background:#b91c1c; }
+          .modal-date-row { display:flex;gap:12px; }
+          .modal-date-row .form-group { flex:1; }
+          </style>
 </head>
 <body>
     <!-- Login Screen -->
@@ -523,10 +537,14 @@
                     <h2>Χρήστες</h2>
                     <p>Διαχείριση χρηστών</p>
                 </div>
+                <div class="expiring-alert" id="expiringAlert" style="display:none;">
+                    <h4>⚠️ Premium Ενεργοποιήσεις προς Λήξη (≤7 ημέρες)</h4>
+                    <table><tbody id="expiringTable"></tbody></table>
+                </div>
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>Email</th><th>Όνομα</th><th>Τύπος</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
+                            <thead><tr><th>Email</th><th>Όνομα</th><th>Τύπος</th><th>Premium Διάστημα</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="usersTable"></tbody>
                         </table>
                     </div>
@@ -574,7 +592,34 @@
         </main>
     </div>
     
-    <!-- Promotion Modal -->
+    <!-- Grant Premium Modal -->
+      <div class="modal-overlay" id="grantModal" style="display:none;" onclick="if(event.target===this)closeGrantModal()">
+          <div class="modal" style="max-width:480px;width:90%;">
+              <div class="modal-header">
+                  <h3 id="grantModalTitle">Grant Premium</h3>
+                  <button class="modal-close" onclick="closeGrantModal()">&times;</button>
+              </div>
+              <div class="modal-body">
+                  <div class="modal-date-row">
+                      <div class="form-group">
+                          <label>📅 Έναρξη Premium</label>
+                          <input type="date" id="grantStartDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
+                      </div>
+                      <div class="form-group">
+                          <label>📅 Λήξη Premium</label>
+                          <input type="date" id="grantEndDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
+                      </div>
+                  </div>
+                  <p style="font-size:12px;color:#888;margin-top:12px;">Αποθηκεύει <code>premium_start_date</code> και <code>subscription_expires_at</code> στο MongoDB.</p>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid #e5e7eb;">
+                  <button class="btn btn-secondary" onclick="closeGrantModal()">Άκυρο</button>
+                  <button class="btn-grant" style="padding:10px 24px;font-size:14px;border-radius:8px;" onclick="submitGrantPremium()">✅ Ενεργοποίηση</button>
+              </div>
+          </div>
+      </div>
+
+      <!-- Promotion Modal -->
     <div class="modal-overlay" id="promotionModal">
         <div class="modal">
             <div class="modal-header">
@@ -882,43 +927,100 @@
         }
         
         async function loadUsers() {
-            try {
-                const res = await apiCall('/admin/users/all?limit=100');
-                const data = await res.json();
-                
-                document.getElementById('usersTable').innerHTML = data.users.map(u => `
-                    <tr>
-                        <td>${u.email || '-'}</td>
-                        <td>${u.name || '-'}</td>
-                        <td><span class="badge ${u.account_type === 'paid' ? 'badge-success' : 'badge-info'}">${u.account_type === 'paid' ? 'Premium' : 'Free'}</span></td>
-                        <td>${u.receipt_count || 0}</td>
-                        <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-'}</td>
-                        <td>
-                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">Αναβάθμιση</button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (err) {
-                console.error('Error loading users:', err);
-            }
-        }
+              try {
+                  const res = await apiCall('/admin/users?limit=200');
+                  const data = await res.json();
+                  const users = data.users || [];
+
+                  const expiring = users.filter(function(u){ return u.expiring_soon; });
+                  const alertEl = document.getElementById('expiringAlert');
+                  if (expiring.length > 0) {
+                      alertEl.style.display = 'block';
+                      document.getElementById('expiringTable').innerHTML = expiring.map(function(u) {
+                          const dl = u.days_left !== null ? u.days_left : '?';
+                          const cls = dl <= 2 ? 'crit' : 'warn';
+                          return '<tr><td><strong>' + (u.email||'-') + '</strong></td>' +
+                              '<td>' + (u.name||'-') + '</td>' +
+                              '<td><span class="expiry-badge ' + cls + '">Λήγει σε ' + dl + ' μέρ.</span></td>' +
+                              '<td>' + (u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString('el-GR') : '-') + '</td></tr>';
+                      }).join('');
+                  } else {
+                      alertEl.style.display = 'none';
+                  }
+
+                  document.getElementById('usersTable').innerHTML = users.map(function(u) {
+                      const isPaid = u.account_type === 'paid';
+                      const dl = u.days_left;
+                      let badge = '';
+                      if (isPaid && dl !== null) {
+                          if (dl <= 2)      badge = '<span class="expiry-badge crit">🔴 ' + dl + ' μέρ.</span>';
+                          else if (dl <= 7) badge = '<span class="expiry-badge warn">⚠️ ' + dl + ' μέρ.</span>';
+                      }
+                      const startStr = u.premium_start_date ? new Date(u.premium_start_date).toLocaleDateString('el-GR') : (isPaid ? '—' : '');
+                      const endStr   = u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString('el-GR') : '';
+                      const period   = isPaid
+                          ? '<span style="font-size:12px;">' + startStr + ' → ' + endStr + '</span>' + badge
+                          : '<span style="color:#999;font-size:12px;">—</span>';
+                      const eid = u._id || '';
+                      const em  = (u.email || '').replace(/'/g, "\\'");
+                      return '<tr>' +
+                          '<td>' + (u.email||'-') + '</td>' +
+                          '<td>' + (u.name||'-') + '</td>' +
+                          '<td><span class="badge ' + (isPaid?'badge-success':'badge-info') + '">' + (isPaid?'Premium':'Free') + '</span></td>' +
+                          '<td>' + period + '</td>' +
+                          '<td>' + (u.receipt_count||0) + '</td>' +
+                          '<td>' + (u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-') + '</td>' +
+                          '<td style="white-space:nowrap;">' +
+                              '<button class="btn-grant" onclick="openGrantModal(\'' + eid + '\',\'' + em + '\')">🎁 Grant</button> ' +
+                              (isPaid ? '<button class="btn-revoke" onclick="revokePremium(\'' + eid + '\')">✖ Revoke</button>' : '') +
+                          '</td>' +
+                          '</tr>';
+                  }).join('');
+              } catch (err) {
+                  console.error('Error loading users:', err);
+              }
+          }
         
-        async function upgradeUser(userId) {
-            const days = prompt('Πόσες ημέρες Premium;', '30');
-            if (!days) return;
-            
-            try {
-                await fetch(`${API_BASE}/admin/users/${userId}/upgrade?admin_token=${adminToken}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ days: parseInt(days) })
-                });
-                loadUsers();
-                alert('Ο χρήστης αναβαθμίστηκε!');
-            } catch (err) {
-                alert('Σφάλμα');
-            }
-        }
+        let _grantUserId = null;
+          function openGrantModal(userId, email) {
+              _grantUserId = userId;
+              document.getElementById('grantModalTitle').textContent = 'Grant Premium — ' + email;
+              const today = new Date();
+              const in30  = new Date(today); in30.setDate(today.getDate() + 30);
+              document.getElementById('grantStartDate').value = today.toISOString().slice(0,10);
+              document.getElementById('grantEndDate').value   = in30.toISOString().slice(0,10);
+              document.getElementById('grantModal').style.display = 'flex';
+          }
+          function closeGrantModal() {
+              document.getElementById('grantModal').style.display = 'none';
+              _grantUserId = null;
+          }
+          async function submitGrantPremium() {
+              const startDate = document.getElementById('grantStartDate').value;
+              const endDate   = document.getElementById('grantEndDate').value;
+              if (!startDate || !endDate) { alert('Επίλεξε ημερομηνίες.'); return; }
+              if (endDate <= startDate)   { alert('Η λήξη πρέπει να είναι μετά την έναρξη.'); return; }
+              try {
+                  const res = await fetch(API_BASE + '/admin/users/' + _grantUserId + '/grant-premium?admin_token=' + adminToken, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ start_date: startDate, end_date: endDate })
+                  });
+                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  closeGrantModal();
+                  loadUsers();
+              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+          }
+          async function revokePremium(userId) {
+              if (!confirm('Αφαίρεση Premium από αυτόν τον χρήστη;')) return;
+              try {
+                  const res = await fetch(API_BASE + '/admin/users/' + userId + '/revoke-premium?admin_token=' + adminToken, {
+                      method: 'POST'
+                  });
+                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  loadUsers();
+              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+          }
         
         async function loadPromotions() {
             try {
