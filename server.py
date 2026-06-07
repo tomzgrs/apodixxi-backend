@@ -2467,13 +2467,33 @@ async def toggle_promo_code(
 
 
 @api_router.get("/admin/users")
-async def list_users(admin_key: str = Query(...), skip: int = 0, limit: int = 100):
-    """List all registered users (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
-        raise HTTPException(status_code=403, detail="Unauthorized")
-    
-    users = await db.users.find().sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    return {"users": users}
+  async def list_users(admin_key: str = Query(None), admin_token: str = Query(None), skip: int = 0, limit: int = 200):
+      """List all registered users with expiring_soon flag (Admin only)."""
+      is_valid = admin_key == ADMIN_PASSWORD
+      if not is_valid and admin_token:
+          is_valid = await verify_admin_token(admin_token)
+      if not is_valid:
+          raise HTTPException(status_code=403, detail="Unauthorized")
+      
+      users = await db.users.find().sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+      now = datetime.now(timezone.utc)
+      warning_threshold = now + timedelta(days=7)
+      for u in users:
+          expiry_str = u.get("subscription_expires_at")
+          u["expiring_soon"] = False
+          u["days_left"] = None
+          if expiry_str and u.get("account_type") == "paid":
+              try:
+                  expiry_dt = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+                  if expiry_dt > now:
+                      delta = (expiry_dt - now).days
+                      u["days_left"] = delta
+                      u["expiring_soon"] = expiry_dt <= warning_threshold
+              except Exception:
+                  pass
+          device_id = u.get("device_id")
+          u["receipt_count"] = await db.receipts.count_documents({"device_id": device_id}) if device_id else 0
+      return {"users": users}
 
 
 @api_router.post("/admin/users/{user_id}/upgrade")
@@ -2509,10 +2529,13 @@ async def upgrade_user(user_id: str, days: int = Body(..., embed=True), admin_ke
 
 
 @api_router.post("/admin/users/{user_id}/downgrade")
-async def downgrade_user(user_id: str, admin_key: str = Query(...)):
-    """Downgrade a user to free (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
-        raise HTTPException(status_code=403, detail="Unauthorized")
+  async def downgrade_user(user_id: str, admin_key: str = Query(None), admin_token: str = Query(None)):
+      """Downgrade a user to free (Admin only)."""
+      is_valid = admin_key == ADMIN_PASSWORD
+      if not is_valid and admin_token:
+          is_valid = await verify_admin_token(admin_token)
+      if not is_valid:
+          raise HTTPException(status_code=403, detail="Unauthorized")
     
     result = await db.users.update_one(
         {"_id": user_id},
@@ -2526,6 +2549,53 @@ async def downgrade_user(user_id: str, admin_key: str = Query(...)):
         raise HTTPException(status_code=404, detail="User not found")
     
     return {"success": True}
+
+
+  class GrantPremiumBody(BaseModel):
+      start_date: str
+      end_date: str
+
+  @api_router.post("/admin/users/{user_id}/grant-premium")
+  async def grant_premium(user_id: str, body: GrantPremiumBody, admin_key: str = Query(None), admin_token: str = Query(None)):
+      """Grant premium with explicit start and end dates (Admin only)."""
+      is_valid = admin_key == ADMIN_PASSWORD
+      if not is_valid and admin_token:
+          is_valid = await verify_admin_token(admin_token)
+      if not is_valid:
+          raise HTTPException(status_code=403, detail="Unauthorized")
+      user = await db.users.find_one({"_id": user_id})
+      if not user:
+          raise HTTPException(status_code=404, detail="User not found")
+      try:
+          start_dt = datetime.fromisoformat(body.start_date.replace("Z", "+00:00"))
+          end_dt   = datetime.fromisoformat(body.end_date.replace("Z", "+00:00"))
+      except ValueError:
+          raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+      if end_dt <= start_dt:
+          raise HTTPException(status_code=400, detail="end_date must be after start_date")
+      await db.users.update_one(
+          {"_id": user_id},
+          {"$set": {"account_type": "paid", "premium_start_date": start_dt.isoformat(), "subscription_expires_at": end_dt.isoformat()}}
+      )
+      return {"success": True, "premium_start_date": start_dt.isoformat(), "subscription_expires_at": end_dt.isoformat()}
+
+
+  @api_router.post("/admin/users/{user_id}/revoke-premium")
+  async def revoke_premium(user_id: str, admin_key: str = Query(None), admin_token: str = Query(None)):
+      """Revoke premium and clear all subscription dates (Admin only)."""
+      is_valid = admin_key == ADMIN_PASSWORD
+      if not is_valid and admin_token:
+          is_valid = await verify_admin_token(admin_token)
+      if not is_valid:
+          raise HTTPException(status_code=403, detail="Unauthorized")
+      result = await db.users.update_one(
+          {"_id": user_id},
+          {"$set": {"account_type": "free", "premium_start_date": None, "subscription_expires_at": None}}
+      )
+      if result.matched_count == 0:
+          raise HTTPException(status_code=404, detail="User not found")
+      return {"success": True}
+  
 
 
 # ============ DATA EXPORT (PAID USERS ONLY) ============
@@ -5194,7 +5264,21 @@ async def admin_dashboard():
             .sidebar-logo h1 span, .nav-item span, .logout-btn span { display: none; }
             .main-content { margin-left: 80px; }
         }
-    </style>
+    
+          .expiry-badge { display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:6px;white-space:nowrap; }
+          .expiry-badge.warn { background:#fef3c7;color:#b45309;border:1px solid #fcd34d; }
+          .expiry-badge.crit { background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5; }
+          .expiring-alert { background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:16px 20px;margin-bottom:20px; }
+          .expiring-alert h4 { font-size:14px;font-weight:600;color:#92400e;margin-bottom:10px;display:flex;align-items:center;gap:6px; }
+          .expiring-alert table { width:100%;font-size:13px; }
+          .expiring-alert td { padding:4px 10px; }
+          .btn-grant { background:#059669;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:500; }
+          .btn-grant:hover { background:#047857; }
+          .btn-revoke { background:#dc2626;color:#fff;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:500; }
+          .btn-revoke:hover { background:#b91c1c; }
+          .modal-date-row { display:flex;gap:12px; }
+          .modal-date-row .form-group { flex:1; }
+          </style>
 </head>
 <body>
     <!-- Login Screen -->
@@ -5306,10 +5390,14 @@ async def admin_dashboard():
                     <h2>Χρήστες</h2>
                     <p>Διαχείριση χρηστών</p>
                 </div>
+                <div class="expiring-alert" id="expiringAlert" style="display:none;">
+                    <h4>⚠️ Premium Ενεργοποιήσεις προς Λήξη (≤7 ημέρες)</h4>
+                    <table><tbody id="expiringTable"></tbody></table>
+                </div>
                 <div class="card">
                     <div class="card-body">
                         <table>
-                            <thead><tr><th>Email</th><th>Όνομα</th><th>Συνδρομή</th><th>Λήξη</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
+                            <thead><tr><th>Email</th><th>Όνομα</th><th>Τύπος</th><th>Premium Διάστημα</th><th>Αποδείξεις</th><th>Εγγραφή</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="usersTable"></tbody>
                         </table>
                     </div>
@@ -5484,7 +5572,34 @@ async def admin_dashboard():
         </div>
     </div>
     
-    <!-- Promo Code Modal -->
+    <!-- Grant Premium Modal -->
+      <div class="modal-overlay" id="grantModal" style="display:none;" onclick="if(event.target===this)closeGrantModal()">
+          <div class="modal" style="max-width:480px;width:90%;">
+              <div class="modal-header">
+                  <h3 id="grantModalTitle">Grant Premium</h3>
+                  <button class="modal-close" onclick="closeGrantModal()">&times;</button>
+              </div>
+              <div class="modal-body">
+                  <div class="modal-date-row">
+                      <div class="form-group">
+                          <label>📅 Έναρξη Premium</label>
+                          <input type="date" id="grantStartDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
+                      </div>
+                      <div class="form-group">
+                          <label>📅 Λήξη Premium</label>
+                          <input type="date" id="grantEndDate" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;" />
+                      </div>
+                  </div>
+                  <p style="font-size:12px;color:#888;margin-top:12px;">Αποθηκεύει <code>premium_start_date</code> και <code>subscription_expires_at</code> στο MongoDB.</p>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 24px;border-top:1px solid #e5e7eb;">
+                  <button class="btn btn-secondary" onclick="closeGrantModal()">Άκυρο</button>
+                  <button class="btn-grant" style="padding:10px 24px;font-size:14px;border-radius:8px;" onclick="submitGrantPremium()">✅ Ενεργοποίηση</button>
+              </div>
+          </div>
+      </div>
+
+      <!-- Promo Code Modal -->
     <div class="modal-overlay" id="promoCodeModal">
         <div class="modal">
             <div class="modal-header">
@@ -5707,68 +5822,101 @@ async def admin_dashboard():
         }
         
         async function loadUsers() {
-            try {
-                const res = await apiCall('/admin/users/all?limit=100');
-                const data = await res.json();
-                
-                document.getElementById('usersTable').innerHTML = data.users.map(u => {
-                    // Calculate subscription status
-                    let subStatus = 'Free';
-                    let subBadgeClass = 'badge-info';
-                    let expiresText = '-';
-                    
-                    if (u.account_type === 'paid' && u.subscription_expires_at) {
-                        const expiresDate = new Date(u.subscription_expires_at);
-                        const now = new Date();
-                        const daysRemaining = Math.ceil((expiresDate - now) / (1000 * 60 * 60 * 24));
-                        
-                        if (daysRemaining > 0) {
-                            subStatus = 'apodixxi+';
-                            subBadgeClass = 'badge-success';
-                            expiresText = expiresDate.toLocaleDateString('el-GR') + ' (' + daysRemaining + ' ημέρες)';
-                        } else {
-                            subStatus = 'Έληξε';
-                            subBadgeClass = 'badge-warning';
-                            expiresText = expiresDate.toLocaleDateString('el-GR') + ' (έληξε)';
-                        }
-                    }
-                    
-                    return `
-                    <tr>
-                        <td>${u.email || '-'}</td>
-                        <td>${u.name || '-'}</td>
-                        <td><span class="badge ${subBadgeClass}">${subStatus}</span></td>
-                        <td>${expiresText}</td>
-                        <td>${u.receipt_count || 0}</td>
-                        <td>${u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-'}</td>
-                        <td>
-                            ${u.account_type === 'paid' ? '<button class="btn btn-danger" onclick="downgradeUser(\\'' + u._id + '\\')">Υποβάθμιση</button>' : ''}
-                            <button class="btn btn-secondary" onclick="upgradeUser('${u._id}')">+30 ημέρες</button>
-                        </td>
-                    </tr>
-                `}).join('');
-            } catch (err) {
-                console.error('Error loading users:', err);
-            }
-        }
-        
-        async function upgradeUser(userId) {
-            const days = prompt('Πόσες ημέρες Premium;', '30');
-            if (!days) return;
-            
-            try {
-                await fetch(`${API_BASE}/admin/users/${userId}/upgrade?admin_token=${adminToken}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ days: parseInt(days) })
-                });
-                loadUsers();
-                alert('Ο χρήστης αναβαθμίστηκε σε apodixxi+!');
-            } catch (err) {
-                alert('Σφάλμα');
-            }
-        }
-        
+              try {
+                  const res = await apiCall('/admin/users/all?limit=200');
+                  const data = await res.json();
+                  const users = data.users || [];
+
+                  const expiring = users.filter(function(u){ return u.expiring_soon; });
+                  const alertEl = document.getElementById('expiringAlert');
+                  if (expiring.length > 0) {
+                      alertEl.style.display = 'block';
+                      document.getElementById('expiringTable').innerHTML = expiring.map(function(u) {
+                          const dl = u.days_left !== null ? u.days_left : '?';
+                          const cls = dl <= 2 ? 'crit' : 'warn';
+                          return '<tr><td><strong>' + (u.email||'-') + '</strong></td>' +
+                              '<td>' + (u.name||'-') + '</td>' +
+                              '<td><span class="expiry-badge ' + cls + '">Λήγει σε ' + dl + ' μέρ.</span></td>' +
+                              '<td>' + (u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString('el-GR') : '-') + '</td></tr>';
+                      }).join('');
+                  } else {
+                      alertEl.style.display = 'none';
+                  }
+
+                  document.getElementById('usersTable').innerHTML = users.map(function(u) {
+                      const isPaid = u.account_type === 'paid';
+                      const dl = u.days_left;
+                      let badge = '';
+                      if (isPaid && dl !== null) {
+                          if (dl <= 2)      badge = '<span class="expiry-badge crit">🔴 ' + dl + ' μέρ.</span>';
+                          else if (dl <= 7) badge = '<span class="expiry-badge warn">⚠️ ' + dl + ' μέρ.</span>';
+                      }
+                      const startStr = u.premium_start_date ? new Date(u.premium_start_date).toLocaleDateString('el-GR') : (isPaid ? '—' : '');
+                      const endStr   = u.subscription_expires_at ? new Date(u.subscription_expires_at).toLocaleDateString('el-GR') : '';
+                      const period   = isPaid
+                          ? '<span style="font-size:12px;">' + startStr + ' → ' + endStr + '</span>' + badge
+                          : '<span style="color:#999;font-size:12px;">—</span>';
+                      const eid = u._id || '';
+                      const em  = (u.email || '').replace(/'/g, "\\'");
+                      return '<tr>' +
+                          '<td>' + (u.email||'-') + '</td>' +
+                          '<td>' + (u.name||'-') + '</td>' +
+                          '<td><span class="badge ' + (isPaid?'badge-success':'badge-info') + '">' + (isPaid?'apodixxi+':'Free') + '</span></td>' +
+                          '<td>' + period + '</td>' +
+                          '<td>' + (u.receipt_count||0) + '</td>' +
+                          '<td>' + (u.created_at ? new Date(u.created_at).toLocaleDateString('el-GR') : '-') + '</td>' +
+                          '<td style="white-space:nowrap;">' +
+                              '<button class="btn-grant" onclick="openGrantModal(\'' + eid + '\',\'' + em + '\')">🎁 Grant</button> ' +
+                              (isPaid ? '<button class="btn-revoke" onclick="revokePremium(\'' + eid + '\')">✖ Revoke</button>' : '') +
+                          '</td>' +
+                          '</tr>';
+                  }).join('');
+              } catch (err) {
+                  console.error('Error loading users:', err);
+              }
+          }
+          
+        let _grantUserId = null;
+          function openGrantModal(userId, email) {
+              _grantUserId = userId;
+              document.getElementById('grantModalTitle').textContent = 'Grant Premium — ' + email;
+              const today = new Date();
+              const in30  = new Date(today); in30.setDate(today.getDate() + 30);
+              document.getElementById('grantStartDate').value = today.toISOString().slice(0,10);
+              document.getElementById('grantEndDate').value   = in30.toISOString().slice(0,10);
+              document.getElementById('grantModal').style.display = 'flex';
+          }
+          function closeGrantModal() {
+              document.getElementById('grantModal').style.display = 'none';
+              _grantUserId = null;
+          }
+          async function submitGrantPremium() {
+              const startDate = document.getElementById('grantStartDate').value;
+              const endDate   = document.getElementById('grantEndDate').value;
+              if (!startDate || !endDate) { alert('Επίλεξε ημερομηνίες.'); return; }
+              if (endDate <= startDate)   { alert('Η λήξη πρέπει να είναι μετά την έναρξη.'); return; }
+              try {
+                  const res = await fetch(API_BASE + '/admin/users/' + _grantUserId + '/grant-premium?admin_token=' + adminToken, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ start_date: startDate, end_date: endDate })
+                  });
+                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  closeGrantModal();
+                  loadUsers();
+              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+          }
+          async function revokePremium(userId) {
+              if (!confirm('Αφαίρεση Premium από αυτόν τον χρήστη;')) return;
+              try {
+                  const res = await fetch(API_BASE + '/admin/users/' + userId + '/revoke-premium?admin_token=' + adminToken, {
+                      method: 'POST'
+                  });
+                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  loadUsers();
+              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+          }
+          
         async function downgradeUser(userId) {
             if (!confirm('Είστε σίγουροι ότι θέλετε να υποβαθμίσετε αυτόν τον χρήστη σε Free;')) return;
             
