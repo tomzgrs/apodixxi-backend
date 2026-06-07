@@ -2554,6 +2554,7 @@ async def upgrade_user(user_id: str, days: int = Body(..., embed=True), admin_ke
       start_date: str
       end_date: str
 
+
   @api_router.post("/admin/users/{user_id}/grant-premium")
   async def grant_premium(user_id: str, body: GrantPremiumBody, admin_key: str = Query(None), admin_token: str = Query(None)):
       """Grant premium with explicit start and end dates (Admin only)."""
@@ -2594,6 +2595,7 @@ async def upgrade_user(user_id: str, days: int = Body(..., embed=True), admin_ke
       if result.matched_count == 0:
           raise HTTPException(status_code=404, detail="User not found")
       return {"success": True}
+
   
 
 
