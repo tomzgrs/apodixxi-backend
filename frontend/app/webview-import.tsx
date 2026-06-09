@@ -224,6 +224,12 @@ const DOM_EXTRACTION_JS = `
       attempts++;
       var _tbl = document.querySelectorAll('table.k-table,table.k-grid-table,table');
       safePost({type:'DEBUG',step:'POLL',attempt:attempts,ts:Date.now(),elapsed:Date.now()-window._apodixxiExtractionStart,tables:_tbl.length,bodyLen:document.body?document.body.innerText.length:0});
+      // Κανάλι ΑΝΕΞΑΡΤΗΤΟ από τη γέφυρα: γράψε διαγνωστικά στον τίτλο (το RN τα διαβάζει μέσω onNavigationStateChange)
+      try {
+        var _fr = document.querySelectorAll('iframe,frame').length;
+        var _rnw = (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage==='function') ? 1 : 0;
+        document.title = 'APX::a'+attempts+'|t'+_tbl.length+'|f'+_fr+'|b'+(document.body?document.body.innerText.length:0)+'|r'+_rnw;
+      } catch(e){}
       try {
         var result = {store_name:'',store_vat:'',date:'',receipt_number:'',raw_text:'',items:[],found_final_total:0};
         result.raw_text = document.body ? (document.body.innerText||'') : '';
@@ -273,6 +279,7 @@ const DOM_EXTRACTION_JS = `
           var _dr=document.querySelectorAll('tr').length;
           var _dc=document.querySelectorAll('td').length;
           safePost({type:'error', message:'Δεν βρέθηκαν προϊόντα μετά από '+attempts+' προσπάθειες. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF). [tables='+_dt+' rows='+_dr+' cells='+_dc+']'});
+          try { document.title = 'APXERR::t'+_dt+'|r'+_dr+'|c'+_dc; } catch(e){}
           return;
         }
 
@@ -297,6 +304,11 @@ const DOM_EXTRACTION_JS = `
 
         safePost({type:'DEBUG',step:'EXTRACTION_DONE',itemCount:result.items.length,ts:Date.now(),elapsed:Date.now()-window._apodixxiExtractionStart,storeName:result.store_name,totalFound:result.found_final_total});
         safePost({type:'extracted', data:result});
+        // Παράδοση δεδομένων ΚΑΙ μέσω τίτλου (fallback αν η γέφυρα postMessage είναι νεκρή)
+        try {
+          var _slim = {store_name:result.store_name,store_vat:result.store_vat,date:result.date,receipt_number:result.receipt_number,found_final_total:result.found_final_total,items:result.items};
+          document.title = 'APXJSON::' + JSON.stringify(_slim);
+        } catch(e){}
       } catch(err) {
         if(attempts>=maxAttempts){
           if(pollId) clearInterval(pollId);
@@ -395,10 +407,14 @@ export default function WebViewImportScreen() {
         setExtracting(false);
         setExtracted(false);
         const d = lastDebugRef.current;
+        const bridgeTxt = d && d.bridge !== undefined
+          ? (lang === 'el' ? (d.bridge ? ', γέφυρα=ΟΚ' : ', γέφυρα=ΝΕΚΡΗ') : (d.bridge ? ', bridge=OK' : ', bridge=DEAD'))
+          : '';
+        const framesTxt = d && d.iframes !== undefined ? `, ${d.iframes} iframes` : '';
         const diag = d
           ? (lang === 'el'
-              ? `\n\nΔιαγνωστικά συσκευής: ${d.attempt || 0} προσπάθειες, ${d.tables || 0} πίνακες, ${d.bodyLen || 0} χαρ. κειμένου.`
-              : `\n\nDevice diagnostics: ${d.attempt || 0} attempts, ${d.tables || 0} tables, ${d.bodyLen || 0} text chars.`)
+              ? `\n\nΔιαγνωστικά συσκευής: ${d.attempt || 0} προσπάθειες, ${d.tables || 0} πίνακες${framesTxt}, ${d.bodyLen || 0} χαρ.${bridgeTxt}.`
+              : `\n\nDevice diagnostics: ${d.attempt || 0} attempts, ${d.tables || 0} tables${framesTxt}, ${d.bodyLen || 0} chars${bridgeTxt}.`)
           : (lang === 'el'
               ? '\n\n(Δεν ελήφθη κανένα μήνυμα από τη σελίδα — το script δεν εκτελέστηκε.)'
               : '\n\n(No message received from the page — the script did not run.)');
@@ -497,6 +513,38 @@ export default function WebViewImportScreen() {
       setExtracting(false);
     }
   }, [extracted, pageUrl, lang, router]);
+
+  // Κανάλι ΑΝΕΞΑΡΤΗΤΟ από τη γέφυρα postMessage: διαβάζει δεδομένα/σφάλματα/διαγνωστικά από τον τίτλο της σελίδας.
+  const handleNavState = useCallback((navState: any) => {
+    const t = navState && navState.title;
+    if (typeof t !== 'string') return;
+    try {
+      if (t.indexOf('APXJSON::') === 0) {
+        const data = JSON.parse(t.slice(9));
+        handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'extracted', data }) } } as any);
+        return;
+      }
+      if (t.indexOf('APXERR::') === 0) {
+        handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'error', message: 'Δεν βρέθηκαν προϊόντα στη σελίδα. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF). [' + t.slice(8) + ']' }) } } as any);
+        return;
+      }
+      if (t.indexOf('APX::') === 0) {
+        const m: any = { viaTitle: true };
+        t.slice(5).split('|').forEach((p: string) => {
+          const k = p[0];
+          const v = parseInt(p.slice(1), 10);
+          if (k === 'a') m.attempt = v;
+          else if (k === 't') m.tables = v;
+          else if (k === 'f') m.iframes = v;
+          else if (k === 'b') m.bodyLen = v;
+          else if (k === 'r') m.bridge = v;
+        });
+        lastDebugRef.current = m;
+      }
+    } catch (e) {
+      // αγνόησε μη έγκυρους τίτλους
+    }
+  }, [handleMessage]);
 
   const webViewAvailable = WebView !== null && Platform.OS !== 'web';
 
@@ -644,6 +692,7 @@ export default function WebViewImportScreen() {
                 }
             }}
             onMessage={handleMessage}
+            onNavigationStateChange={handleNavState}
             userAgent="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
           />
 
