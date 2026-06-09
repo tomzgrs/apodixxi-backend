@@ -319,6 +319,8 @@ export default function WebViewImportScreen() {
   // Δείξε την οδηγία/χειρισμό του PDF διακόπτη μόνο για Σκλαβενίτη.
   // Κρύψε αν το URL έχει epsilondigital ΚΑΙ ΟΧΙ sklavenitis (π.χ. ΑΒ Βασιλόπουλος).
   const showPdfToggle = !(pageUrl.includes('epsilondigital') && !pageUrl.includes('sklavenitis'));
+  // Σελίδες e-invoicing (Epsilon) που έχουν τον PDF διακόπτη — εκεί τρέχουμε auto-switch
+  const isEpsilonPage = pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet') || pageUrl.includes('sklavenitis');
   const { lang } = useContext(I18nContext);
   const router = useRouter();
   const webviewRef = useRef<any>(null);
@@ -326,6 +328,7 @@ export default function WebViewImportScreen() {
   const [extracting, setExtracting] = useState(false);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [extracted, setExtracted] = useState(false);
+  const lastDebugRef = useRef<any>(null);
   
   // VAT Validation states
   const [showVatModal, setShowVatModal] = useState(false);
@@ -385,16 +388,25 @@ export default function WebViewImportScreen() {
   const handleExtract = useCallback(() => {
     if (webviewRef.current && !extracting) {
       setExtracting(true);
+      lastDebugRef.current = null;
       
       // Set a timeout to reset if extraction takes too long
       const timeoutId = setTimeout(() => {
         setExtracting(false);
         setExtracted(false);
+        const d = lastDebugRef.current;
+        const diag = d
+          ? (lang === 'el'
+              ? `\n\nΔιαγνωστικά συσκευής: ${d.attempt || 0} προσπάθειες, ${d.tables || 0} πίνακες, ${d.bodyLen || 0} χαρ. κειμένου.`
+              : `\n\nDevice diagnostics: ${d.attempt || 0} attempts, ${d.tables || 0} tables, ${d.bodyLen || 0} text chars.`)
+          : (lang === 'el'
+              ? '\n\n(Δεν ελήφθη κανένα μήνυμα από τη σελίδα — το script δεν εκτελέστηκε.)'
+              : '\n\n(No message received from the page — the script did not run.)');
         Alert.alert(
           lang === 'el' ? 'Χρονικό όριο' : 'Timeout',
-          lang === 'el' 
+          (lang === 'el' 
             ? 'Η εξαγωγή δεδομένων πήρε πολύ χρόνο. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF) και δοκιμάστε ξανά.'
-            : 'Data extraction took too long. Make sure you see products in a table (not PDF) and try again.',
+            : 'Data extraction took too long. Make sure you see products in a table (not PDF) and try again.') + diag,
           [{ text: 'OK' }]
         );
       }, 25000); // 25 second timeout (πάντα > JS polling 20s)
@@ -419,22 +431,16 @@ export default function WebViewImportScreen() {
 
   const handleMessage = useCallback(async (event: any) => {
     try {
-      // Clear timeout if it exists
+      const msg = JSON.parse(event.nativeEvent.data);
+
+      // DEBUG POLL: κράτα τα διαγνωστικά αλλά ΜΗΝ ακυρώνεις το timeout (περίμενε terminal μήνυμα)
+      if (msg.type === 'DEBUG') { lastDebugRef.current = msg; return; }
+
+      // Terminal μήνυμα → ακύρωσε το timeout
       if (webviewRef.current && (webviewRef.current as any)._extractionTimeout) {
         clearTimeout((webviewRef.current as any)._extractionTimeout);
       }
-      
-      const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'switchAttempt') return;
-      if (msg.type === 'DEBUG') {
-        const elapsedSec = msg.elapsed !== undefined ? `+${(msg.elapsed/1000).toFixed(1)}s` : '';
-        const details = Object.entries(msg as Record<string,unknown>)
-          .filter(([k]) => !['type','step','ts','elapsed'].includes(k))
-          .map(([k,v]) => `${k}: ${v}`)
-          .join('\n');
-        Alert.alert(`[Debug] ${msg.step} ${elapsedSec}`, details || '(no extra data)');
-        return;
-      }
       if (msg.type === 'extracted' && !extracted) {
         setExtracted(true);
         const data = msg.data;
@@ -565,7 +571,7 @@ export default function WebViewImportScreen() {
               setPageLoaded(true);
               // Auto-switch from PDF to HTML view for Epsilon Digital sites
                 // Blazor Server needs 3-5s to connect via SignalR and render
-                if (pageUrl.includes('epsilondigital-sklavenitis')) {
+                if (isEpsilonPage) {
                   const SWITCH_JS = `
                     (function() {
                       try {
