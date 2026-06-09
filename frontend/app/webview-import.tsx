@@ -13,367 +13,312 @@ try {
 } catch (e) {}
 
 const DOM_EXTRACTION_JS = `
-(function() {
-  try {
-    var result = {
-      store_name: '',
-      store_vat: '',
-      date: '',
-      receipt_number: '',
-      raw_text: '',
-      items: [],
-      found_final_total: 0
-    };
+  (function() {
+    if (window._apodixxiExtracting) return;
+    window._apodixxiExtracting = true;
+    window._apodixxiExtractionStart = Date.now();
 
-    result.raw_text = document.body.innerText || '';
+    // Κρύψε το Blazor reconnect overlay που μπλοκάρει/τυφλώνει τον parser, και ζήτα επανασύνδεση
+    try {
+      var s = document.createElement('style');
+      s.innerHTML = '#components-reconnect-modal,[id*="reconnect"]{display:none!important}';
+      document.head.appendChild(s);
+    } catch(e) {}
+    try { if (window.Blazor && window.Blazor.reconnect) window.Blazor.reconnect(); } catch(e) {}
+    safePost({type:'DEBUG',step:'SCRIPT_START',ts:Date.now(),url:window.location.href.slice(0,120)});
 
-    // Store name from URL
-    var fullUrl = window.location.href.toLowerCase();
-    var hostname = window.location.hostname.toLowerCase();
-    
-    if (hostname.includes('marketin') || fullUrl.includes('marketin')) {
-      result.store_name = 'MARKET IN';
-    } else if (hostname.includes('abmarket') || fullUrl.includes('abmarket')) {
-      result.store_name = 'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ';
-    } else if (hostname.includes('bazaar') || fullUrl.includes('bazaar')) {
-      result.store_name = 'BAZAAR';
-    } else if (hostname.includes('sklavenitis') || fullUrl.includes('sklavenitis')) {
-      result.store_name = 'ΣΚΛΑΒΕΝΙΤΗΣ';
-    }
+    var attempts = 0;
+    var maxAttempts = 20;
+    var pollId = null;
 
-    // Extract VAT, date, receipt number
-    var vatMatch = result.raw_text.match(/(?:Α\\.?Φ\\.?Μ\\.?|ΑΦΜ)[:\\s]*([0-9]{9})/i);
-    if (vatMatch) result.store_vat = vatMatch[1];
-    
-    var dateMatch = result.raw_text.match(/(\\d{1,2}[\\-\\/\\.]\\d{1,2}[\\-\\/\\.]\\d{2,4})/);
-    if (dateMatch) result.date = dateMatch[1];
-
-    // Find ΤΕΛΙΚΗ ΑΞΙΑ from the summary section
-    var lines = result.raw_text.split('\\n');
-    for (var li = 0; li < lines.length; li++) {
-      var line = lines[li];
-      var lineUpper = line.toUpperCase();
-      
-      // Look for ΤΕΛΙΚΗ ΑΞΙΑ specifically
-      if (lineUpper.includes('ΤΕΛΙΚΗ ΑΞΙΑ') || lineUpper.includes('ΠΛΗΡΩΤΕΟ')) {
-        var nums = line.match(/(\\d+)[,\\.](\\d{2})/g);
-        if (nums && nums.length > 0) {
-          var lastNum = nums[nums.length - 1].replace(',', '.');
-          result.found_final_total = parseFloat(lastNum);
-        }
+    function safePost(msg) {
+      var payload = JSON.stringify(msg);
+      var t = 0;
+      function send() {
+        try {
+          if (window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === 'function') {
+            window.ReactNativeWebView.postMessage(payload);
+          } else if (t < 8) { t++; setTimeout(send, 400); }
+        } catch(e) { if (t < 8) { t++; setTimeout(send, 400); } }
       }
+      send();
     }
 
-    // Parse price - must be X,XX or X.XX format (1-2 decimal places)
     function parsePrice(text) {
       if (!text) return 0;
-      var clean = text.replace(/[€\\s]/g, '').trim();
-      
-      // Skip percentages
+      var clean = text.replace(/[€\s]/g, '').trim();
       if (clean.includes('%')) return 0;
-      
-      // Skip quantities with 3 decimal places (like 1,000 meaning 1.000)
-      if (/^\\d+[,.]\\d{3}$/.test(clean)) return 0;
-      
-      // Replace comma with dot
+      if (/^\d+[,.]\d{3}$/.test(clean)) return 0;
       clean = clean.replace(',', '.');
-      
-      // Match valid price: integer or 1-2 decimal places
-      if (/^\\d+(\\.\\d{1,2})?$/.test(clean)) {
-        return parseFloat(clean);
-      }
+      if (/^\d+(\.\d{1,2})?$/.test(clean)) return parseFloat(clean);
       return 0;
     }
 
-    // Check if text is a valid product description
     function isValidDescription(text) {
       if (!text || text.length < 3) return false;
       var t = text.toUpperCase().trim();
-      
-      // Exclude very long hexadecimal strings (digital signatures)
       if (t.length > 50 && /^[0-9A-F]+$/.test(t)) return false;
-      
-      // Exclude Base64-like strings (digital signatures)
       if (t.length > 30 && /[=+\/]/.test(text) && /^[A-Za-z0-9+\/=]+$/.test(text)) return false;
-      
-      // Exclude strings that look like hashes/signatures
       if (t.length > 40 && !/\s/.test(t)) return false;
-      
-      // Exclude keywords - payment methods, totals, headers
-      var excludes = ['ΣΥΝΟΛΟ', 'ΤΕΛΙΚ', 'ΚΑΘΑΡ', 'ΦΠΑ', 'ΠΛΗΡΩΤ', 
-                     'ΥΠΟΣΥΝΟΛ', 'EFT', 'ΜΕΤΡΗΤ', 'ΚΑΡΤ', 'VISA',
-                     'ΚΩΔΙΚΟΣ', 'ΠΕΡΙΓΡΑΦΗ', 'ΠΟΣΟΤΗΤΑ', 'ΤΙΜΗ', 'Α/Α', 'ΜΜ',
-                     'ΣΧΟΛΙΑ', 'MASTERCARD', 'CREDIT', 'DEBIT', 
-                     'PAYMENT', 'ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ', 'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ',
-                     'ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ', 'ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ', 'ΠΛΗΡΩΜΗ',
-                     'ΜΟΝΑΔΑ ΜΕΤΡΗΣΗΣ'];
+      var excludes = ['ΣΥΝΟΛΟ','ΤΕΛΙΚ','ΚΑΘΑΡ','ΦΠΑ','ΠΛΗΡΩΤ','ΥΠΟΣΥΝΟΛ','EFT','ΜΕΤΡΗΤ',
+                      'ΚΑΡΤ','VISA','ΚΩΔΙΚΟΣ','ΠΕΡΙΓΡΑΦΗ','ΠΟΣΟΤΗΤΑ','ΤΙΜΗ','Α/Α','ΜΜ',
+                      'ΣΧΟΛΙΑ','MASTERCARD','CREDIT','DEBIT','PAYMENT','ΓΡΑΜΜΕΣ ΠΑΡΑΣΤΑΤΙΚΟΥ',
+                      'ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ','ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ','ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ','ΠΛΗΡΩΜΗ',
+                      'ΜΟΝΑΔΑ ΜΕΤΡΗΣΗΣ','ΜΟΝΑΔΑ','ΕΚΠΤΩΣ'];
       for (var i = 0; i < excludes.length; i++) {
-        if (t.includes(excludes[i]) || t === excludes[i]) return false;
+        if (t.includes(excludes[i])) return false;
       }
-      
-      // Exclude if it looks like a payment method pattern (POS / e-POS)
-      if (/POS/.test(t) && /E-?POS/.test(t)) return false;
-      if (/^POS\s*[\/\-\s]/.test(t)) return false;
+      if (t.includes('POS') && (t.includes('E-POS') || t.includes('/'))) return false;
       if (t === 'POS' || t === 'E-POS' || t === 'EPOS') return false;
-      if (t.includes('POS /') || t.includes('POS/') || t.includes('/ E-POS') || t.includes('/E-POS')) return false;
-      
-      // Must contain at least one Greek or Latin letter
       if (!/[A-ZΑ-Ω]/.test(t)) return false;
-      
       return true;
     }
-    
-    // Check if text is ONLY a unit of measurement (not a product description)
+
     function isUnitOfMeasurement(text) {
       if (!text) return false;
       var t = text.toUpperCase().trim();
-      var units = ['ΚΙΛΑ', 'ΚΙΛΆ', 'ΤΕΜΑΧΙΑ', 'ΤΕΜΆΧΙΑ', 'ΤΕΜ', 'ΛΙΤΡΑ', 'ΛΊΤΡΑ', 
-                   'ΓΡΑΜΜΑΡΙΑ', 'ΜΕΤΡΑ', 'KILOS', 'PIECES', 'LITERS', 'GRAMS',
-                   'KG', 'GR', 'LT', 'ML', 'PCS', 'ΤΕΜΑΧΙΟ', 'ΚΙΛΟ'];
-      for (var i = 0; i < units.length; i++) {
-        if (t === units[i]) return true;
-      }
+      var units = ['ΚΙΛΑ','ΚΙΛΆ','ΤΕΜΑΧΙΑ','ΤΕΜΆΧΙΑ','ΤΕΜ','ΛΙΤΡΑ','ΛΊΤΡΑ','ΓΡΑΜΜΑΡΙΑ',
+                   'ΜΕΤΡΑ','KILOS','PIECES','LITERS','GRAMS','KG','GR','LT','ML','PCS','ΤΕΜΑΧΙΟ','ΚΙΛΟ'];
+      for (var i = 0; i < units.length; i++) { if (t === units[i]) return true; }
       return false;
     }
 
-    // Check if a table row is a payment/total row (not a product)
-    function isPaymentOrTotalRow(rowText) {
-      var t = rowText.toUpperCase();
-      // Payment method markers
-      if (t.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || t.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) return true;
-      if (t.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ')) return true;
-      // Check for POS payment patterns anywhere in the row
-      if (t.includes('POS /') || t.includes('POS/') || t.includes('/ E-POS') || t.includes('/E-POS')) return true;
-      if (t.includes('POS') && t.includes('E-POS')) return true;  // Row contains both POS and e-POS
-      // Row that is just payment methods
-      if (/^\s*POS\s*[\/\-]/.test(t) || /^\s*E-?POS/.test(t)) return true;
-      return false;
+    function extractFromTables() {
+      var items = [];
+      var tables = document.querySelectorAll('table.k-table, table.k-grid-table, table');
+      if (tables.length === 0) return items;
+      safePost({type:'DEBUG',step:'TABLES_FOUND',count:tables.length,firstRows:tables[0]?tables[0].querySelectorAll('tr').length:0,firstCell:tables[0]&&tables[0].querySelector('td')?tables[0].querySelector('td').innerText.slice(0,80):'',ts:Date.now()});
+
+      for (var ti = 0; ti < tables.length; ti++) {
+        var rows = tables[ti].querySelectorAll('tr');
+        for (var ri = 0; ri < rows.length; ri++) {
+          var cells = rows[ri].querySelectorAll('td');
+          if (cells.length < 2) continue;
+
+          var fullRowText = (rows[ri].innerText || '').toUpperCase();
+          if (fullRowText.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || fullRowText.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) continue;
+          if (fullRowText.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ') || fullRowText.includes('ΣΥΝΟΛΙΚΗ ΑΞΙΑ')) continue;
+          if (fullRowText.includes('ΚΑΘΑΡΗ ΑΞΙΑ:') || fullRowText.includes('ΦΟΡΟΙ:')) continue;
+          if (fullRowText.includes('POS') && (fullRowText.includes('E-POS') || fullRowText.includes('/'))) continue;
+          if (/^\s*POS/.test(fullRowText)) continue;
+
+          var description = '', actualDescIndex = -1, unitFound = '';
+          var candidates = [];
+          for (var di = 0; di < Math.min(cells.length, 6); di++) {
+            var cellText = cells[di] ? cells[di].innerText.trim() : '';
+            if (!cellText) continue;
+            if (isUnitOfMeasurement(cellText)) { unitFound = cellText; continue; }
+            if (/^\d+[,.]?\d*$/.test(cellText)) continue;
+            if (/^\d+%$/.test(cellText)) continue;
+            if (/^\d+[,.]\d{2}$/.test(cellText)) continue;
+            if (cellText.length >= 3 && /[A-Za-zΑ-Ωα-ω]/.test(cellText)) {
+              candidates.push({ text: cellText, index: di });
+            }
+          }
+          if (candidates.length > 0) {
+            candidates.sort(function(a,b){ return b.text.length - a.text.length; });
+            for (var ci = 0; ci < candidates.length; ci++) {
+              if (isValidDescription(candidates[ci].text)) {
+                description = candidates[ci].text; actualDescIndex = candidates[ci].index; break;
+              }
+            }
+            if (!description && candidates.length > 0) { description = candidates[0].text; actualDescIndex = candidates[0].index; }
+          }
+          if (!description) continue;
+
+          var quantity = '1', qtyValue = 1.0;
+          for (var qi = actualDescIndex + 1; qi < Math.min(cells.length, actualDescIndex + 6); qi++) {
+            var rawQ = cells[qi] ? cells[qi].innerText.trim() : '';
+            var qText = rawQ.replace(',', '.');
+            var wm = rawQ.match(/^(\d+[,.]\d{1,3})\s*(KG|ΚΙΛΑ|Κιλ)/i);
+            if (wm) { var wv2 = parseFloat(wm[1].replace(',','.')); if (wv2>0.001&&wv2<1000){qtyValue=wv2;quantity=String(wv2);unitFound=unitFound||'Κιλά';break;} }
+            if (/^\d+\.\d+$/.test(qText)&&parseFloat(qText)<1000){qtyValue=parseFloat(qText);quantity=qText;break;}
+            if (/^\d+$/.test(qText)&&parseInt(qText)>=1&&parseInt(qText)<100){qtyValue=parseInt(qText);quantity=qText;break;}
+          }
+
+          // Weight detection
+          if (qtyValue === 1.0) {
+            var unitUpper = (unitFound||'').toUpperCase();
+            var isWt = (unitUpper==='ΚΙΛΑ'||unitUpper==='ΚΙΛΆ'||unitUpper==='KG'||unitUpper==='ΚΙΛΟ');
+            if (isWt || /\bKG\b|\bΚΙΛ/i.test(description)) {
+              var wFound = null;
+              var wInDesc = description.match(/(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)/i);
+              if (wInDesc) { wFound = wInDesc[1]; description = description.replace(wInDesc[0],'').replace(/[\n\s]+/g,' ').trim(); }
+              if (!wFound) {
+                for (var wci=actualDescIndex+1;wci<cells.length;wci++){
+                  var wRaw=cells[wci]?cells[wci].innerText.trim():'';
+                  var wCM=wRaw.match(/^(\d+[,.]\d{1,3})\s*(?:KG|ΚΙΛΑ|ΚΙΛΆ|Κιλ)/i);
+                  if(wCM){wFound=wCM[1];break;}
+                }
+              }
+              if (!wFound && isWt) {
+                for (var wci2=actualDescIndex+1;wci2<cells.length;wci2++){
+                  var wRaw2=cells[wci2]?cells[wci2].innerText.trim():'';
+                  if(isUnitOfMeasurement(wRaw2))continue;
+                  var cM=wRaw2.match(/^(\d{1,4}),(\d{1,4})$/);
+                  if(cM){var wv3=parseFloat(cM[1]+'.'+cM[2]);if(wv3>0.001&&wv3<100&&Math.abs(wv3-1.0)>0.005){wFound=wRaw2;break;}}
+                }
+              }
+              if (wFound) { var wVal=parseFloat(String(wFound).replace(',','.'));if(wVal>0.001&&wVal<100&&Math.abs(wVal-1.0)>0.005){qtyValue=wVal;quantity=String(wVal);} }
+            }
+          }
+
+          var allPrices = [];
+          for (var pi=actualDescIndex+1;pi<cells.length;pi++){
+            var ct=cells[pi]?cells[pi].innerText.trim():'';
+            var pv=parsePrice(ct);
+            if(pv>0) allPrices.push(pv);
+          }
+          var finalPrice = 0;
+          if (allPrices.length>=2) { finalPrice=allPrices[allPrices.length-1]+allPrices[allPrices.length-2]; }
+          else if (allPrices.length===1) { finalPrice=allPrices[0]; }
+
+          if (finalPrice > 0) {
+            items.push({ code:'', description:description,
+              unit: unitFound||(qtyValue<1?'Κιλά':'Τεμάχια'),
+              quantity: quantity,
+              unit_price: (finalPrice/qtyValue).toFixed(2),
+              total: finalPrice.toFixed(2) });
+          }
+        }
+      }
+      return items;
     }
 
-    // Get all tables
-    var tables = document.querySelectorAll('table');
-    
-    // First, find the header row to identify column indices
-    var vatAmountColIndex = -1;  // Αξία ΦΠΑ column
-    var netValueColIndex = -1;   // Καθαρή αξία column
-    var descColIndex = -1;       // Περιγραφή column
-    var qtyColIndex = -1;        // Ποσότητα column
-    
-    for (var ti = 0; ti < tables.length; ti++) {
-      var headerRow = tables[ti].querySelector('tr');
-      if (headerRow) {
-        var headerCells = headerRow.querySelectorAll('th, td');
-        for (var hi = 0; hi < headerCells.length; hi++) {
-          var headerText = (headerCells[hi].innerText || '').toUpperCase().trim();
-          if (headerText.includes('ΑΞΙΑ ΦΠΑ') || headerText === 'ΦΠΑ') {
-            vatAmountColIndex = hi;
-          } else if (headerText.includes('ΚΑΘΑΡΗ') || headerText.includes('ΚΑΘΑΡ')) {
-            netValueColIndex = hi;
-          } else if (headerText.includes('ΠΕΡΙΓΡΑΦΗ')) {
-            descColIndex = hi;
-          } else if (headerText.includes('ΠΟΣΟΤΗΤ') || headerText.includes('ΠΟΣΌΤΗΤ')) {
-            qtyColIndex = hi;
+    function extractFromRawText() {
+      var items = [], usedDescs = {};
+      var fbLines = (document.body ? document.body.innerText||'' : '').split('\n');
+      for (var fli=0;fli<fbLines.length;fli++){
+        var fline=fbLines[fli].trim();
+        if(fline.length<4) continue;
+        var flU=fline.toUpperCase();
+        if(flU.includes('ΣΥΝΟΛΟ')||flU.includes('ΠΛΗΡΩΤ')||flU.includes('ΠΕΡΙΓΡΑΦΗ')||
+           flU.includes('Α/Α')||flU.includes('ΑΞΙΑ ΦΠΑ')||flU.includes('ΤΕΛΙΚ')||
+           flU.includes('ΚΑΘΑΡ')||flU.includes('ΕΚΠΤΩΣ')||flU.includes('POS')||
+           flU.includes('MASTERCARD')||flU.includes('VISA')||flU.includes('ΤΡΟΠΟΣ')||
+           flU.includes('ΜΕΙΚΤ')||flU.includes('ΦΠΑ %')||flU.includes('ΜΟΝΑΔΑ')) continue;
+        var fparts=fline.split(/\t+|  +/);
+        var fdesc='',fqty=1,fprices=[];
+        for(var fpi=0;fpi<fparts.length;fpi++){
+          var fp=fparts[fpi].trim(); if(!fp) continue;
+          var fpv=parsePrice(fp);
+          if(fpv>0.01&&fpv<50000){fprices.push(fpv);continue;}
+          if(/^\d+$/.test(fp)&&parseInt(fp)<1000){if(fdesc)fqty=parseInt(fp);continue;}
+          if(fp.length>=3&&/[A-Za-zΑ-Ωα-ω]/.test(fp)&&isValidDescription(fp)){
+            fdesc=fdesc?fdesc+' '+fp:fp;
+          }
+        }
+        if(fdesc&&fprices.length>0&&!usedDescs[fdesc]){
+          var ftotal=fprices[fprices.length-1];
+          if(ftotal>0){
+            usedDescs[fdesc]=true;
+            items.push({code:'',description:fdesc,unit:fqty<1?'Κιλά':'Τεμάχια',
+              quantity:String(fqty),unit_price:(ftotal/Math.max(fqty,1)).toFixed(2),total:ftotal.toFixed(2)});
           }
         }
       }
+      return items;
     }
-    
-    for (var ti = 0; ti < tables.length; ti++) {
-      var rows = tables[ti].querySelectorAll('tr');
-      
-      for (var ri = 0; ri < rows.length; ri++) {
-        var cells = rows[ri].querySelectorAll('td');
-        if (cells.length < 3) continue;
-        
-        // Get full row text to check if it's a payment/total row
-        var fullRowText = (rows[ri].innerText || '').toUpperCase();
-        
-        // Skip payment method rows and total rows
-        if (fullRowText.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || fullRowText.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) continue;
-        if (fullRowText.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ') || fullRowText.includes('ΣΥΝΟΛΙΚΗ ΑΞΙΑ')) continue;
-        if (fullRowText.includes('ΚΑΘΑΡΗ ΑΞΙΑ:') || fullRowText.includes('ΦΟΡΟΙ:') || fullRowText.includes('ΚΡΑΤΗΣΕΙΣ')) continue;
-        if (fullRowText.includes('POS') && (fullRowText.includes('E-POS') || fullRowText.includes('/') || fullRowText.includes('-'))) continue;
-        // Skip if row starts with POS
-        if (/^\s*POS/.test(fullRowText)) continue;
-        
-        // Find description - Look for the longest text that looks like a product name
-        var description = '';
-        var actualDescIndex = -1;
-        var unitFound = '';
-        
-        // In Epsilon Digital tables, description is usually in column 1 or 2
-        // But sometimes cells might be structured differently
-        
-        // Collect all candidate texts from first 5 columns
-        var candidates = [];
-        for (var di = 0; di < Math.min(cells.length, 5); di++) {
-          var cellText = cells[di] ? cells[di].innerText.trim() : '';
-          if (!cellText) continue;
-          
-          // Skip if it's a unit of measurement
-          if (isUnitOfMeasurement(cellText)) {
-            unitFound = cellText;
-            continue;
-          }
-          
-          // Skip if it's just a number (row number or quantity)
-          if (/^\d+[,\.]?\d*$/.test(cellText)) continue;
-          
-          // Skip if it's a percentage (VAT %)
-          if (/^\d+%$/.test(cellText)) continue;
-          
-          // Skip if it's a price format
-          if (/^\d+[,\.]\d{2}$/.test(cellText)) continue;
-          
-          // This could be a description candidate
-          if (cellText.length >= 3 && /[A-Za-zΑ-Ωα-ω]/.test(cellText)) {
-            candidates.push({ text: cellText, index: di });
+
+    function doExtract() {
+      attempts++;
+      var _tbl = document.querySelectorAll('table.k-table,table.k-grid-table,table');
+      safePost({type:'DEBUG',step:'POLL',attempt:attempts,ts:Date.now(),elapsed:Date.now()-window._apodixxiExtractionStart,tables:_tbl.length,bodyLen:document.body?document.body.innerText.length:0});
+      try {
+        var result = {store_name:'',store_vat:'',date:'',receipt_number:'',raw_text:'',items:[],found_final_total:0};
+        result.raw_text = document.body ? (document.body.innerText||'') : '';
+
+        var fullUrl=window.location.href.toLowerCase();
+        var hostname=window.location.hostname.toLowerCase();
+        if(hostname.includes('marketin')||fullUrl.includes('marketin')) result.store_name='MARKET IN';
+        else if(hostname.includes('abmarket')||fullUrl.includes('abmarket')) result.store_name='ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ';
+        else if(hostname.includes('bazaar')||fullUrl.includes('bazaar')) result.store_name='BAZAAR';
+        else if(hostname.includes('sklavenitis')||fullUrl.includes('sklavenitis')) result.store_name='ΣΚΛΑΒΕΝΙΤΗΣ';
+        else if(hostname.includes('epsilonnet')||hostname.includes('epsilondigital')) result.store_name='ΣΚΛΑΒΕΝΙΤΗΣ';
+        else if(hostname.includes('discountmarkt')||fullUrl.includes('discountmarkt')) result.store_name='DISCOUNT MARKT';
+        else if(hostname.includes('kritikos')||fullUrl.includes('kritikos')||hostname.includes('kretikos')) result.store_name='ΚΡΗΤΙΚΟΣ';
+
+        var vatMatch=result.raw_text.match(/(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)\.?:?\s*([0-9][0-9\s\.]{7,11}[0-9])/i);
+        if(vatMatch) result.store_vat=vatMatch[1].replace(/[^0-9]/g,'').substring(0,9);
+        if(!result.store_vat||result.store_vat.length!==9){
+          var vatFb=result.raw_text.match(/\b(0[0-9]{8})\b/);
+          if(vatFb) result.store_vat=vatFb[1];
+        }
+        if(!result.store_name&&result.store_vat==='800764388') result.store_name='ΣΚΛΑΒΕΝΙΤΗΣ';
+
+        var dateMatch=result.raw_text.match(/(\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{2,4})/);
+        if(dateMatch) result.date=dateMatch[1];
+
+        var rawLines=result.raw_text.split('\n');
+        for(var li=0;li<rawLines.length;li++){
+          var lineUp=rawLines[li].toUpperCase();
+          if(lineUp.includes('ΤΕΛΙΚΗ ΑΞΙΑ')||lineUp.includes('ΠΛΗΡΩΤΕΟ')){
+            var nums=rawLines[li].match(/(\d+)[,.](\d{2})/g);
+            if(nums&&nums.length>0) result.found_final_total=parseFloat(nums[nums.length-1].replace(',','.'));
           }
         }
-        
-        // Choose the best candidate - prefer longer texts as they're more likely to be descriptions
-        if (candidates.length > 0) {
-          // Sort by length (longest first)
-          candidates.sort(function(a, b) { return b.text.length - a.text.length; });
-          
-          // Take the longest one that passes validation
-          for (var ci = 0; ci < candidates.length; ci++) {
-            if (isValidDescription(candidates[ci].text)) {
-              description = candidates[ci].text;
-              actualDescIndex = candidates[ci].index;
-              break;
-            }
-          }
-          
-          // If no candidate passed strict validation, use the longest one anyway
-          if (!description && candidates.length > 0) {
-            description = candidates[0].text;
-            actualDescIndex = candidates[0].index;
-          }
+
+        result.items = extractFromTables();
+        if(result.items.length===0) result.items = extractFromRawText();
+
+        // Keep polling if no items yet and attempts remaining
+        if(result.items.length===0 && attempts<maxAttempts) return;
+
+        // Polling expired χωρίς προϊόντα → στείλε ΑΜΕΣΩΣ error ώστε να μην περιμένει το RN timeout
+        if(result.items.length===0) {
+          if(pollId) clearInterval(pollId);
+          window._apodixxiPollId=null;
+          window._apodixxiExtracting=false;
+          var _dt=document.querySelectorAll('table').length;
+          var _dr=document.querySelectorAll('tr').length;
+          var _dc=document.querySelectorAll('td').length;
+          safePost({type:'error', message:'Δεν βρέθηκαν προϊόντα μετά από '+attempts+' προσπάθειες. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF). [tables='+_dt+' rows='+_dr+' cells='+_dc+']'});
+          return;
         }
-        
-        // If still no description, skip this row
-        if (!description) continue;
-        
-        // Also look for unit of measurement in the rest of the row
-        if (!unitFound) {
-          for (var ui = actualDescIndex + 1; ui < cells.length; ui++) {
-            var uText = cells[ui] ? cells[ui].innerText.trim() : '';
-            if (isUnitOfMeasurement(uText)) {
-              unitFound = uText;
-              break;
+
+        if(pollId) clearInterval(pollId);
+        window._apodixxiPollId=null;
+        window._apodixxiExtracting = false;
+
+        var itemsSum=0;
+        for(var s=0;s<result.items.length;s++) itemsSum+=parseFloat(result.items[s].total)||0;
+        result.found_final_total=Math.round(itemsSum*100)/100;
+
+        var totalPatterns=['ΣΥΝΟΛΙΚΗ ΑΞΙΑ','ΣΥΝΟΛΙΚΉ ΑΞΊΑ','ΤΕΛΙΚΟ ΣΥΝΟΛΟ','ΠΛΗΡΩΤΕΟ','ΠΛΗΡΩΤΕΟ ΠΟΣΟ'];
+        for(var i=0;i<rawLines.length;i++){
+          var rlu=rawLines[i].toUpperCase();
+          for(var tp=0;tp<totalPatterns.length;tp++){
+            if(rlu.includes(totalPatterns[tp])){
+              var pm=rawLines[i].match(/([\d]+[,.][\d]{2})/);
+              if(pm){var tv=parseFloat(pm[1].replace(',','.'));if(tv>0&&Math.abs(tv-itemsSum)<itemsSum*0.15)result.found_final_total=tv;}
             }
           }
         }
-        
-        // Get quantity
-        var quantity = '1';
-        var qtyValue = 1.0;
-        var qtySearchStart = actualDescIndex + 1;
-        var qtySearchEnd = Math.min(cells.length, actualDescIndex + 4);
-        
-        for (var qi = qtySearchStart; qi < qtySearchEnd; qi++) {
-          var qText = cells[qi] ? cells[qi].innerText.trim().replace(',', '.') : '';
-          if (/^\d+\.\d+$/.test(qText) && parseFloat(qText) < 1000) {
-            qtyValue = parseFloat(qText);
-            quantity = qText;
-            break;
-          } else if (/^\d+$/.test(qText) && parseInt(qText) < 100) {
-            qtyValue = parseInt(qText);
-            quantity = qText;
-            break;
-          }
-        }
-        
-        // Find VAT amount and Net value from the row
-        // In Epsilon Digital tables:
-        // - Second to last numeric column = Αξία ΦΠΑ (VAT amount)
-        // - Last numeric column = Καθαρή αξία (Net value)
-        // Total price = Net + VAT
-        
-        var allPrices = [];
-        for (var pi = actualDescIndex + 1; pi < cells.length; pi++) {
-          var cellText = cells[pi] ? cells[pi].innerText.trim() : '';
-          var price = parsePrice(cellText);
-          if (price > 0) {
-            allPrices.push(price);
-          }
-        }
-        
-        var vatAmount = 0;
-        var netValue = 0;
-        var finalPrice = 0;
-        
-        // We need at least 2 prices to get both VAT and Net
-        if (allPrices.length >= 2) {
-          netValue = allPrices[allPrices.length - 1];      // Last = Καθαρή αξία
-          vatAmount = allPrices[allPrices.length - 2];     // Second to last = Αξία ΦΠΑ
-          finalPrice = netValue + vatAmount;               // Total = Net + VAT
-        } else if (allPrices.length === 1) {
-          // Only one price found, use it as final price
-          finalPrice = allPrices[0];
-          netValue = allPrices[0];
-        }
-        
-        if (finalPrice > 0) {
-          result.items.push({
-            code: '',
-            description: description,
-            unit: unitFound || (qtyValue < 1 ? 'Κιλά' : 'Τεμάχια'),
-            quantity: quantity,
-            unit_price: (finalPrice / qtyValue).toFixed(2),
-            total: finalPrice.toFixed(2)
-          });
-        }
-      }
-    }
-    
-    // Find the TOTAL (Συνολική Αξία) from the page
-    // Look for patterns like "Συνολική Αξία: 18,53" or "ΠΛΗΡΩΤΕΟ: 18,53"
-    var totalPatterns = ['ΣΥΝΟΛΙΚΗ ΑΞΙΑ', 'ΣΥΝΟΛΙΚΉ ΑΞΊΑ', 'ΤΕΛΙΚΟ ΣΥΝΟΛΟ', 'ΠΛΗΡΩΤΕΟ', 
-                         'ΣΥΝΟΛΟ:', 'TOTAL:', 'GRAND TOTAL', 'ΠΛΗΡΩΤΕΟ ΠΟΣΟ'];
-    var allText = document.body.innerText || '';
-    var lines = allText.split('\\n');
-    
-    // Also calculate the sum of all items as backup
-    var itemsSum = 0;
-    for (var s = 0; s < result.items.length; s++) {
-      itemsSum += parseFloat(result.items[s].total) || 0;
-    }
-    itemsSum = Math.round(itemsSum * 100) / 100;
-    
-    // Set items sum as the found_final_total (this is the most accurate)
-    result.found_final_total = itemsSum;
-    
-    // Try to find explicit total in the text (might be different due to discounts/coupons)
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].toUpperCase();
-      for (var tp = 0; tp < totalPatterns.length; tp++) {
-        if (line.includes(totalPatterns[tp])) {
-          var priceMatch = lines[i].match(/([\\d]+[,\\.][\\d]{2})/);
-          if (priceMatch) {
-            var totalVal = parseFloat(priceMatch[1].replace(',', '.'));
-            // Only use this total if it's close to our calculated sum (within 10%)
-            // This helps avoid picking up wrong totals
-            if (totalVal > 0 && Math.abs(totalVal - itemsSum) < itemsSum * 0.1) {
-              result.found_final_total = totalVal;
-            }
-          }
+
+        safePost({type:'DEBUG',step:'EXTRACTION_DONE',itemCount:result.items.length,ts:Date.now(),elapsed:Date.now()-window._apodixxiExtractionStart,storeName:result.store_name,totalFound:result.found_final_total});
+        safePost({type:'extracted', data:result});
+      } catch(err) {
+        if(attempts>=maxAttempts){
+          if(pollId) clearInterval(pollId);
+          window._apodixxiExtracting=false;
+          safePost({type:'error', message:err.toString()});
         }
       }
     }
 
-    window.ReactNativeWebView.postMessage(JSON.stringify({type: 'extracted', data: result}));
-  } catch(err) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({type: 'error', message: err.toString()}));
-  }
-})();
-true;
-`;
+    doExtract();
+    window._apodixxiPollId = pollId = setInterval(doExtract, 1000);
+  })();
+  true;
+  `;
+
 
 export default function WebViewImportScreen() {
   const { url: rawUrl } = useLocalSearchParams<{ url: string }>();
   const pageUrl = rawUrl || '';
+  // Δείξε την οδηγία/χειρισμό του PDF διακόπτη μόνο για Σκλαβενίτη.
+  // Κρύψε αν το URL έχει epsilondigital ΚΑΙ ΟΧΙ sklavenitis (π.χ. ΑΒ Βασιλόπουλος).
+  const showPdfToggle = !(pageUrl.includes('epsilondigital') && !pageUrl.includes('sklavenitis'));
   const { lang } = useContext(I18nContext);
   const router = useRouter();
   const webviewRef = useRef<any>(null);
@@ -452,12 +397,23 @@ export default function WebViewImportScreen() {
             : 'Data extraction took too long. Make sure you see products in a table (not PDF) and try again.',
           [{ text: 'OK' }]
         );
-      }, 15000); // 15 second timeout
+      }, 25000); // 25 second timeout (πάντα > JS polling 20s)
       
       // Store timeout ID to clear it on success
       (webviewRef.current as any)._extractionTimeout = timeoutId;
       
-      webviewRef.current.injectJavaScript(DOM_EXTRACTION_JS);
+      // Reset any previous extraction state before starting new one
+        webviewRef.current.injectJavaScript(`
+          if (window._apodixxiPollId) { clearInterval(window._apodixxiPollId); }
+          window._apodixxiExtracting = false;
+          window._apodixxiPollId = null;
+          true;
+        `);
+        setTimeout(() => {
+          if (webviewRef.current) {
+            webviewRef.current.injectJavaScript(DOM_EXTRACTION_JS);
+          }
+        }, 100);
     }
   }, [extracting, lang]);
 
@@ -469,6 +425,16 @@ export default function WebViewImportScreen() {
       }
       
       const msg = JSON.parse(event.nativeEvent.data);
+      if (msg.type === 'switchAttempt') return;
+      if (msg.type === 'DEBUG') {
+        const elapsedSec = msg.elapsed !== undefined ? `+${(msg.elapsed/1000).toFixed(1)}s` : '';
+        const details = Object.entries(msg as Record<string,unknown>)
+          .filter(([k]) => !['type','step','ts','elapsed'].includes(k))
+          .map(([k,v]) => `${k}: ${v}`)
+          .join('\n');
+        Alert.alert(`[Debug] ${msg.step} ${elapsedSec}`, details || '(no extra data)');
+        return;
+      }
       if (msg.type === 'extracted' && !extracted) {
         setExtracted(true);
         const data = msg.data;
@@ -545,7 +511,7 @@ export default function WebViewImportScreen() {
             ? '1. Περιμένετε να φορτώσει η σελίδα'
             : '1. Wait for the page to load'}
         </Text>
-        {(pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet')) && (
+        {showPdfToggle && (
           <View style={styles.pdfToggleInstruction}>
             <Text style={styles.instructionText}>
               {lang === 'el'
@@ -561,10 +527,10 @@ export default function WebViewImportScreen() {
         )}
         <Text style={styles.instructionText}>
           {lang === 'el'
-            ? (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet'))
+            ? showPdfToggle
               ? '3. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
               : '2. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
-            : (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet'))
+            : showPdfToggle
               ? '3. Tap "Extract Data" when you see the products'
               : '2. Tap "Extract Data" when you see the products'}
         </Text>
@@ -597,66 +563,77 @@ export default function WebViewImportScreen() {
             onLoadEnd={() => { 
               setLoading(false); 
               setPageLoaded(true);
-              // Auto-switch from PDF to iframe view for Epsilon Digital sites
-              if (pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet')) {
-                // Wait a bit for page elements to fully render
-                setTimeout(() => {
-                  webviewRef.current?.injectJavaScript(`
+              // Auto-switch from PDF to HTML view for Epsilon Digital sites
+                // Blazor Server needs 3-5s to connect via SignalR and render
+                if (pageUrl.includes('epsilondigital-sklavenitis')) {
+                  const SWITCH_JS = `
                     (function() {
                       try {
-                        // Method 1: Find toggle by looking for element near "PDF" text
-                        var allElements = document.querySelectorAll('*');
-                        for (var i = 0; i < allElements.length; i++) {
-                          var el = allElements[i];
-                          var text = (el.innerText || el.textContent || '').trim();
-                          // Find elements containing just "PDF"
-                          if (text === 'PDF' || text.includes('PDF')) {
-                            // Look for nearby toggle/switch elements (siblings or parent's siblings)
-                            var parent = el.parentElement;
-                            if (parent) {
-                              var toggles = parent.querySelectorAll('input[type="checkbox"], input[type="radio"], .toggle, .switch, .slider, [class*="switch"], [class*="toggle"]');
-                              toggles.forEach(function(t) {
-                                if (t.checked || t.classList.contains('active') || t.classList.contains('on')) {
-                                  t.click();
-                                  console.log('Clicked toggle near PDF');
-                                }
-                              });
-                              // Also check parent siblings
-                              var grandparent = parent.parentElement;
-                              if (grandparent) {
-                                var moreToggles = grandparent.querySelectorAll('input[type="checkbox"], [class*="switch"], [class*="toggle"], [class*="slider"]');
-                                moreToggles.forEach(function(t) {
-                                  t.click();
-                                  console.log('Clicked toggle in grandparent');
-                                });
-                              }
+                        var switched = false;
+
+                        // Method 1: Telerik/Kendo Switch ON → click to turn OFF (show HTML)
+                        var telerikOn = document.querySelectorAll('.k-switch-on, [class*="k-switch"][class*="on"]');
+                        telerikOn.forEach(function(sw) {
+                          var inp = sw.querySelector('input[type="checkbox"]') || sw.querySelector('input');
+                          if (inp) { inp.click(); switched = true; }
+                          else { sw.click(); switched = true; }
+                        });
+
+                        // Method 2: Any checked checkbox whose label/parent contains "PDF"
+                        if (!switched) {
+                          var allInputs = document.querySelectorAll('input[type="checkbox"]:checked, input[type="radio"]:checked');
+                          allInputs.forEach(function(inp) {
+                            var parent = inp.parentElement;
+                            var depth = 0;
+                            while (parent && depth < 5) {
+                              var txt = (parent.innerText || parent.textContent || '').toUpperCase();
+                              if (txt.includes('PDF')) { inp.click(); switched = true; break; }
+                              parent = parent.parentElement; depth++;
                             }
-                            break;
-                          }
+                          });
                         }
-                        
-                        // Method 2: Try Bootstrap-style switches
-                        var bootstrapSwitches = document.querySelectorAll('.custom-control-input, .form-check-input, .form-switch input');
-                        bootstrapSwitches.forEach(function(sw) {
-                          if (sw.checked) {
-                            sw.click();
-                          }
-                        });
-                        
-                        // Method 3: Click any slider/round toggle
-                        var sliders = document.querySelectorAll('.slider, .round, [class*="slider"], [class*="toggle-slider"]');
-                        sliders.forEach(function(s) {
-                          s.click();
-                        });
-                        
-                      } catch(e) {
-                        console.log('Auto-switch error:', e);
-                      }
+
+                        // Method 3: Find PDF text label, traverse up to find any toggle
+                        if (!switched) {
+                          var textNodes = Array.from(document.querySelectorAll('span,label,div,p'))
+                            .filter(function(el) {
+                              return el.children.length === 0 && (el.innerText || '').trim() === 'PDF';
+                            });
+                          textNodes.forEach(function(node) {
+                            var parent = node.parentElement;
+                            var depth = 0;
+                            while (parent && depth < 6) {
+                              var toggles = parent.querySelectorAll('input[type="checkbox"],input[type="radio"],[class*="switch"],[class*="toggle"],[class*="k-switch"]');
+                              if (toggles.length > 0) {
+                                toggles.forEach(function(t) { t.click(); });
+                                switched = true; break;
+                              }
+                              parent = parent.parentElement; depth++;
+                            }
+                          });
+                        }
+
+                        // Method 4: Bootstrap / generic switches
+                        if (!switched) {
+                          document.querySelectorAll('.custom-control-input:checked, .form-check-input:checked, .form-switch input:checked').forEach(function(sw) {
+                            sw.click(); switched = true;
+                          });
+                        }
+
+                        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(
+                          JSON.stringify({ type: 'switchAttempt', switched: switched })
+                        );
+                      } catch(e) { console.log('AutoSwitch err:', e.message); }
                     })();
                     true;
-                  `);
-                }, 1500); // Wait 1.5 seconds for page to fully load
-              }
+                  `;
+                  // Retry at 3s, 6s, and 10s — Blazor Server needs time to connect + render
+                  [3000, 6000, 10000].forEach(function(delay) {
+                    setTimeout(function() {
+                      webviewRef.current?.injectJavaScript(SWITCH_JS);
+                    }, delay);
+                  });
+                }
             }}
             onMessage={handleMessage}
             userAgent="Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
