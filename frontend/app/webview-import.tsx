@@ -435,12 +435,14 @@ export default function WebViewImportScreen() {
 
       // DEBUG POLL: κράτα τα διαγνωστικά αλλά ΜΗΝ ακυρώνεις το timeout (περίμενε terminal μήνυμα)
       if (msg.type === 'DEBUG') { lastDebugRef.current = msg; return; }
+      // switchAttempt: τηλεμετρία auto-switch (3s/6s/10s), ΟΧΙ terminal — μην αγγίζεις το timeout
+      if (msg.type === 'switchAttempt') return;
 
-      // Terminal μήνυμα → ακύρωσε το timeout
-      if (webviewRef.current && (webviewRef.current as any)._extractionTimeout) {
+      // Μόνο terminal μηνύματα (extracted/error) ακυρώνουν το extraction timeout
+      if ((msg.type === 'extracted' || msg.type === 'error') &&
+          webviewRef.current && (webviewRef.current as any)._extractionTimeout) {
         clearTimeout((webviewRef.current as any)._extractionTimeout);
       }
-      if (msg.type === 'switchAttempt') return;
       if (msg.type === 'extracted' && !extracted) {
         setExtracted(true);
         const data = msg.data;
