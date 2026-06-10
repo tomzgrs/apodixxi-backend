@@ -19,12 +19,8 @@ const DOM_EXTRACTION_JS = `
     window._apodixxiExtractionStart = Date.now();
 
     // Κρύψε το Blazor reconnect overlay που μπλοκάρει/τυφλώνει τον parser, και ζήτα επανασύνδεση
-    try {
-      var s = document.createElement('style');
-      s.innerHTML = '#components-reconnect-modal,[id*="reconnect"]{display:none!important}';
-      document.head.appendChild(s);
-    } catch(e) {}
-    try { if (window.Blazor && window.Blazor.reconnect) window.Blazor.reconnect(); } catch(e) {}
+    try { document.head.insertAdjacentHTML('beforeend', '<style>#components-reconnect-modal,[id*="reconnect"]{display:none!important}</style>'); } catch(e) {}
+    try { window.Blazor.reconnect(); } catch(e) {}
     safePost({type:'DEBUG',step:'SCRIPT_START',ts:Date.now(),url:window.location.href.slice(0,120)});
 
     var attempts = 0;
@@ -310,11 +306,15 @@ const DOM_EXTRACTION_JS = `
           document.title = 'APXJSON::' + JSON.stringify(_slim);
         } catch(e){}
       } catch(err) {
-        if(attempts>=maxAttempts){
-          if(pollId) clearInterval(pollId);
-          window._apodixxiExtracting=false;
-          safePost({type:'error', message:err.toString()});
-        }
+        // Οποιοδήποτε σφάλμα → στείλε ΑΜΕΣΩΣ error (μην περιμένεις την τελευταία προσπάθεια)
+        if(pollId) clearInterval(pollId);
+        window._apodixxiPollId=null;
+        window._apodixxiExtracting=false;
+        var _et=document.querySelectorAll('table').length;
+        var _er=document.querySelectorAll('tr').length;
+        var _ec=document.querySelectorAll('td').length;
+        safePost({type:'error', message:'Σφάλμα εξαγωγής: '+err.toString()+' [tables='+_et+' rows='+_er+' cells='+_ec+']'});
+        try { document.title = 'APXERR::e1|t'+_et+'|r'+_er+'|c'+_ec; } catch(e){}
       }
     }
 
@@ -328,11 +328,8 @@ const DOM_EXTRACTION_JS = `
 export default function WebViewImportScreen() {
   const { url: rawUrl } = useLocalSearchParams<{ url: string }>();
   const pageUrl = rawUrl || '';
-  // Δείξε την οδηγία/χειρισμό του PDF διακόπτη μόνο για Σκλαβενίτη.
-  // Κρύψε αν το URL έχει epsilondigital ΚΑΙ ΟΧΙ sklavenitis (π.χ. ΑΒ Βασιλόπουλος).
-  const showPdfToggle = !(pageUrl.includes('epsilondigital') && !pageUrl.includes('sklavenitis'));
-  // Σελίδες e-invoicing (Epsilon) που έχουν τον PDF διακόπτη — εκεί τρέχουμε auto-switch
-  const isEpsilonPage = pageUrl.includes('epsilondigital') || pageUrl.includes('epsilonnet') || pageUrl.includes('sklavenitis');
+  // Κρύψε την οδηγία/χειρισμό του PDF διακόπτη για Σκλαβενίτη· δείξε την για ΑΒ Βασιλόπουλο (και τα υπόλοιπα).
+  const showPdfToggle = !pageUrl.includes('sklavenitis');
   const { lang } = useContext(I18nContext);
   const router = useRouter();
   const webviewRef = useRef<any>(null);
@@ -451,8 +448,6 @@ export default function WebViewImportScreen() {
 
       // DEBUG POLL: κράτα τα διαγνωστικά αλλά ΜΗΝ ακυρώνεις το timeout (περίμενε terminal μήνυμα)
       if (msg.type === 'DEBUG') { lastDebugRef.current = msg; return; }
-      // switchAttempt: τηλεμετρία auto-switch (3s/6s/10s), ΟΧΙ terminal — μην αγγίζεις το timeout
-      if (msg.type === 'switchAttempt') return;
 
       // Μόνο terminal μηνύματα (extracted/error) ακυρώνουν το extraction timeout
       if ((msg.type === 'extracted' || msg.type === 'error') &&
@@ -616,80 +611,9 @@ export default function WebViewImportScreen() {
             javaScriptEnabled={true}
             domStorageEnabled={true}
             onLoadStart={() => { setLoading(true); setPageLoaded(false); }}
-            onLoadEnd={() => { 
-              setLoading(false); 
+            onLoadEnd={() => {
+              setLoading(false);
               setPageLoaded(true);
-              // Auto-switch from PDF to HTML view for Epsilon Digital sites
-                // Blazor Server needs 3-5s to connect via SignalR and render
-                if (isEpsilonPage) {
-                  const SWITCH_JS = `
-                    (function() {
-                      try {
-                        var switched = false;
-
-                        // Method 1: Telerik/Kendo Switch ON → click to turn OFF (show HTML)
-                        var telerikOn = document.querySelectorAll('.k-switch-on, [class*="k-switch"][class*="on"]');
-                        telerikOn.forEach(function(sw) {
-                          var inp = sw.querySelector('input[type="checkbox"]') || sw.querySelector('input');
-                          if (inp) { inp.click(); switched = true; }
-                          else { sw.click(); switched = true; }
-                        });
-
-                        // Method 2: Any checked checkbox whose label/parent contains "PDF"
-                        if (!switched) {
-                          var allInputs = document.querySelectorAll('input[type="checkbox"]:checked, input[type="radio"]:checked');
-                          allInputs.forEach(function(inp) {
-                            var parent = inp.parentElement;
-                            var depth = 0;
-                            while (parent && depth < 5) {
-                              var txt = (parent.innerText || parent.textContent || '').toUpperCase();
-                              if (txt.includes('PDF')) { inp.click(); switched = true; break; }
-                              parent = parent.parentElement; depth++;
-                            }
-                          });
-                        }
-
-                        // Method 3: Find PDF text label, traverse up to find any toggle
-                        if (!switched) {
-                          var textNodes = Array.from(document.querySelectorAll('span,label,div,p'))
-                            .filter(function(el) {
-                              return el.children.length === 0 && (el.innerText || '').trim() === 'PDF';
-                            });
-                          textNodes.forEach(function(node) {
-                            var parent = node.parentElement;
-                            var depth = 0;
-                            while (parent && depth < 6) {
-                              var toggles = parent.querySelectorAll('input[type="checkbox"],input[type="radio"],[class*="switch"],[class*="toggle"],[class*="k-switch"]');
-                              if (toggles.length > 0) {
-                                toggles.forEach(function(t) { t.click(); });
-                                switched = true; break;
-                              }
-                              parent = parent.parentElement; depth++;
-                            }
-                          });
-                        }
-
-                        // Method 4: Bootstrap / generic switches
-                        if (!switched) {
-                          document.querySelectorAll('.custom-control-input:checked, .form-check-input:checked, .form-switch input:checked').forEach(function(sw) {
-                            sw.click(); switched = true;
-                          });
-                        }
-
-                        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(
-                          JSON.stringify({ type: 'switchAttempt', switched: switched })
-                        );
-                      } catch(e) { console.log('AutoSwitch err:', e.message); }
-                    })();
-                    true;
-                  `;
-                  // Retry at 3s, 6s, and 10s — Blazor Server needs time to connect + render
-                  [3000, 6000, 10000].forEach(function(delay) {
-                    setTimeout(function() {
-                      webviewRef.current?.injectJavaScript(SWITCH_JS);
-                    }, delay);
-                  });
-                }
             }}
             onMessage={handleMessage}
             onNavigationStateChange={handleNavState}
