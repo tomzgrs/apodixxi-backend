@@ -13,7 +13,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const API_BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api`;
 
@@ -31,6 +33,7 @@ interface AIAssistantProps {
 
 export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
   const { theme, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -61,27 +64,19 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
   }, []);
 
   const loadChatHistory = async () => {
+    // AI chat is intentionally ephemeral: when the app is closed/swiped away from the
+    // recent apps, the conversation must not survive. We keep messages in memory only
+    // and proactively clear any history persisted by older app versions.
     try {
-      const history = await AsyncStorage.getItem(`ai_chat_${deviceId}`);
-      if (history) {
-        const parsed = JSON.parse(history);
-        setMessages(parsed.messages || []);
-        setSessionId(parsed.sessionId || null);
-      }
+      await AsyncStorage.removeItem(`ai_chat_${deviceId}`);
     } catch (e) {
-      console.log('Failed to load chat history');
+      console.log('Failed to clear chat history');
     }
   };
 
-  const saveChatHistory = async (newMessages: Message[], newSessionId: string | null) => {
-    try {
-      await AsyncStorage.setItem(`ai_chat_${deviceId}`, JSON.stringify({
-        messages: newMessages.slice(-50), // Keep last 50 messages
-        sessionId: newSessionId,
-      }));
-    } catch (e) {
-      console.log('Failed to save chat history');
-    }
+  const saveChatHistory = async (_newMessages: Message[], _newSessionId: string | null) => {
+    // No-op: AI chat is ephemeral and must not be persisted across app launches.
+    // Keeping it in component state ensures it is cleared when the app is killed.
   };
 
   const sendMessage = async () => {
@@ -100,8 +95,10 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
     setIsLoading(true);
 
     try {
-      // Get access token for Authorization header
-      const accessToken = await AsyncStorage.getItem('accessToken');
+      // Get access token for Authorization header (stored in SecureStore on native)
+      const accessToken = Platform.OS === 'web'
+        ? await AsyncStorage.getItem('accessToken')
+        : await SecureStore.getItemAsync('accessToken');
       
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -173,7 +170,7 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
           </View>
           <View>
             <Text style={styles.headerTitle}>AI Βοηθός</Text>
-            <Text style={styles.headerSubtitle}>Powered by Gemini</Text>
+            <Text style={styles.headerSubtitle}>Apodixxi AI Ψηφιακός Βοηθός</Text>
           </View>
         </View>
         {onClose && (
@@ -253,9 +250,10 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
 
       {/* Input */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        keyboardVerticalOffset={Platform.OS === 'android' ? 80 : 0}
       >
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <TextInput
             style={styles.input}
             placeholder="Ρώτησέ με οτιδήποτε..."

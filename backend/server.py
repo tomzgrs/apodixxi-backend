@@ -267,6 +267,7 @@ class ReceiptData(BaseModel):
     source_type: str = ""  # entersoft, impact, xml, manual
     provider: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    receipt_date: str = ""  # Normalized 'YYYY-MM-DD' from the printed receipt date, used for sorting
 
 class ManualReceiptInput(BaseModel):
     device_id: str
@@ -1214,6 +1215,27 @@ def _strip_greek_accents(text) -> str:
     nfkd = unicodedata.normalize('NFD', str(text))
     no_marks = ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
     return no_marks.upper().strip()
+
+
+def _normalize_receipt_date(date_str) -> str:
+    """Convert a receipt's printed date string to a sortable ISO date 'YYYY-MM-DD'.
+
+    Handles the common Greek receipt formats (dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy,
+    2-digit-year variants) plus already-ISO dates/datetimes. Returns '' if it cannot
+    be parsed, so callers can fall back to created_at.
+    """
+    if not date_str:
+        return ""
+    s = str(date_str).strip()
+    if re.match(r'^\d{4}-\d{2}-\d{2}', s):  # already ISO (date or datetime)
+        return s[:10]
+    core = s[:10]
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%d/%m/%y", "%d-%m-%y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(core, fmt).strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            continue
+    return ""
 
 
 def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str, found_final_total: float = 0.0, store_vat: str = "") -> dict:
@@ -2692,6 +2714,9 @@ async def get_recommendations(
 ):
     """Get personalized recommendations for a user."""
     recommendations = []
+    # Better-price suggestions only consider prices seen in the shared pool within the
+    # last 7 days, so users are not alerted about stale prices.
+    cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     
     # 1. Get active admin promotions
     now = datetime.now(timezone.utc).isoformat()
@@ -2754,7 +2779,8 @@ async def get_recommendations(
             # Search for this product in other receipts with lower price
             better_price = await db.receipts.find_one({
                 "items.description": {"$regex": product_name[:20], "$options": "i"},
-                "store_name": {"$ne": last_store}
+                "store_name": {"$ne": last_store},
+                "created_at": {"$gte": cutoff_7d}
             }, sort=[("items.unit_price", 1)])
             
             if better_price:
@@ -2814,6 +2840,8 @@ async def get_after_save_recommendations(
 ):
     """Get recommendations after saving a receipt."""
     recommendations = []
+    # Only suggest cheaper alternatives seen in the shared pool within the last 7 days.
+    cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     
     # Get the saved receipt
     receipt = await db.receipts.find_one({"id": receipt_id})
@@ -2838,6 +2866,7 @@ async def get_after_save_recommendations(
             {"$unwind": "$items"},
             {"$match": {
                 "store_name": {"$ne": store_name},
+                "created_at": {"$gte": cutoff_7d},
                 "items.description": {"$regex": search_term, "$options": "i"},
                 "items.unit_price": {"$lt": item_price * 0.9}  # At least 10% cheaper
             }},
@@ -3163,6 +3192,7 @@ async def import_receipt_from_url(
     
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
+    doc["receipt_date"] = _normalize_receipt_date(doc.get("date", "")) or (doc.get("created_at", "") or "")[:10]
     await db.receipts.insert_one(doc)
 
     # Index products with user_email
@@ -3201,6 +3231,7 @@ async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile =
 
     receipt = ReceiptData(device_id=device_id, **receipt_data)
     doc = receipt.dict()
+    doc["receipt_date"] = _normalize_receipt_date(doc.get("date", "")) or (doc.get("created_at", "") or "")[:10]
     await db.receipts.insert_one(doc)
 
     for item in receipt_data["items"]:
@@ -3243,6 +3274,7 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
 
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
+    doc["receipt_date"] = _normalize_receipt_date(doc.get("date", "")) or (doc.get("created_at", "") or "")[:10]
     await db.receipts.insert_one(doc)
 
     for item in receipt_data["items"]:
@@ -3288,6 +3320,7 @@ async def create_manual_receipt(input: ManualReceiptInput):
     }
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
+    doc["receipt_date"] = _normalize_receipt_date(doc.get("date", "")) or (doc.get("created_at", "") or "")[:10]
     await db.receipts.insert_one(doc)
 
     for item in input.items:
@@ -3319,7 +3352,7 @@ async def get_receipts(device_id: str = Query(...), skip: int = 0, limit: int = 
             {"store_name": {"$regex": search, "$options": "i"}},
             {"items.description": {"$regex": search, "$options": "i"}}
         ]
-    cursor = db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit)
+    cursor = db.receipts.find(query, {"_id": 0}).sort([("receipt_date", -1), ("created_at", -1)]).skip(skip).limit(limit)
     receipts = await cursor.to_list(limit)
     # Sanitize all float values to prevent JSON serialization errors
     sanitized_receipts = [sanitize_receipt_data(r) for r in receipts]
@@ -3342,7 +3375,7 @@ async def get_receipts_by_store(
     }
     
     total = await db.receipts.count_documents(query)
-    receipts = await db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    receipts = await db.receipts.find(query, {"_id": 0}).sort([("receipt_date", -1), ("created_at", -1)]).skip(skip).limit(limit).to_list(limit)
     sanitized_receipts = [sanitize_receipt_data(r) for r in receipts]
     
     return {
@@ -6462,6 +6495,30 @@ app.include_router(no_prefix_router)
 @app.get("/")
 async def root():
     return {"message": "apodixxi API", "version": "1.0.0", "status": "healthy"}
+
+async def _backfill_receipt_dates():
+    """One-time idempotent backfill: populate receipt_date for legacy receipts so the
+    list can be sorted by the date printed on the receipt instead of the scan time."""
+    try:
+        cursor = db.receipts.find({"receipt_date": {"$exists": False}},
+                                  {"_id": 0, "id": 1, "date": 1, "created_at": 1})
+        count = 0
+        async for r in cursor:
+            rdate = _normalize_receipt_date(r.get("date", "")) or (r.get("created_at", "") or "")[:10]
+            await db.receipts.update_one({"id": r["id"]}, {"$set": {"receipt_date": rdate}})
+            count += 1
+        if count:
+            logger.info(f"[startup] Backfilled receipt_date for {count} receipts")
+    except Exception as e:
+        logger.warning(f"[startup] receipt_date backfill skipped: {e}")
+
+
+@app.on_event("startup")
+async def schedule_receipt_date_backfill():
+    # Run in the background so it never blocks app startup / health checks.
+    import asyncio
+    asyncio.create_task(_backfill_receipt_dates())
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
