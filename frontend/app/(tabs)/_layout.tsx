@@ -10,7 +10,12 @@ import { Radius } from '../../src/theme';
 
 type IconName = 'home' | 'add' | 'purchases' | 'compare' | 'settings';
 
-const PRODUCTION_BANNER_ID = 'ca-app-pub-2145791775687228/9394941228';
+const PRODUCTION_BANNER_ID = Platform.select({
+  android: 'ca-app-pub-2145791775687228/9394941228',
+  // No iOS AdMob app configured yet (app.json has only androidAppId). Use the
+  // test unit on iOS until a real iOS AdMob app + ad unit exist.
+  ios: 'ca-app-pub-3940256099942544/2934735716',
+}) || 'ca-app-pub-2145791775687228/9394941228';
 const TEST_BANNER_ID = Platform.select({
   android: 'ca-app-pub-3940256099942544/6300978111',
   ios: 'ca-app-pub-3940256099942544/2934735716',
@@ -121,7 +126,7 @@ export default function TabLayout() {
       {/* Ad banner — normal flow element below the tab navigator, visible to all users */}
       <View style={[styles.adWrapper, adLoaded && { paddingBottom: insets.bottom }]}>
         <BannerAd
-          unitId={TEST_BANNER_ID}
+          unitId={__DEV__ ? TEST_BANNER_ID : PRODUCTION_BANNER_ID}
           size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
           requestOptions={{ requestNonPersonalizedAdsOnly: true }}
           onAdLoaded={() => setAdLoaded(true)}
