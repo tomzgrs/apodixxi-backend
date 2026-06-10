@@ -8,7 +8,6 @@ import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
-import AdBanner from '../../src/components/AdBanner';
 
 type Tab = 'url' | 'manual';
 
@@ -133,7 +132,7 @@ export default function AddReceiptScreen() {
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.background },
-    scroll: { padding: Spacing.lg, paddingBottom: 80 },  // Extra padding for sticky AdBanner
+    scroll: { padding: Spacing.lg, paddingBottom: 160 },
     adContainer: {
       alignItems: 'center',
       paddingVertical: Spacing.sm,
@@ -249,7 +248,7 @@ export default function AddReceiptScreen() {
   });
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <Text style={styles.title}>{t('add_receipt')}</Text>
@@ -404,8 +403,6 @@ export default function AddReceiptScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
       
-      {/* Sticky Ad Banner */}
-      <AdBanner position="bottom" />
     </SafeAreaView>
   );
 }

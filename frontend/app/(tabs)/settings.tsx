@@ -11,8 +11,6 @@ import { useAuth } from '../../src/AuthContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
-import AdBanner from '../../src/components/AdBanner';
-
 // App version - hardcoded for production stability
 const APP_VERSION = '1.0.0';
 const BUILD_NUMBER = '33';
@@ -118,7 +116,7 @@ export default function SettingsScreen() {
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.background },
-    scroll: { padding: Spacing.lg, paddingBottom: 80 },  // Extra padding for sticky AdBanner
+    scroll: { padding: Spacing.lg, paddingBottom: 160 },
     adContainer: {
       alignItems: 'center',
       paddingVertical: Spacing.sm,
@@ -304,6 +302,26 @@ export default function SettingsScreen() {
       fontSize: Typography.xs,
       fontWeight: Typography.semibold,
     },
+    editionRow: {
+      alignItems: 'center',
+      paddingVertical: Spacing.sm,
+      borderTopWidth: 1,
+      borderTopColor: theme.borderLight,
+    },
+    editionBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: Spacing.md,
+      paddingVertical: 5,
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      gap: 5,
+    },
+    editionText: {
+      fontSize: Typography.xs,
+      fontWeight: Typography.bold,
+      letterSpacing: 0.3,
+    },
     logoutBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -337,7 +355,7 @@ export default function SettingsScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>{t('settings')}</Text>
 
@@ -354,18 +372,42 @@ export default function SettingsScreen() {
                 <View style={styles.accountTypeRow}>
                   <View style={[
                     styles.accountTypeBadge, 
-                    { backgroundColor: user?.account_type === 'paid' ? '#fef3c7' : theme.surface }
+                    { backgroundColor: user?.is_premium === true ? '#fef3c7' : theme.surface }
                   ]}>
                     <Text style={[
                       styles.accountTypeText,
-                      { color: user?.account_type === 'paid' ? '#92400e' : theme.textSecondary }
+                      { color: user?.is_premium === true ? '#92400e' : theme.textSecondary }
                     ]}>
-                      {user?.account_type === 'paid' ? '⭐ apodixxi+' : 'Free'}
+                      {user?.is_premium === true ? '⭐ apodixxi+' : 'Free'}
                     </Text>
                   </View>
                 </View>
               </View>
             </View>
+            {/* Edition badge */}
+            <View style={styles.editionRow}>
+              <View style={[
+                styles.editionBadge,
+                user?.is_premium === true
+                  ? { backgroundColor: '#fef3c7', borderColor: '#f59e0b' }
+                  : { backgroundColor: theme.primaryLight, borderColor: theme.primary }
+              ]}>
+                <Ionicons
+                  name={user?.is_premium === true ? 'star' : 'person-outline'}
+                  size={12}
+                  color={user?.is_premium === true ? '#f59e0b' : theme.primary}
+                />
+                <Text style={[
+                  styles.editionText,
+                  { color: user?.is_premium === true ? '#92400e' : theme.primary }
+                ]}>
+                  {user?.is_premium === true
+                    ? (lang === 'el' ? 'Paid Έκδοση' : 'Paid Edition')
+                    : (lang === 'el' ? 'Free Έκδοση' : 'Free Edition')}
+                </Text>
+              </View>
+            </View>
+
             <TouchableOpacity
               style={styles.logoutBtn}
               onPress={handleLogout}
@@ -510,7 +552,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>{t('about')}</Text>
           <View style={styles.aboutCard}>
             <Ionicons name="cart" size={36} color={theme.primary} />
-            <Text style={styles.aboutAppName}>apodixxi</Text>
+            <Text style={styles.aboutAppName}>{user?.is_premium === true ? 'apodixxi+' : 'apodixxi'}</Text>
             <Text style={styles.aboutVersion}>{t('version')} {APP_VERSION} ({BUILD_NUMBER})</Text>
             <View style={styles.aboutRow}>
               <Text style={styles.aboutLabel}>{t('device_id')}:</Text>
@@ -520,8 +562,6 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
       
-      {/* Sticky Ad Banner */}
-      <AdBanner useTestAds={true} position="bottom" />
     </SafeAreaView>
   );
 }

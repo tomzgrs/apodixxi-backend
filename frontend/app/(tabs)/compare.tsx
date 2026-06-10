@@ -1,6 +1,7 @@
 import React, { useContext, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Image, Modal, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
@@ -8,8 +9,6 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { getStoreLogo } from '../../src/storeLogos';
 import { api } from '../../src/api';
-import AdBanner from '../../src/components/AdBanner';
-
 type SortOption = 'price_asc' | 'price_desc' | 'store' | 'date';
 
 interface ProductResult {
@@ -38,6 +37,7 @@ export default function CompareScreen() {
   const [selectedProduct, setSelectedProduct] = useState<ProductResult | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
 
   const handleSearch = async () => {
     if (!query.trim() || query.trim().length < 2) return;
@@ -119,8 +119,8 @@ export default function CompareScreen() {
   const styles = createStyles(theme, isDark);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
         <ScrollView 
           contentContainerStyle={styles.scroll} 
           showsVerticalScrollIndicator={false}
@@ -385,18 +385,31 @@ export default function CompareScreen() {
                 
                 <ScrollView style={styles.historyList}>
                   {selectedProduct.price_history?.map((entry, i) => (
-                    <View key={i} style={styles.historyItem}>
-                      <View style={styles.historyDate}>
-                        <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />
-                        <Text style={styles.historyDateText}>{entry.date}</Text>
-                      </View>
-                      <View style={styles.historyDetails}>
-                        <Text style={styles.historyQty}>
-                          x{entry.quantity.toFixed(entry.quantity < 1 ? 3 : 0)}
-                        </Text>
-                        <Text style={styles.historyPrice}>{formatPrice(entry.price)}</Text>
-                      </View>
-                    </View>
+                    <TouchableOpacity
+                        key={i}
+                        style={[styles.historyItem, !!entry.receipt_id && styles.historyItemTappable]}
+                        activeOpacity={entry.receipt_id ? 0.7 : 1}
+                        onPress={() => {
+                          if (entry.receipt_id) {
+                            setShowHistoryModal(false);
+                            router.push(`/receipt/${entry.receipt_id}`);
+                          }
+                        }}
+                      >
+                        <View style={styles.historyDate}>
+                          <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />
+                          <Text style={styles.historyDateText}>{entry.date}</Text>
+                        </View>
+                        <View style={styles.historyDetails}>
+                          <Text style={styles.historyQty}>
+                            x{entry.quantity.toFixed(entry.quantity < 1 ? 3 : 0)}
+                          </Text>
+                          <Text style={styles.historyPrice}>{formatPrice(entry.price)}</Text>
+                          {!!entry.receipt_id && (
+                            <Ionicons name="chevron-forward" size={14} color={theme.textMuted} style={{ marginLeft: 4 }} />
+                          )}
+                        </View>
+                      </TouchableOpacity>
                   ))}
                 </ScrollView>
               </>
@@ -405,15 +418,13 @@ export default function CompareScreen() {
         </View>
       </Modal>
       
-      {/* Sticky Ad Banner */}
-      <AdBanner useTestAds={true} position="bottom" />
     </SafeAreaView>
   );
 }
 
 const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.background },
-  scroll: { padding: Spacing.base, paddingBottom: 80 },  // Extra padding for sticky AdBanner
+  scroll: { padding: Spacing.base, paddingBottom: 160 },
   adContainer: {
     alignItems: 'center',
     paddingVertical: Spacing.sm,
