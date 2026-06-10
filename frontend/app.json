@@ -5,7 +5,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": ["apodixxi", "com.apodixxi.app"],
+    "scheme": [
+      "apodixxi",
+      "com.apodixxi.app"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -15,9 +18,8 @@
       }
     },
     "android": {
-      "package": "com.apodixxi.test",
+      "package": "com.apodixxi.app",
       "versionCode": 34,
-      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#111827"
@@ -65,7 +67,9 @@
       ],
       "expo-localization",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin",
+      "expo-updates"
     ],
     "experiments": {
       "typedRoutes": true
@@ -73,9 +77,17 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "51b064ea-445d-4357-a76e-f62784cc1a24"
+        "projectId": "04a614af-f2bb-4601-a299-8bcfe908b241"
       }
     },
-    "owner": "tomzgrs"
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/04a614af-f2bb-4601-a299-8bcfe908b241"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
   }
 }
