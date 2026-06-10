@@ -12,7 +12,7 @@ try {
   WebView = require('react-native-webview').default;
 } catch (e) {}
 
-const DOM_EXTRACTION_JS = `
+const DOM_EXTRACTION_JS = String.raw`
   (function() {
     if (window._apodixxiExtracting) return;
     window._apodixxiExtracting = true;
