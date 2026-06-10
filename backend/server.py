@@ -14,6 +14,7 @@ import smtplib
 import httpx
 import io
 import json
+import unicodedata
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
@@ -297,6 +298,7 @@ class WebViewExtractedData(BaseModel):
     raw_text: str = ""
     items: List[dict] = []
     store_name: str = ""
+    store_vat: str = ""  # VAT extracted client-side (more reliable than re-parsing raw text)
     found_final_total: float = 0.0  # Final total with VAT found in raw text
 
 # ── Parsers ──
@@ -1201,7 +1203,20 @@ def parse_peppol_html(html: str, source_url: str) -> dict:
     return data
 
 
-def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str, found_final_total: float = 0.0) -> dict:
+def _strip_greek_accents(text) -> str:
+    """Uppercase and remove Greek diacritics (tonos/dialytika) for robust matching.
+
+    e.g. 'Μετρητά' -> 'ΜΕΤΡΗΤΑ', 'Επί πιστώσει' -> 'ΕΠΙ ΠΙΣΤΩΣΕΙ'. Without this,
+    str.upper() keeps the accent ('ΜΕΤΡΗΤΆ') and substring keyword checks fail.
+    """
+    if not text:
+        return ""
+    nfkd = unicodedata.normalize('NFD', str(text))
+    no_marks = ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
+    return no_marks.upper().strip()
+
+
+def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str, source_url: str, found_final_total: float = 0.0, store_vat: str = "") -> dict:
     """Parse data extracted from WebView DOM injection (Epsilon Digital pages)."""
     
     # Determine store name from URL if not provided
@@ -1237,15 +1252,25 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
 
     lines = raw_text.split('\n') if raw_text else []
 
+    # Prefer the VAT extracted client-side (the WebView regex is more permissive and
+    # runs against the live DOM). Fall back to re-parsing the raw text below.
+    clean_hint_vat = re.sub(r'\D', '', store_vat or '')
+    if len(clean_hint_vat) == 9:
+        data["store_vat"] = clean_hint_vat
+
     # Extract store info from raw text
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        # VAT
-        afm_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)[:\s]*(\d{9})', line)
-        if afm_match:
-            data["store_vat"] = afm_match.group(1)
+        # VAT (only if the client did not already provide one) - allow spaces/dots
+        # between digits, e.g. "Α.Φ.Μ.: 094 247 924"
+        if not data["store_vat"]:
+            afm_match = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)\.?[:\s]*([0-9][0-9\s\.]{7,11}[0-9])', line)
+            if afm_match:
+                digits = re.sub(r'\D', '', afm_match.group(1))[:9]
+                if len(digits) == 9:
+                    data["store_vat"] = digits
         # Date
         date_match = re.search(r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})', line)
         if date_match and not data["date"]:
@@ -1265,20 +1290,23 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
     # Process items from DOM extraction (structured data from JS)
     # Helper function to check if this is a total row
     def is_total_row(text):
-        if not text:
+        t = _strip_greek_accents(text)
+        if not t:
             return False
-        t = text.upper().strip()
         return t in ['ΣΥΝΟΛΟ', 'ΣΥΝΟΛΑ', 'ΤΕΛΙΚΟ', 'TOTAL', 'ΠΛΗΡΩΤΕΟ'] or \
                (len(t) < 8 and re.match(r'^\d+[,.]?\d*$', t))
 
     # Helper function to check if this is a payment method row
     def is_payment_row(text):
-        if not text:
+        # Accent-insensitive: 'Μετρητά'/'Επί πιστώσει' must be detected as payment
+        # rows, not summed into the total as if they were products.
+        t = _strip_greek_accents(text)
+        if not t:
             return False
-        t = text.upper().strip()
         payment_keywords = ['EFT-POS', 'EFT POS', 'EFTPOS', 'POS', 'ΜΕΤΡΗΤΑ', 'ΚΑΡΤΑ',
                           'CASH', 'CARD', 'ΠΛΗΡΩΜ', 'VISA', 'MASTERCARD', 'CREDIT',
-                          'DEBIT', 'PAYMENT', 'ΑΠΟΔ', 'ΡΕΣΤΑ', 'CHANGE']
+                          'DEBIT', 'PAYMENT', 'ΑΠΟΔ', 'ΡΕΣΤΑ', 'CHANGE',
+                          'ΠΙΣΤΩΣ', 'ΕΠΙ ΠΙΣΤΩΣΕΙ']
         return any(kw in t for kw in payment_keywords)
 
     if items_from_dom:
@@ -1361,10 +1389,12 @@ def parse_webview_extracted(raw_text: str, items_from_dom: list, store_hint: str
             diff = abs(found_final_total - calculated_total)
             if diff <= calculated_total * 0.25:  # 25% tolerance
                 data["total"] = calculated_total
-            elif found_final_total >= calculated_total:
-                # Only use found_final_total if it's larger (includes VAT we didn't capture)
+            elif calculated_total < found_final_total <= calculated_total * 1.30:
+                # found_final_total slightly larger -> likely includes VAT we didn't capture
                 data["total"] = found_final_total
             else:
+                # found_final_total wildly larger/smaller (e.g. inflated by payment-method
+                # rows like Μετρητά + Επί πιστώσει) -> trust the items sum instead
                 data["total"] = calculated_total
         else:
             data["total"] = calculated_total
@@ -3204,7 +3234,8 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
         items_from_dom=input.items,
         store_hint=input.store_name,
         source_url=input.url,
-        found_final_total=input.found_final_total
+        found_final_total=input.found_final_total,
+        store_vat=input.store_vat
     )
 
     if not receipt_data["items"]:
@@ -3613,159 +3644,7 @@ async def get_analytics(device_id: str = Query(...), months: int = Query(default
     }
 
 
-
-
-  @api_router.get("/stats/categories")
-  async def get_category_stats(device_id: str = Query(...)):
-      """Category/subcategory breakdown for drill-down chart."""
-      from collections import defaultdict
-      receipts = await db.receipts.find(
-          {"device_id": device_id}, {"items": 1}
-      ).to_list(10000)
-
-      overrides = {}
-      async for ov in db.user_category_overrides.find({"device_id": device_id}, {"_id": 0}):
-          overrides[ov["item_name_normalized"]] = {
-              "category": ov["custom_category"],
-              "subcategory": ov.get("custom_subcategory", ""),
-          }
-
-      cat_totals: dict = defaultdict(float)
-      subcat_totals: dict = defaultdict(lambda: defaultdict(float))
-
-      for receipt in receipts:
-          for item in receipt.get("items", []):
-              raw_name = (item.get("name") or item.get("description") or "").strip().lower()
-              cat = item.get("category", "Άλλο") or "Άλλο"
-              subcat = item.get("subcategory", "") or ""
-              price = float(item.get("total_price") or item.get("total_value") or 0)
-              if raw_name in overrides:
-                  cat = overrides[raw_name]["category"]
-                  subcat = overrides[raw_name].get("subcategory", subcat)
-              cat_totals[cat] += price
-              if subcat:
-                  subcat_totals[cat][subcat] += price
-
-      grand_total = sum(cat_totals.values())
-      if grand_total == 0:
-          return {"categories": [], "grand_total": 0}
-
-      COLORS = ["#6366F1","#8B5CF6","#EC4899","#F59E0B","#10B981","#3B82F6","#EF4444","#14B8A6","#F97316","#84CC16","#06B6D4","#A855F7","#E11D48","#0EA5E9","#22C55E"]
-      categories = []
-      for idx, (cat, total) in enumerate(sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)):
-          color = COLORS[idx % len(COLORS)]
-          subcats = subcat_totals.get(cat, {})
-          subcat_grand = sum(subcats.values()) or total
-          subcategories = [
-              {
-                  "name": sc,
-                  "total": round(v, 2),
-                  "percentage": round((v / subcat_grand) * 100, 1),
-                  "color": COLORS[(idx * 3 + si) % len(COLORS)],
-              }
-              for si, (sc, v) in enumerate(sorted(subcats.items(), key=lambda x: x[1], reverse=True))
-          ]
-          categories.append({
-              "name": cat,
-              "total": round(total, 2),
-              "percentage": round((total / grand_total) * 100, 1),
-              "color": color,
-              "subcategories": subcategories,
-          })
-
-      return {"categories": categories, "grand_total": round(grand_total, 2)}
-
-
-  @api_router.get("/stats/category-products")
-  async def get_category_products_inline(
-      device_id: str = Query(...),
-      category: str = Query(...),
-      subcategory: str = Query(None),
-      month: str = Query(None),
-  ):
-      """Drill-down to product level within a category/subcategory."""
-      from collections import defaultdict
-      receipts = await db.receipts.find({"device_id": device_id}).to_list(10000)
-      product_totals: dict = defaultdict(float)
-      product_count: dict = defaultdict(int)
-
-      for receipt in receipts:
-          if month:
-              date_str = receipt.get("date", receipt.get("created_at", "")) or ""
-              try:
-                  ds = date_str[:7] if isinstance(date_str, str) else date_str.strftime("%Y-%m")
-                  if ds != month:
-                      continue
-              except Exception:
-                  pass
-          for item in receipt.get("items", []):
-              item_cat = item.get("category", "Άλλο") or "Άλλο"
-              item_subcat = item.get("subcategory", "") or ""
-              if item_cat != category:
-                  continue
-              if subcategory and item_subcat != subcategory:
-                  continue
-              name = (item.get("name") or item.get("description") or "Άγνωστο").strip()
-              if not name:
-                  continue
-              price = float(item.get("total_price") or item.get("total_value") or 0)
-              product_totals[name] += price
-              product_count[name] += 1
-
-      products = [
-          {"name": k, "total": round(v, 2), "count": product_count[k]}
-          for k, v in sorted(product_totals.items(), key=lambda x: x[1], reverse=True)
-      ]
-      return {"category": category, "subcategory": subcategory, "month": month,
-              "products": products, "total": round(sum(product_totals.values()), 2)}
-
-
-  @api_router.put("/overrides")
-  async def set_category_override(
-      device_id: str = Query(...),
-      item_name: str = Query(...),
-      category: str = Query(...),
-      subcategory: str = Query(default=""),
-  ):
-      """Set a manual category override for a product."""
-      import unicodedata as _ud, re as _re
-      def _norm(s):
-          s = _ud.normalize('NFD', s.lower())
-          s = ''.join(c for c in s if _ud.category(c) != 'Mn')
-          return _re.sub(r'\s+', ' ', s).strip()
-      name_norm = _norm(item_name)
-      await db.user_category_overrides.update_one(
-          {"device_id": device_id, "item_name_normalized": name_norm},
-          {"$set": {"item_name_original": item_name, "custom_category": category,
-                    "custom_subcategory": subcategory, "updated_at": datetime.now(timezone.utc)}},
-          upsert=True,
-      )
-      return {"ok": True, "item": item_name, "category": category, "subcategory": subcategory}
-
-
-  @api_router.get("/overrides")
-  async def get_category_overrides(device_id: str = Query(...)):
-      """Get all manual category overrides for a device."""
-      overrides = await db.user_category_overrides.find(
-          {"device_id": device_id}, {"_id": 0}
-      ).to_list(1000)
-      return {"overrides": overrides}
-
-
-  @api_router.delete("/overrides")
-  async def delete_category_override(device_id: str = Query(...), item_name: str = Query(...)):
-      """Delete override and revert product to default category."""
-      import unicodedata as _ud, re as _re
-      def _norm(s):
-          s = _ud.normalize('NFD', s.lower())
-          s = ''.join(c for c in s if _ud.category(c) != 'Mn')
-          return _re.sub(r'\s+', ' ', s).strip()
-      result = await db.user_category_overrides.delete_one(
-          {"device_id": device_id, "item_name_normalized": _norm(item_name)}
-      )
-      return {"ok": result.deleted_count > 0}
-
-  @api_router.get("/backup/export")
+@api_router.get("/backup/export")
 async def export_data(device_id: str = Query(...)):
     receipts = await db.receipts.find({"device_id": device_id}, {"_id": 0}).to_list(10000)
     return {
@@ -5714,19 +5593,20 @@ async def generate_ai_content(prompt: str) -> str:
         raise HTTPException(status_code=503, detail="AI service not available")
     
     try:
+        import asyncio as _asyncio
         if genai_client:
-            # New google.genai async API
-            response = await genai_client.aio.models.generate_content(
-                model='gemini-1.5-flash',
+            # Use sync client in thread to avoid event-loop issues
+            response = await _asyncio.to_thread(
+                genai_client.models.generate_content,
+                model='gemini-2.0-flash',
                 contents=prompt
             )
             return response.text
         else:
             # Legacy google.generativeai API — run in thread to avoid blocking
-            import asyncio
             import google.generativeai as genai_module
-            model = genai_module.GenerativeModel('gemini-1.5-flash')
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            model = genai_module.GenerativeModel('gemini-2.0-flash')
+            response = await _asyncio.to_thread(model.generate_content, prompt)
             return response.text
     except Exception as e:
         logger.error(f"Gemini AI error: {e}")

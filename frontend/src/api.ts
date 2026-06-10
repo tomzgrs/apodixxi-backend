@@ -1,7 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const API_BASE = `${BACKEND_URL}/api`;
+
+async function getStoredToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    return AsyncStorage.getItem('accessToken');
+  }
+  return SecureStore.getItemAsync('accessToken');
+}
 
 async function getDeviceId(): Promise<string> {
   let id = await AsyncStorage.getItem('device_id');
@@ -150,6 +159,7 @@ export const api = {
     raw_text: string;
     items: any[];
     store_name: string;
+    store_vat?: string;
     found_final_total?: number;
   }) => {
     return request('/receipts/import-webview', {
@@ -190,7 +200,7 @@ export const api = {
 
   async getSubscriptionStatus() {
     const deviceId = await this.getDeviceId();
-    const accessToken = await AsyncStorage.getItem('accessToken');
+    const accessToken = await getStoredToken();
     const headers: Record<string, string> = {};
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
@@ -201,4 +211,74 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
-};
+
+  async getCategoryStats() {
+    const device_id = await getDeviceId();
+    return request(`/stats/categories?device_id=${device_id}`);
+  },
+
+  async getCategoryProducts(category: string, subcategory?: string, month?: string) {
+      const device_id = await getDeviceId();
+      const params = new URLSearchParams({ device_id, category });
+      if (subcategory) params.append('subcategory', subcategory);
+      if (month) params.append('month', month);
+      return request(`/stats/category-products?${params}`);
+    },
+
+    async setOverride(item_name: string, category: string, subcategory: string = '') {
+      const device_id = await getDeviceId();
+      const params = new URLSearchParams({ device_id, item_name, category, subcategory });
+      return request(`/overrides?${params}`, { method: 'PUT' });
+    },
+
+    async getOverrides() {
+      const device_id = await getDeviceId();
+      return request(`/overrides?device_id=${device_id}`);
+    },
+
+    async deleteOverride(item_name: string) {
+      const device_id = await getDeviceId();
+      const params = new URLSearchParams({ device_id, item_name });
+      return request(`/overrides?${params}`, { method: 'DELETE' });
+    },
+
+    async getProductPrices(description: string) {
+    const accessToken = await getStoredToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    const params = new URLSearchParams({ description });
+    const res = await fetch(`${API_BASE}/products/prices?${params}`, { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Request failed' }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+    getCustomCategories: async () => {
+      const device_id = await getDeviceId();
+      return request(`/categories/custom?device_id=${device_id}`);
+    },
+
+    addCustomCategory: async (name: string, subcategories: string[]) => {
+      const device_id = await getDeviceId();
+      return request('/categories/custom', {
+        method: 'POST',
+        body: JSON.stringify({ device_id, name, subcategories }),
+      });
+    },
+
+    deleteCustomCategory: async (name: string) => {
+      const device_id = await getDeviceId();
+      return request(`/categories/custom/${encodeURIComponent(name)}?device_id=${device_id}`, {
+        method: 'DELETE',
+      });
+    },
+
+    getBestPrice: async (name: string) => {
+      return request(`/products/best-price?name=${encodeURIComponent(name)}`);
+    },
+  };
+  

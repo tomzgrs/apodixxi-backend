@@ -91,12 +91,15 @@ const DOM_EXTRACTION_JS = String.raw`
           var cells = rows[ri].querySelectorAll('td');
           if (cells.length < 2) continue;
 
-          var fullRowText = (rows[ri].innerText || '').toUpperCase();
+          var fullRowText = (rows[ri].innerText || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
           if (fullRowText.includes('ΤΡΟΠΟΙ ΠΛΗΡΩΜΗΣ') || fullRowText.includes('ΤΡΟΠΟΣ ΠΛΗΡΩΜΗΣ')) continue;
           if (fullRowText.includes('ΣΥΝΟΛΑ ΠΑΡΑΣΤΑΤΙΚΟΥ') || fullRowText.includes('ΣΥΝΟΛΙΚΗ ΑΞΙΑ')) continue;
           if (fullRowText.includes('ΚΑΘΑΡΗ ΑΞΙΑ:') || fullRowText.includes('ΦΟΡΟΙ:')) continue;
           if (fullRowText.includes('POS') && (fullRowText.includes('E-POS') || fullRowText.includes('/'))) continue;
           if (/^\s*POS/.test(fullRowText)) continue;
+          // Skip payment-method rows (e.g. "Μετρητά", "Επί πιστώσει") so they are not
+          // counted as products and inflate the total.
+          if (fullRowText.includes('ΜΕΤΡΗΤ') || fullRowText.includes('ΕΠΙ ΠΙΣΤΩΣ') || fullRowText.includes('ΠΙΣΤΩΣΕΙ')) continue;
 
           var description = '', actualDescIndex = -1, unitFound = '';
           var candidates = [];
@@ -236,7 +239,6 @@ const DOM_EXTRACTION_JS = String.raw`
         else if(hostname.includes('abmarket')||fullUrl.includes('abmarket')) result.store_name='ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ';
         else if(hostname.includes('bazaar')||fullUrl.includes('bazaar')) result.store_name='BAZAAR';
         else if(hostname.includes('sklavenitis')||fullUrl.includes('sklavenitis')) result.store_name='ΣΚΛΑΒΕΝΙΤΗΣ';
-        else if(hostname.includes('epsilonnet')||hostname.includes('epsilondigital')) result.store_name='ΣΚΛΑΒΕΝΙΤΗΣ';
         else if(hostname.includes('discountmarkt')||fullUrl.includes('discountmarkt')) result.store_name='DISCOUNT MARKT';
         else if(hostname.includes('kritikos')||fullUrl.includes('kritikos')||hostname.includes('kretikos')) result.store_name='ΚΡΗΤΙΚΟΣ';
 
@@ -246,7 +248,11 @@ const DOM_EXTRACTION_JS = String.raw`
           var vatFb=result.raw_text.match(/\b(0[0-9]{8})\b/);
           if(vatFb) result.store_vat=vatFb[1];
         }
-        if(!result.store_name&&result.store_vat==='800764388') result.store_name='ΣΚΛΑΒΕΝΙΤΗΣ';
+        // VAT is authoritative: epsilonnet/epsilondigital is a shared e-invoicing portal used
+        // by many chains (incl. ΚΡΗΤΙΚΟΣ on epsilondigital-3rdpartb), so never guess the store
+        // from that hostname - map from the receipt's own VAT instead.
+        var VAT_STORE_MAP={'800764388':'ΣΚΛΑΒΕΝΙΤΗΣ','094247924':'ΚΡΗΤΙΚΟΣ','094025817':'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ','094014249':'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ','094059506':'ΑΒ ΒΑΣΙΛΟΠΟΥΛΟΣ','094062259':'METRO','094063140':'ΜΑΣΟΥΤΗΣ','094063169':'ΜΑΣΟΥΤΗΣ','094116278':'ΓΑΛΑΞΙΑΣ','998771189':'MARKET IN','800469072':'MARKET IN','094384144':'BAZAAR','094288618':'BAZAAR','094357707':'DISCOUNT MARKT'};
+        if(result.store_vat&&VAT_STORE_MAP[result.store_vat]) result.store_name=VAT_STORE_MAP[result.store_vat];
 
         var dateMatch=result.raw_text.match(/(\d{1,2}[\-\/\.]\d{1,2}[\-\/\.]\d{2,4})/);
         if(dateMatch) result.date=dateMatch[1];
@@ -382,6 +388,7 @@ export default function WebViewImportScreen() {
         raw_text: data.raw_text || '',
         items: data.items,
         store_name: data.store_name || '',
+        store_vat: data.store_vat || '',
         found_final_total: data.found_final_total || 0,
       });
       Alert.alert(
