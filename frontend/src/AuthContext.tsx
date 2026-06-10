@@ -15,6 +15,7 @@ export interface User {
   phone: string | null;
   auth_provider: 'email' | 'google' | 'apple' | 'facebook' | 'phone';
   account_type: 'free' | 'paid';
+  is_premium?: boolean;
   subscription_expires_at?: string;
   is_email_verified: boolean;
 }
@@ -25,13 +26,10 @@ interface AuthContextType {
   isAuthenticated: boolean;
   accessToken: string | null;
   signUp: (email: string, password: string, name: string) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: (googleUserInfo: { email: string; name: string; googleId: string; picture?: string }) => Promise<void>;
+  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  signInWithGoogle: (idToken: string, email?: string, rememberMe?: boolean) => Promise<void>;
   signInWithApple: (appleUserInfo: { appleId: string; email: string; name: string; identityToken: string }) => Promise<void>;
   signInWithFacebook: (facebookUserInfo: { email: string; name: string; facebookId: string; picture?: string }) => Promise<void>;
-  requestPhoneOTP: (phoneNumber: string) => Promise<string>;
-  verifyPhoneOTP: (phoneNumber: string, otp: string) => Promise<void>;
-  completePhoneAuth: (phoneNumber: string, email: string) => Promise<void>;
   updatePhone: (phoneNumber: string) => Promise<void>;
   applyPromoCode: (code: string) => Promise<{ message: string; expires_at: string }>;
   signOut: () => Promise<void>;
@@ -133,9 +131,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refresh_token: string;
     device_id?: string;
     user: User;
-  }) => {
-    await storage.setItem('accessToken', data.access_token);
-    await storage.setItem('refreshToken', data.refresh_token);
+  }, rememberMe: boolean = true) => {
+    if (rememberMe) {
+      await storage.setItem('accessToken', data.access_token);
+      await storage.setItem('refreshToken', data.refresh_token);
+    }
+    await AsyncStorage.setItem('rememberMe', rememberMe ? '1' : '0');
     
     // If server returns a device_id, update local storage to sync with user account
     // This ensures the device sees all user's receipts
@@ -172,7 +173,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const errorData = JSON.parse(responseText);
           errorMessage = errorData.detail || errorMessage;
         } catch {
-          errorMessage = responseText || errorMessage;
+          if (response.status >= 500 || responseText.includes('page not found') || responseText.includes('<html')) {
+            errorMessage = 'Σφάλμα διακομιστή. Παρακαλώ δοκιμάστε ξανά.';
+          } else {
+            errorMessage = responseText || errorMessage;
+          }
         }
         throw new Error(errorMessage);
       }
@@ -184,7 +189,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string, rememberMe: boolean = true) => {
     setIsLoading(true);
     try {
       // Get device_id to link with user account
@@ -204,39 +209,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const errorData = JSON.parse(responseText);
           errorMessage = errorData.detail || errorMessage;
         } catch {
-          errorMessage = responseText || errorMessage;
+          if (response.status >= 500 || responseText.includes('page not found') || responseText.includes('<html')) {
+            errorMessage = 'Σφάλμα διακομιστή. Παρακαλώ δοκιμάστε ξανά.';
+          } else {
+            errorMessage = responseText || errorMessage;
+          }
         }
         throw new Error(errorMessage);
       }
 
       const data = JSON.parse(responseText);
-      await handleAuthResponse(data);
+      await handleAuthResponse(data, rememberMe);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const signInWithGoogle = useCallback(async (googleUserInfo: { email: string; name: string; googleId: string; picture?: string }) => {
+  const signInWithGoogle = useCallback(async (idToken: string, email?: string, rememberMe: boolean = true) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/auth/google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          google_id: googleUserInfo.googleId,
-          email: googleUserInfo.email, 
-          name: googleUserInfo.name,
-          picture: googleUserInfo.picture
-        })
+        body: JSON.stringify({ id_token: idToken, ...(email ? { email } : {}) })
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Google sign-in failed');
+        let errorMessage = `Σφάλμα σύνδεσης (${response.status})`;
+        try {
+          const responseText = await response.text();
+          try {
+            const errorData = JSON.parse(responseText);
+            if (typeof errorData.detail === 'string') {
+              errorMessage = errorData.detail;
+            } else if (errorData.detail) {
+              errorMessage = JSON.stringify(errorData.detail);
+            } else if (typeof errorData.message === 'string') {
+              errorMessage = errorData.message;
+            } else {
+              errorMessage = responseText || errorMessage;
+            }
+          } catch {
+            errorMessage = responseText || errorMessage;
+          }
+        } catch {}
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      await handleAuthResponse(data);
+      await handleAuthResponse(data, rememberMe);
     } finally {
       setIsLoading(false);
     }
@@ -285,40 +306,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.detail || 'Facebook sign-in failed');
-      }
-
-      const data = await response.json();
-      await handleAuthResponse(data);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  // Phone number that was used for OTP (stored for verification)
-  const [pendingPhoneNumber, setPendingPhoneNumber] = useState<string>('');
-
-  const requestPhoneOTP = useCallback(async (phoneNumber: string): Promise<string> => {
-    // Phone auth disabled - Firebase native modules incompatible with New Architecture
-    throw new Error('Η σύνδεση με τηλέφωνο δεν είναι διαθέσιμη. Παρακαλώ χρησιμοποιήστε email ή Google.');
-  }, []);
-
-  const verifyPhoneOTP = useCallback(async (phoneNumber: string, otp: string) => {
-    // Phone auth disabled - Firebase native modules incompatible with New Architecture
-    throw new Error('Η σύνδεση με τηλέφωνο δεν είναι διαθέσιμη. Παρακαλώ χρησιμοποιήστε email ή Google.');
-  }, []);
-
-  const completePhoneAuth = useCallback(async (phoneNumber: string, email: string) => {
-    setIsLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/auth/phone/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone_number: phoneNumber, email })
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Phone authentication failed');
       }
 
       const data = await response.json();
@@ -426,9 +413,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signInWithGoogle,
         signInWithApple,
         signInWithFacebook,
-        requestPhoneOTP,
-        verifyPhoneOTP,
-        completePhoneAuth,
         updatePhone,
         applyPromoCode,
         signOut,

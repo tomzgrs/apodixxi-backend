@@ -12,11 +12,13 @@ import {
   Platform,
   SafeAreaView,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../src/AuthContext';
+import { useAuth, API_URL } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as WebBrowser from 'expo-web-browser';
 import AppleSignInButton from '../src/components/AppleSignInButton';
+import GoogleSignInButton from '../src/components/GoogleSignInButton';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -43,6 +45,16 @@ export default function LoginScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+
+  useEffect(() => {
+    AsyncStorage.getItem('rememberMe').then(val => {
+      if (val !== null) setRememberMe(val !== '0');
+    });
+    AsyncStorage.getItem('savedEmail').then(val => {
+      if (val) setEmail(val);
+    });
+  }, []);
 
   const validateEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -77,132 +89,20 @@ export default function LoginScreen() {
       if (mode === 'signup') {
         await signUp(email, password, name);
       } else {
-        await signIn(email, password);
+        await signIn(email, password, rememberMe);
+        if (rememberMe) {
+          await AsyncStorage.setItem('savedEmail', email);
+        } else {
+          await AsyncStorage.removeItem('savedEmail');
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Κάτι πήγε στραβά');
     }
   };
 
-  const handleRequestOTP = async () => {
-    setError('');
-    
-    if (!phone) {
-      setError('Παρακαλώ εισάγετε τον αριθμό τηλεφώνου');
-      return;
-    }
-
-    // Format phone number
-    let formattedPhone = phone;
-    if (!phone.startsWith('+')) {
-      formattedPhone = '+30' + phone; // Default to Greece
-    }
-
-    try {
-      const mockCode = await requestPhoneOTP(formattedPhone);
-      setPhone(formattedPhone);
-      setMode('phone-otp');
-      Alert.alert('OTP Στάλθηκε', 'Ένα SMS με κωδικό επαλήθευσης στάλθηκε στο τηλέφωνό σας.');
-    } catch (err: any) {
-      setError(err.message || 'Αποτυχία αποστολής OTP');
-    }
-  };
-
-  const handleVerifyOTP = async () => {
-    setError('');
-    
-    if (!otp || otp.length !== 6) {
-      setError('Παρακαλώ εισάγετε τον 6ψήφιο κωδικό');
-      return;
-    }
-
-    try {
-      await verifyPhoneOTP(phone, otp);
-      setMode('phone-email');
-    } catch (err: any) {
-      setError(err.message || 'Μη έγκυρος κωδικός OTP');
-    }
-  };
-
-  const handleCompletePhoneAuth = async () => {
-    setError('');
-    
-    if (!email) {
-      setError('Παρακαλώ εισάγετε το email σας');
-      return;
-    }
-
-    if (!validateEmail(email)) {
-      setError('Μη έγκυρη διεύθυνση email');
-      return;
-    }
-
-    try {
-      await completePhoneAuth(phone, email);
-    } catch (err: any) {
-      setError(err.message || 'Αποτυχία ολοκλήρωσης εγγραφής');
-    }
-  };
-
   const styles = createStyles(theme, isDark);
 
-  // Phone OTP Step
-  if (mode === 'phone-otp') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardView}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <View style={styles.header}>
-              <TouchableOpacity onPress={() => setMode('phone')} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={theme.text} />
-              </TouchableOpacity>
-              <Text style={styles.title}>Επαλήθευση</Text>
-              <Text style={styles.subtitle}>Εισάγετε τον 6ψήφιο κωδικό</Text>
-            </View>
-
-            <View style={styles.form}>
-              <View style={styles.inputContainer}>
-                <Ionicons name="keypad" size={20} color={theme.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="000000"
-                  placeholderTextColor={theme.textSecondary}
-                  value={otp}
-                  onChangeText={setOtp}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  autoFocus
-                />
-              </View>
-
-              {error ? <Text style={styles.error}>{error}</Text> : null}
-
-              <TouchableOpacity 
-                style={[styles.primaryButton, isLoading && styles.buttonDisabled]} 
-                onPress={handleVerifyOTP}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Επαλήθευση</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={handleRequestOTP} style={styles.linkButton}>
-                <Text style={styles.linkText}>Αποστολή νέου κωδικού</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // Forgot Password Screen
   if (mode === 'forgot-password') {
     const handleForgotPassword = async () => {
       setError('');
@@ -217,19 +117,27 @@ export default function LoginScreen() {
       
       setForgotPasswordLoading(true);
       try {
-        const response = await fetch(`${require('../src/AuthContext').API_URL}/api/auth/forgot-password`, {
+        const response = await fetch(`${API_URL}/api/auth/forgot-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email })
         });
-        const data = await response.json();
+        let data: any = {};
+        try {
+          data = await response.json();
+        } catch {
+          if (!response.ok) {
+            setError('Σφάλμα διακομιστή. Παρακαλώ δοκιμάστε ξανά αργότερα.');
+            return;
+          }
+        }
         if (response.ok) {
           setForgotPasswordSuccess(true);
         } else {
           setError(data.detail || 'Κάτι πήγε στραβά');
         }
       } catch (err: any) {
-        setError(err.message || 'Κάτι πήγε στραβά');
+        setError('Σφάλμα σύνδεσης. Ελέγξτε τη σύνδεσή σας.');
       } finally {
         setForgotPasswordLoading(false);
       }
@@ -344,12 +252,20 @@ export default function LoginScreen() {
       
       setForgotPasswordLoading(true);
       try {
-        const response = await fetch(`${require('../src/AuthContext').API_URL}/api/auth/reset-password`, {
+        const response = await fetch(`${API_URL}/api/auth/reset-password`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: resetToken, new_password: newPassword })
         });
-        const data = await response.json();
+        let data: any = {};
+        try {
+          data = await response.json();
+        } catch {
+          if (!response.ok) {
+            setError('Σφάλμα διακομιστή. Παρακαλώ δοκιμάστε ξανά αργότερα.');
+            return;
+          }
+        }
         if (response.ok) {
           Alert.alert(
             'Επιτυχία!',
@@ -364,7 +280,7 @@ export default function LoginScreen() {
           setError(data.detail || 'Κάτι πήγε στραβά');
         }
       } catch (err: any) {
-        setError(err.message || 'Κάτι πήγε στραβά');
+        setError('Σφάλμα σύνδεσης. Ελέγξτε τη σύνδεσή σας.');
       } finally {
         setForgotPasswordLoading(false);
       }
@@ -393,11 +309,12 @@ export default function LoginScreen() {
                 <Ionicons name="keypad" size={20} color={theme.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={[styles.input, { letterSpacing: 4, fontWeight: '600', fontSize: 18 }]}
-                  placeholder="XXXXXX"
+                  placeholder="000000"
                   placeholderTextColor={theme.textSecondary}
                   value={resetToken}
-                  onChangeText={(text) => setResetToken(text.toUpperCase())}
-                  autoCapitalize="characters"
+                  onChangeText={setResetToken}
+                  autoCapitalize="none"
+                  keyboardType="number-pad"
                   maxLength={6}
                   autoFocus
                 />
@@ -429,109 +346,6 @@ export default function LoginScreen() {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.primaryButtonText}>Αλλαγή κωδικού</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // Phone Email Step
-  if (mode === 'phone-email') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardView}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <View style={styles.header}>
-              <TouchableOpacity onPress={() => setMode('phone-otp')} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={theme.text} />
-              </TouchableOpacity>
-              <Text style={styles.title}>Σχεδόν έτοιμο!</Text>
-              <Text style={styles.subtitle}>Εισάγετε το email σας για να ολοκληρώσετε</Text>
-            </View>
-
-            <View style={styles.form}>
-              <View style={styles.inputContainer}>
-                <Ionicons name="mail" size={20} color={theme.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email"
-                  placeholderTextColor={theme.textSecondary}
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoFocus
-                />
-              </View>
-
-              {error ? <Text style={styles.error}>{error}</Text> : null}
-
-              <TouchableOpacity 
-                style={[styles.primaryButton, isLoading && styles.buttonDisabled]} 
-                onPress={handleCompletePhoneAuth}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Ολοκλήρωση</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // Phone Number Input
-  if (mode === 'phone') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardView}
-        >
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <View style={styles.header}>
-              <TouchableOpacity onPress={() => setMode('login')} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={theme.text} />
-              </TouchableOpacity>
-              <Text style={styles.title}>Σύνδεση με Τηλέφωνο</Text>
-              <Text style={styles.subtitle}>Θα σας στείλουμε κωδικό επαλήθευσης</Text>
-            </View>
-
-            <View style={styles.form}>
-              <View style={styles.inputContainer}>
-                <Ionicons name="call" size={20} color={theme.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="+30 697 xxx xxxx"
-                  placeholderTextColor={theme.textSecondary}
-                  value={phone}
-                  onChangeText={setPhone}
-                  keyboardType="phone-pad"
-                  autoFocus
-                />
-              </View>
-
-              {error ? <Text style={styles.error}>{error}</Text> : null}
-
-              <TouchableOpacity 
-                style={[styles.primaryButton, isLoading && styles.buttonDisabled]} 
-                onPress={handleRequestOTP}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Αποστολή Κωδικού</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -620,6 +434,22 @@ export default function LoginScreen() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
+            {/* Remember Me - only show on login */}
+            {mode === 'login' && (
+              <TouchableOpacity
+                style={styles.rememberMeRow}
+                onPress={() => setRememberMe(v => !v)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+                  {rememberMe && <Ionicons name="checkmark" size={13} color="#fff" />}
+                </View>
+                <Text style={[styles.rememberMeText, { color: theme.textSecondary }]}>
+                  Να με θυμάσαι
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {/* Forgot Password Link - only show on login */}
             {mode === 'login' && (
               <TouchableOpacity 
@@ -654,19 +484,13 @@ export default function LoginScreen() {
 
           {/* Social Buttons */}
           <View style={styles.socialButtons}>
-            <TouchableOpacity 
-              style={[styles.socialButton, { backgroundColor: '#4285F4', opacity: 0.6 }]}
-              onPress={() => {
-                Alert.alert(
-                  'Google Sign-In',
-                  'Η σύνδεση με Google δεν είναι διαθέσιμη προσωρινά. Παρακαλώ χρησιμοποιήστε email.',
-                  [{ text: 'OK' }]
-                );
-              }}
-            >
-              <Ionicons name="logo-google" size={20} color="#fff" />
-              <Text style={styles.socialButtonText}>Google</Text>
-            </TouchableOpacity>
+            <GoogleSignInButton
+              onSignIn={(idToken, email) => signInWithGoogle(idToken, email, rememberMe)}
+              isLoading={googleLoading}
+              setIsLoading={setGoogleLoading}
+              setError={setError}
+              style={styles.socialButton}
+            />
 
             <AppleSignInButton
               onSignIn={signInWithApple}
@@ -792,6 +616,29 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     backgroundColor: isDark ? 'rgba(13, 148, 136, 0.1)' : 'rgba(13, 148, 136, 0.1)',
     padding: 8,
     borderRadius: 8,
+  },
+  rememberMeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#6b7280',
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#0d9488',
+    borderColor: '#0d9488',
+  },
+  rememberMeText: {
+    fontSize: 14,
   },
   primaryButton: {
     backgroundColor: theme.primary,

@@ -387,7 +387,7 @@ export default function CompareScreen() {
                   {selectedProduct.price_history?.map((entry, i) => (
                     <TouchableOpacity
                         key={i}
-                        style={[styles.historyItem, !!entry.receipt_id && styles.historyItemTappable]}
+                        style={styles.historyItem}
                         activeOpacity={entry.receipt_id ? 0.7 : 1}
                         onPress={() => {
                           if (entry.receipt_id) {
