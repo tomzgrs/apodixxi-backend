@@ -3432,6 +3432,80 @@ async def compare_product_prices(q: str = Query(..., min_length=2)):
     return {"query": q, "stores": stores, "total_products": len(products)}
 
 
+# ============ FAVORITE PRODUCTS ============
+
+class FavoriteInput(BaseModel):
+    device_id: str
+    name: str
+
+
+@api_router.get("/favorites")
+async def get_favorites(device_id: str = Query(...)):
+    """Return the user's favorite product names, enriched with the cheapest current price per favorite."""
+    favs = await db.favorites.find(
+        {"device_id": device_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+
+    result = []
+    for f in favs:
+        name = f.get("name", "")
+        best_price = None
+        best_store = ""
+        last_date = ""
+        store_count = 0
+        if name:
+            matches = await db.products.find(
+                {"description": {"$regex": f"^{re.escape(name)}$", "$options": "i"}},
+                {"_id": 0}
+            ).to_list(100)
+            store_count = len(matches)
+            for p in matches:
+                price = p.get("last_price", 0) or 0
+                if price > 0 and (best_price is None or price < best_price):
+                    best_price = price
+                    best_store = p.get("store_name", "")
+                    last_date = p.get("last_date", "")
+        result.append({
+            "name": name,
+            "best_price": best_price,
+            "best_store": best_store,
+            "last_date": last_date,
+            "store_count": store_count,
+            "created_at": f.get("created_at", ""),
+        })
+    return {"favorites": result}
+
+
+@api_router.post("/favorites")
+async def add_favorite(input: FavoriteInput):
+    name = (input.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Product name is required")
+    await db.favorites.update_one(
+        {"device_id": input.device_id, "name_lower": name.lower()},
+        {
+            "$set": {
+                "device_id": input.device_id,
+                "name": name,
+                "name_lower": name.lower(),
+            },
+            "$setOnInsert": {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        },
+        upsert=True,
+    )
+    return {"status": "added", "name": name}
+
+
+@api_router.delete("/favorites/{name}")
+async def remove_favorite(name: str, device_id: str = Query(...)):
+    await db.favorites.delete_one(
+        {"device_id": device_id, "name_lower": (name or "").strip().lower()}
+    )
+    return {"status": "removed", "name": name}
+
+
 @api_router.get("/stats")
 async def get_stats(
     device_id: str = Query(...),
