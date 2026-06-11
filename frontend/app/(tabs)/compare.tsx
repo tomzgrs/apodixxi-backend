@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Image, Modal, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -61,12 +61,20 @@ export default function CompareScreen() {
     }
   };
 
+  const togglingRef = useRef<Set<string>>(new Set());
+
   const toggleFavorite = async (name: string) => {
     const key = name.toLowerCase().trim();
+    if (!key || togglingRef.current.has(key)) return;
+    togglingRef.current.add(key);
+
     const wasFav = favoriteNames.has(key);
-    const optimistic = new Set(favoriteNames);
-    if (wasFav) optimistic.delete(key); else optimistic.add(key);
-    setFavoriteNames(optimistic);
+    setFavoriteNames((prev) => {
+      const next = new Set(prev);
+      if (wasFav) next.delete(key); else next.add(key);
+      return next;
+    });
+
     try {
       if (wasFav) {
         await api.removeFavorite(name);
@@ -76,7 +84,13 @@ export default function CompareScreen() {
       await loadFavorites();
     } catch (e) {
       console.log('Toggle favorite error:', e);
-      setFavoriteNames(favoriteNames);
+      setFavoriteNames((prev) => {
+        const next = new Set(prev);
+        if (wasFav) next.add(key); else next.delete(key);
+        return next;
+      });
+    } finally {
+      togglingRef.current.delete(key);
     }
   };
 
@@ -342,29 +356,33 @@ export default function CompareScreen() {
                 const hasHistory = product.price_history && product.price_history.length > 1;
 
                 return (
-                  <TouchableOpacity
+                  <View
                     key={i}
                     style={[styles.productCard, isCheapest && styles.productCardCheapest]}
-                    onPress={() => hasHistory ? showPriceHistory(product) : null}
-                    activeOpacity={hasHistory ? 0.7 : 1}
                   >
                     <View style={styles.productHeader}>
-                      {logoUrl ? (
-                        <Image source={{ uri: logoUrl }} style={styles.storeLogo} resizeMode="contain" />
-                      ) : (
-                        <View style={[styles.storeIcon, { backgroundColor: getStoreColor(product.store_name) }]}>
-                          <Text style={styles.storeIconText}>{getStoreInitial(product.store_name)}</Text>
-                        </View>
-                      )}
-                      <View style={styles.productInfo}>
-                        <Text style={styles.productName} numberOfLines={2}>{product.description}</Text>
-                        <Text style={styles.productStore}>{product.store_name}</Text>
-                        {product.last_date && (
-                          <Text style={styles.productDate}>
-                            <Ionicons name="calendar-outline" size={10} color={theme.textMuted} /> {product.last_date}
-                          </Text>
+                      <TouchableOpacity
+                        style={styles.productMain}
+                        onPress={() => hasHistory ? showPriceHistory(product) : null}
+                        activeOpacity={hasHistory ? 0.7 : 1}
+                      >
+                        {logoUrl ? (
+                          <Image source={{ uri: logoUrl }} style={styles.storeLogo} resizeMode="contain" />
+                        ) : (
+                          <View style={[styles.storeIcon, { backgroundColor: getStoreColor(product.store_name) }]}>
+                            <Text style={styles.storeIconText}>{getStoreInitial(product.store_name)}</Text>
+                          </View>
                         )}
-                      </View>
+                        <View style={styles.productInfo}>
+                          <Text style={styles.productName} numberOfLines={2}>{product.description}</Text>
+                          <Text style={styles.productStore}>{product.store_name}</Text>
+                          {product.last_date && (
+                            <Text style={styles.productDate}>
+                              <Ionicons name="calendar-outline" size={10} color={theme.textMuted} /> {product.last_date}
+                            </Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.heartBtn}
                         onPress={() => toggleFavorite(product.description)}
@@ -398,7 +416,7 @@ export default function CompareScreen() {
                         )}
                       </View>
                     </View>
-                  </TouchableOpacity>
+                  </View>
                 );
               })}
             </>
@@ -476,33 +494,34 @@ export default function CompareScreen() {
               )}
 
               {!favLoading && favoritesList.map((fav, i) => (
-                <TouchableOpacity
-                  key={i}
-                  style={styles.productCard}
-                  onPress={() => openFavorite(fav.name)}
-                  activeOpacity={0.7}
-                >
+                <View key={i} style={styles.productCard}>
                   <View style={styles.productHeader}>
-                    <View style={[styles.storeIcon, { backgroundColor: theme.primaryLight }]}>
-                      <Ionicons name="heart" size={18} color={theme.error} />
-                    </View>
-                    <View style={styles.productInfo}>
-                      <Text style={styles.productName} numberOfLines={2}>{fav.name}</Text>
-                      {fav.best_store ? (
-                        <Text style={styles.productStore}>
-                          {(lang === 'el' ? 'Φθηνότερα: ' : 'Cheapest: ') + fav.best_store}
-                        </Text>
-                      ) : (
-                        <Text style={styles.productStore}>
-                          {lang === 'el' ? 'Χωρίς τιμές ακόμη' : 'No prices yet'}
-                        </Text>
-                      )}
-                      {!!fav.last_date && (
-                        <Text style={styles.productDate}>
-                          <Ionicons name="calendar-outline" size={10} color={theme.textMuted} /> {fav.last_date}
-                        </Text>
-                      )}
-                    </View>
+                    <TouchableOpacity
+                      style={styles.productMain}
+                      onPress={() => openFavorite(fav.name)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.storeIcon, { backgroundColor: theme.primaryLight }]}>
+                        <Ionicons name="heart" size={18} color={theme.error} />
+                      </View>
+                      <View style={styles.productInfo}>
+                        <Text style={styles.productName} numberOfLines={2}>{fav.name}</Text>
+                        {fav.best_store ? (
+                          <Text style={styles.productStore}>
+                            {(lang === 'el' ? 'Φθηνότερα: ' : 'Cheapest: ') + fav.best_store}
+                          </Text>
+                        ) : (
+                          <Text style={styles.productStore}>
+                            {lang === 'el' ? 'Χωρίς τιμές ακόμη' : 'No prices yet'}
+                          </Text>
+                        )}
+                        {!!fav.last_date && (
+                          <Text style={styles.productDate}>
+                            <Ionicons name="calendar-outline" size={10} color={theme.textMuted} /> {fav.last_date}
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
                     <View style={styles.productPriceWrap}>
                       {fav.best_price != null && (
                         <Text style={[styles.productPrice, { color: theme.success }]}>
@@ -518,7 +537,7 @@ export default function CompareScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
-                </TouchableOpacity>
+                </View>
               ))}
             </>
           )}
@@ -806,6 +825,7 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     borderWidth: 2 
   },
   productHeader: { flexDirection: 'row', alignItems: 'center' },
+  productMain: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   storeIcon: { 
     width: 44, 
     height: 44, 
