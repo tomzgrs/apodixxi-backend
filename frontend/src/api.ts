@@ -280,5 +280,25 @@ export const api = {
     getBestPrice: async (name: string) => {
       return request(`/products/best-price?name=${encodeURIComponent(name)}`);
     },
+
+    getFavorites: async () => {
+      const device_id = await getDeviceId();
+      return request(`/favorites?device_id=${device_id}`);
+    },
+
+    addFavorite: async (name: string) => {
+      const device_id = await getDeviceId();
+      return request('/favorites', {
+        method: 'POST',
+        body: JSON.stringify({ device_id, name }),
+      });
+    },
+
+    removeFavorite: async (name: string) => {
+      const device_id = await getDeviceId();
+      return request(`/favorites/${encodeURIComponent(name)}?device_id=${device_id}`, {
+        method: 'DELETE',
+      });
+    },
   };
   
