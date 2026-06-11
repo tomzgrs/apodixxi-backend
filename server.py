@@ -3557,11 +3557,32 @@ async def get_receipts(device_id: str = Query(...), skip: int = 0, limit: int = 
             {"store_name": {"$regex": search, "$options": "i"}},
             {"items.description": {"$regex": search, "$options": "i"}}
         ]
-    cursor = db.receipts.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit)
-    receipts = await cursor.to_list(limit)
+    # Sort by the printed purchase date (`date`), falling back to the scan date
+    # (`created_at`). `date` is a string in mixed formats, so parse it in Python
+    # to get a correct chronological order, then paginate the sorted result.
+    all_receipts = await db.receipts.find(query, {"_id": 0}).to_list(10000)
+
+    def _receipt_sort_key(r):
+        ds = (r.get("date") or "").strip()
+        if ds:
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
+                try:
+                    return datetime.strptime(ds[:10], fmt)
+                except Exception:
+                    pass
+        ca = (r.get("created_at") or "")
+        if ca:
+            try:
+                return datetime.fromisoformat(ca.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                pass
+        return datetime.min
+
+    all_receipts.sort(key=_receipt_sort_key, reverse=True)
+    total = len(all_receipts)
+    page = all_receipts[skip: skip + limit]
     # Sanitize all float values to prevent JSON serialization errors
-    sanitized_receipts = [sanitize_receipt_data(r) for r in receipts]
-    total = await db.receipts.count_documents(query)
+    sanitized_receipts = [sanitize_receipt_data(r) for r in page]
     return {"receipts": sanitized_receipts, "total": total}
 
 
