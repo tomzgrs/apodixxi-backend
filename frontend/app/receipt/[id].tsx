@@ -1,5 +1,5 @@
-import React, { useContext, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Image } from 'react-native';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,7 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
+import PriceComparisonSheet from '../../src/components/PriceComparisonSheet';
 
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -17,6 +18,9 @@ export default function ReceiptDetailScreen() {
   const router = useRouter();
   const [receipt, setReceipt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [compareItem, setCompareItem] = useState<{ description: string; price: number } | null>(null);
+  const [favoriteNames, setFavoriteNames] = useState<Set<string>>(new Set());
+  const togglingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     (async () => {
@@ -30,6 +34,50 @@ export default function ReceiptDetailScreen() {
       }
     })();
   }, [id]);
+
+  useEffect(() => {
+    loadFavorites();
+  }, []);
+
+  const loadFavorites = async () => {
+    try {
+      const data = await api.getFavorites();
+      const list = data.favorites || [];
+      setFavoriteNames(new Set(list.map((f: any) => (f.name || '').toLowerCase().trim())));
+    } catch (e) {
+      console.log('Load favorites error:', e);
+    }
+  };
+
+  const toggleFavorite = async (name: string) => {
+    const key = (name || '').toLowerCase().trim();
+    if (!key || togglingRef.current.has(key)) return;
+    togglingRef.current.add(key);
+
+    const wasFav = favoriteNames.has(key);
+    setFavoriteNames((prev) => {
+      const next = new Set(prev);
+      if (wasFav) next.delete(key); else next.add(key);
+      return next;
+    });
+
+    try {
+      if (wasFav) {
+        await api.removeFavorite(name);
+      } else {
+        await api.addFavorite(name);
+      }
+    } catch (e) {
+      console.log('Toggle favorite error:', e);
+      setFavoriteNames((prev) => {
+        const next = new Set(prev);
+        if (wasFav) next.add(key); else next.delete(key);
+        return next;
+      });
+    } finally {
+      togglingRef.current.delete(key);
+    }
+  };
 
   const handleDelete = () => {
     Alert.alert(t('delete'), t('confirm_delete'), [
@@ -170,6 +218,27 @@ export default function ReceiptDetailScreen() {
     colQty: { width: 40, textAlign: 'center' },
     colPrice: { width: 50, textAlign: 'right' },
     colTotal: { width: 55, textAlign: 'right' },
+
+    // Favorite (heart) button
+    heartBtn: {
+      width: 26,
+      height: 26,
+      borderRadius: Radius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 2,
+    },
+
+    // Compare button
+    compareBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: Radius.full,
+      backgroundColor: theme.primaryLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 4,
+    },
     
     // Totals card
     totalsCard: { 
@@ -302,6 +371,22 @@ export default function ReceiptDetailScreen() {
               <Text style={[styles.tableCell, styles.colTotal, styles.tableCellTotal]}>
                 {formatPrice(item.total_value)}
               </Text>
+              <TouchableOpacity
+                style={styles.heartBtn}
+                onPress={() => toggleFavorite(item.description)}
+              >
+                <Ionicons
+                  name={favoriteNames.has((item.description || '').toLowerCase().trim()) ? 'heart' : 'heart-outline'}
+                  size={16}
+                  color={favoriteNames.has((item.description || '').toLowerCase().trim()) ? theme.error : theme.textMuted}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.compareBtn}
+                onPress={() => setCompareItem({ description: item.description, price: item.total_value })}
+              >
+                <Ionicons name="git-compare-outline" size={14} color={theme.primary} />
+              </TouchableOpacity>
             </View>
           ))}
         </View>
@@ -351,11 +436,21 @@ export default function ReceiptDetailScreen() {
           {receipt.source_url ? (
             <View style={styles.sourceLinkContainer}>
               <Text style={styles.sourceLabel}>{lang === 'el' ? 'Link' : 'Link'}:</Text>
-              <Text style={styles.sourceLink} numberOfLines={2}>{receipt.source_url}</Text>
+              <TouchableOpacity onPress={() => Linking.openURL(receipt.source_url)}>
+                <Text style={[styles.sourceLink, { color: '#0D9488', textDecorationLine: 'underline' }]} numberOfLines={2}>{receipt.source_url}</Text>
+              </TouchableOpacity>
             </View>
           ) : null}
         </View>
       </ScrollView>
+
+      {/* Price Comparison Bottom Sheet */}
+      <PriceComparisonSheet
+        visible={compareItem !== null}
+        description={compareItem?.description ?? ''}
+        currentPrice={compareItem?.price ?? 0}
+        onClose={() => setCompareItem(null)}
+      />
     </SafeAreaView>
   );
 }
