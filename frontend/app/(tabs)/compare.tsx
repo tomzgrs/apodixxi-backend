@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Image, Modal, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -37,7 +37,59 @@ export default function CompareScreen() {
   const [selectedProduct, setSelectedProduct] = useState<ProductResult | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [mode, setMode] = useState<'search' | 'favorites'>('search');
+  const [favoriteNames, setFavoriteNames] = useState<Set<string>>(new Set());
+  const [favoritesList, setFavoritesList] = useState<any[]>([]);
+  const [favLoading, setFavLoading] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    loadFavorites();
+  }, []);
+
+  const loadFavorites = async () => {
+    try {
+      setFavLoading(true);
+      const data = await api.getFavorites();
+      const list = data.favorites || [];
+      setFavoritesList(list);
+      setFavoriteNames(new Set(list.map((f: any) => (f.name || '').toLowerCase().trim())));
+    } catch (e) {
+      console.log('Load favorites error:', e);
+    } finally {
+      setFavLoading(false);
+    }
+  };
+
+  const toggleFavorite = async (name: string) => {
+    const key = name.toLowerCase().trim();
+    const wasFav = favoriteNames.has(key);
+    const optimistic = new Set(favoriteNames);
+    if (wasFav) optimistic.delete(key); else optimistic.add(key);
+    setFavoriteNames(optimistic);
+    try {
+      if (wasFav) {
+        await api.removeFavorite(name);
+      } else {
+        await api.addFavorite(name);
+      }
+      await loadFavorites();
+    } catch (e) {
+      console.log('Toggle favorite error:', e);
+      setFavoriteNames(favoriteNames);
+    }
+  };
+
+  const openFavorite = (name: string) => {
+    setMode('search');
+    setQuery(name.toUpperCase());
+    setSearched(true);
+    setLoading(true);
+    api.compareProducts(name)
+      .then(setResults)
+      .catch((e) => console.log('Compare error:', e))
+      .finally(() => setLoading(false));
+  };
 
   const handleSearch = async () => {
     if (!query.trim() || query.trim().length < 2) return;
@@ -138,6 +190,32 @@ export default function CompareScreen() {
             {lang === 'el' ? 'Βρείτε τις καλύτερες τιμές για τα προϊόντα σας' : 'Find the best prices for your products'}
           </Text>
 
+          {/* Mode Toggle: Search / Favorites */}
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              style={[styles.modeChip, mode === 'search' && styles.modeChipActive]}
+              onPress={() => setMode('search')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="search" size={16} color={mode === 'search' ? theme.textInverse : theme.textSecondary} />
+              <Text style={[styles.modeChipText, mode === 'search' && styles.modeChipTextActive]}>
+                {lang === 'el' ? 'Αναζήτηση' : 'Search'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeChip, mode === 'favorites' && styles.modeChipActive]}
+              onPress={() => setMode('favorites')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="heart" size={16} color={mode === 'favorites' ? theme.textInverse : theme.error} />
+              <Text style={[styles.modeChipText, mode === 'favorites' && styles.modeChipTextActive]}>
+                {lang === 'el' ? 'Αγαπημένα' : 'Favorites'}{favoritesList.length > 0 ? ` (${favoritesList.length})` : ''}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {mode === 'search' && (
+          <>
           {/* Search Bar */}
           <View style={styles.searchRow}>
             <View style={styles.searchInputWrap}>
@@ -287,6 +365,17 @@ export default function CompareScreen() {
                           </Text>
                         )}
                       </View>
+                      <TouchableOpacity
+                        style={styles.heartBtn}
+                        onPress={() => toggleFavorite(product.description)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons
+                          name={favoriteNames.has(product.description.toLowerCase().trim()) ? 'heart' : 'heart-outline'}
+                          size={22}
+                          color={favoriteNames.has(product.description.toLowerCase().trim()) ? theme.error : theme.textMuted}
+                        />
+                      </TouchableOpacity>
                       <View style={styles.productPriceWrap}>
                         <Text style={[styles.productPrice, isCheapest && { color: theme.success }]}>
                           {formatPrice(product.last_price)}
@@ -352,6 +441,86 @@ export default function CompareScreen() {
                 </View>
               </View>
             </View>
+          )}
+          </>
+          )}
+
+          {mode === 'favorites' && (
+            <>
+              {favLoading && (
+                <View style={styles.center}>
+                  <ActivityIndicator size="large" color={theme.primary} />
+                </View>
+              )}
+
+              {!favLoading && favoritesList.length === 0 && (
+                <View style={styles.empty}>
+                  <View style={styles.emptyIconWrap}>
+                    <Ionicons name="heart-outline" size={48} color={theme.error} />
+                  </View>
+                  <Text style={styles.emptyTitle}>
+                    {lang === 'el' ? 'Δεν έχετε αγαπημένα' : 'No favorites yet'}
+                  </Text>
+                  <Text style={styles.emptyDesc}>
+                    {lang === 'el'
+                      ? 'Πατήστε την καρδιά ♥ σε ένα προϊόν στην Αναζήτηση για να το προσθέσετε εδώ'
+                      : 'Tap the heart ♥ on a product in Search to add it here'}
+                  </Text>
+                </View>
+              )}
+
+              {!favLoading && favoritesList.length > 0 && (
+                <Text style={styles.resultsCount}>
+                  {favoritesList.length} {lang === 'el' ? 'αγαπημένα' : 'favorites'}
+                </Text>
+              )}
+
+              {!favLoading && favoritesList.map((fav, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.productCard}
+                  onPress={() => openFavorite(fav.name)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.productHeader}>
+                    <View style={[styles.storeIcon, { backgroundColor: theme.primaryLight }]}>
+                      <Ionicons name="heart" size={18} color={theme.error} />
+                    </View>
+                    <View style={styles.productInfo}>
+                      <Text style={styles.productName} numberOfLines={2}>{fav.name}</Text>
+                      {fav.best_store ? (
+                        <Text style={styles.productStore}>
+                          {(lang === 'el' ? 'Φθηνότερα: ' : 'Cheapest: ') + fav.best_store}
+                        </Text>
+                      ) : (
+                        <Text style={styles.productStore}>
+                          {lang === 'el' ? 'Χωρίς τιμές ακόμη' : 'No prices yet'}
+                        </Text>
+                      )}
+                      {!!fav.last_date && (
+                        <Text style={styles.productDate}>
+                          <Ionicons name="calendar-outline" size={10} color={theme.textMuted} /> {fav.last_date}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.productPriceWrap}>
+                      {fav.best_price != null && (
+                        <Text style={[styles.productPrice, { color: theme.success }]}>
+                          {formatPrice(fav.best_price)}
+                        </Text>
+                      )}
+                      <TouchableOpacity
+                        onPress={() => toggleFavorite(fav.name)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={{ marginTop: 6 }}
+                      >
+                        <Ionicons name="heart" size={20} color={theme.error} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -471,6 +640,25 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     justifyContent: 'center',
     ...Shadows.sm,
   },
+
+  // Mode toggle
+  modeRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
+  modeChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  modeChipActive: { backgroundColor: theme.primary, borderColor: theme.primary },
+  modeChipText: { fontSize: Typography.sm, fontWeight: Typography.semibold, color: theme.textSecondary },
+  modeChipTextActive: { color: theme.textInverse },
+  heartBtn: { paddingHorizontal: Spacing.sm, justifyContent: 'center', alignItems: 'center' },
   
   // Loading & Empty
   center: { paddingVertical: Spacing['3xl'], alignItems: 'center' },
