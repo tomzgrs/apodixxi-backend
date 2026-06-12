@@ -12,8 +12,9 @@ try {
   WebView = require('react-native-webview').default;
 } catch (e) {}
 
-const DOM_EXTRACTION_JS = String.raw`
+const buildExtractionJS = (nonce: string) => String.raw`
   (function() {
+    var NONCE = ${JSON.stringify(nonce)};
     if (window._apodixxiExtracting) return;
     window._apodixxiExtracting = true;
     window._apodixxiExtractionStart = Date.now();
@@ -305,11 +306,11 @@ const DOM_EXTRACTION_JS = String.raw`
         }
 
         safePost({type:'DEBUG',step:'EXTRACTION_DONE',itemCount:result.items.length,ts:Date.now(),elapsed:Date.now()-window._apodixxiExtractionStart,storeName:result.store_name,totalFound:result.found_final_total});
-        safePost({type:'extracted', data:result});
+        safePost({type:'extracted', data:result, nonce:NONCE});
         // Παράδοση δεδομένων ΚΑΙ μέσω τίτλου (fallback αν η γέφυρα postMessage είναι νεκρή)
         try {
           var _slim = {store_name:result.store_name,store_vat:result.store_vat,date:result.date,receipt_number:result.receipt_number,found_final_total:result.found_final_total,items:result.items};
-          document.title = 'APXJSON::' + JSON.stringify(_slim);
+          document.title = 'APXJSON::' + NONCE + '::' + JSON.stringify(_slim);
         } catch(e){}
       } catch(err) {
         // Οποιοδήποτε σφάλμα → στείλε ΑΜΕΣΩΣ error (μην περιμένεις την τελευταία προσπάθεια)
@@ -344,6 +345,7 @@ export default function WebViewImportScreen() {
   const [pageLoaded, setPageLoaded] = useState(false);
   const [extracted, setExtracted] = useState(false);
   const lastDebugRef = useRef<any>(null);
+  const extractionNonceRef = useRef<string | null>(null);
   
   // VAT Validation states
   const [showVatModal, setShowVatModal] = useState(false);
@@ -403,9 +405,12 @@ export default function WebViewImportScreen() {
     if (webviewRef.current && !extracting) {
       setExtracting(true);
       lastDebugRef.current = null;
+      const nonce = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+      extractionNonceRef.current = nonce;
       
       // Set a timeout to reset if extraction takes too long
       const timeoutId = setTimeout(() => {
+        extractionNonceRef.current = null;
         setExtracting(false);
         setExtracted(false);
         const d = lastDebugRef.current;
@@ -435,7 +440,7 @@ export default function WebViewImportScreen() {
         `);
         setTimeout(() => {
           if (webviewRef.current) {
-            webviewRef.current.injectJavaScript(DOM_EXTRACTION_JS);
+            webviewRef.current.injectJavaScript(buildExtractionJS(nonce));
           }
         }, 100);
     }
@@ -448,17 +453,26 @@ export default function WebViewImportScreen() {
       // DEBUG POLL: κράτα τα διαγνωστικά αλλά ΜΗΝ ακυρώνεις το timeout (περίμενε terminal μήνυμα)
       if (msg.type === 'DEBUG') { lastDebugRef.current = msg; return; }
 
-      // Μόνο terminal μηνύματα (extracted/error) ακυρώνουν το extraction timeout
-      if ((msg.type === 'extracted' || msg.type === 'error') &&
-          webviewRef.current && (webviewRef.current as any)._extractionTimeout) {
-        clearTimeout((webviewRef.current as any)._extractionTimeout);
-      }
+      // Terminal messages (extracted/error) clear the extraction timeout.
+      const clearExtractionTimeout = () => {
+        if (webviewRef.current && (webviewRef.current as any)._extractionTimeout) {
+          clearTimeout((webviewRef.current as any)._extractionTimeout);
+        }
+      };
+
       if (msg.type === 'extracted' && !extracted) {
+        // Trust boundary: only import data from an extraction WE initiated,
+        // identified by a single-use nonce that our injected JS echoes back.
+        // This stops a malicious/unexpected page from posting fabricated receipt
+        // data through the WebView bridge or the document.title channel.
+        if (!extractionNonceRef.current || msg.nonce !== extractionNonceRef.current) {
+          return;
+        }
+        extractionNonceRef.current = null; // single-use: prevent replay
+        clearExtractionTimeout();
         setExtracted(true);
         const data = msg.data;
-        
-        console.log('Extracted data:', JSON.stringify(data, null, 2));
-        
+
         if (data.items && data.items.length > 0) {
           // Check if VAT is known
           const vatNumber = data.store_vat || '';
@@ -479,7 +493,6 @@ export default function WebViewImportScreen() {
               }
             } catch (e) {
               // If VAT validation fails, proceed anyway
-              console.log('VAT validation failed, proceeding:', e);
             }
           }
           
@@ -498,6 +511,7 @@ export default function WebViewImportScreen() {
         }
         setExtracting(false);
       } else if (msg.type === 'error') {
+        clearExtractionTimeout();
         Alert.alert(t('error'), msg.message);
         setExtracting(false);
       }
@@ -512,8 +526,11 @@ export default function WebViewImportScreen() {
     if (typeof title !== 'string') return;
     try {
       if (title.indexOf('APXJSON::') === 0) {
-        const data = JSON.parse(title.slice(9));
-        handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'extracted', data }) } } as any);
+        const rest = title.slice(9);
+        const sep = rest.indexOf('::');
+        const nonce = sep >= 0 ? rest.slice(0, sep) : '';
+        const data = JSON.parse(sep >= 0 ? rest.slice(sep + 2) : rest);
+        handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'extracted', data, nonce }) } } as any);
         return;
       }
       if (title.indexOf('APXERR::') === 0) {

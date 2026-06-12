@@ -31,11 +31,14 @@ Ran an OSV-based dependency audit over the workspace.
     `node-forge`, `shell-quote`) are Node-only and cannot run in the
     React Native (Hermes) runtime. They execute on the developer/build machine,
     not on the user's device, so they are **not exploitable in the released app**.
+  - **Residual risk:** these advisories are not *zero* risk — they represent
+    supply-chain / build-environment exposure (developer & CI machines), just not
+    runtime exposure on the user's device.
   - **Decision — accepted risk:** not patched via `yarn` `resolutions`. The
     EAS production build for RN 0.81.5 is sensitive to toolchain version changes
     and cannot be fully verified from this environment; bumping transitive build
-    deps risks breaking the build for zero user-facing security gain. Re-audit and
-    bump opportunistically when the toolchain is next upgraded.
+    deps risks breaking the build for zero device-runtime security gain. Re-audit
+    and bump opportunistically when the toolchain is next upgraded.
 - **PyPI advisories (incl. 2 critical, e.g. PyJWT):** belong to the **backend**,
   which is out of scope for this review.
 
@@ -52,7 +55,8 @@ Ran an OSV-based dependency audit over the workspace.
   via env var.
 - **No sensitive data logged.** No `console.*` call logs a token, password, or
   email. **Fixed:** removed a `console.log` that printed the synced `device_id`
-  in `AuthContext.tsx`.
+  in `AuthContext.tsx`, and a `console.log` that printed the full extracted
+  receipt payload in `app/webview-import.tsx`.
 - **No insecure transport.** No `http://` endpoints; the API base resolves to
   `https://api.apodixxi.app`.
 - **No dynamic code execution.** No `eval`, `new Function`, or
@@ -73,17 +77,29 @@ Ran an OSV-based dependency audit over the workspace.
 No dynamic-code or unsafe-HTML patterns. The privacy/dataflow scan found **no
 findings in the mobile app code** (its hits were all in the out-of-scope backend).
 
+### WebView importer trust boundary (fixed)
+
+`app/webview-import.tsx` loads a retailer page in a WebView and imports the receipt
+data it sends back over the `ReactNativeWebView` bridge and a `document.title`
+fallback channel. Previously **any** `{type:"extracted"}` message was imported,
+so a malicious or unexpected page could post fabricated receipt data (an integrity
+issue). **Fixed:** each extraction now generates a **single-use nonce** that is
+injected only into our extraction script (kept in the script's closure, never on
+`window`); the app imports an `extracted` payload only when it carries the matching
+nonce, and the nonce is cleared after one use to prevent replay. Restricting WebView
+*navigation* to the supported retailer domains is tracked as a separate hardening
+follow-up.
+
 ## Accepted risks & hardening recommendations
 
 1. **Build-time dependency advisories (accepted):** not shipped to users; re-audit
    on the next toolchain upgrade. See section 1.
 2. **`savedEmail` in AsyncStorage (low):** standard "remember email" UX; the email
    is low-sensitivity and only stored when the user opts in.
-3. **WebView importer has no navigation allow-list (hardening):**
-   `app/webview-import.tsx` loads the user-supplied retailer URL and runs scraping
-   JS on it. It only reads receipt data and posts it back over the standard
-   `ReactNativeWebView` bridge, so risk is low, but restricting navigation to the
-   supported retailer domains would harden it further.
+3. **WebView importer navigation allow-list (hardening, follow-up):** the data
+   channel is now nonce-protected (see section 4), but `app/webview-import.tsx`
+   still navigates to any user-supplied URL. Restricting navigation to the
+   supported retailer domains (HTTPS-only) would harden it further.
 4. **Placeholder config values (hygiene, not a vulnerability):** `app.json` still
    contains `REPLACE_WITH_…` placeholders for Sentry org/project and the Google
    iOS URL scheme. These should be filled in (or the plugins removed) before iOS
