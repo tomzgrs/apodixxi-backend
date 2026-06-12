@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image, Modal, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Image, Modal, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,18 +8,23 @@ import { useTheme } from '../../src/ThemeContext';
 import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
+import { useAuth } from '../../src/AuthContext';
 import { getStoreLogo } from '../../src/storeLogos';
 import { BarChart, DonutChart, DonutLegend, TrendIndicator } from '../../src/components/Charts';
 import { Recommendations } from '../../src/components/Recommendations';
 import AIAssistant from '../../src/components/AIAssistant';
-import AdBanner from '../../src/components/AdBanner';
-
+import CategoryDrilldown from '../../src/components/CategoryDrilldown';
+import { useConnectivity } from '../../src/hooks/useConnectivity';
 export default function DashboardScreen() {
   const { t, lang } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
+  const { user } = useAuth();
   const router = useRouter();
+  const online = useConnectivity();
+  const [fromCache, setFromCache] = useState(false);
   const [stats, setStats] = useState<any>(null);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [categoryStats, setCategoryStats] = useState<{ categories: any[]; grand_total: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [distributionMode, setDistributionMode] = useState<'total' | 'month'>('total');
@@ -36,13 +41,16 @@ export default function DashboardScreen() {
     try {
       const id = await api.getDeviceId();
       setDeviceId(id);
-      const [statsData, analyticsData, subStatus] = await Promise.all([
+      const [statsData, analyticsData, subStatus, catData] = await Promise.all([
         api.getStats(),
         api.getAnalytics(6),
-        api.getSubscriptionStatus().catch(() => ({ is_premium: false, app_name: 'apodixxi', days_remaining: null }))
+        api.getSubscriptionStatus().catch(() => ({ is_premium: false, app_name: 'apodixxi', days_remaining: null })),
+        api.getCategoryStats().catch(() => null),
       ]);
       setStats(statsData);
       setAnalytics(analyticsData);
+      setFromCache(!!(statsData && statsData.__fromCache));
+      if (catData) setCategoryStats(catData);
       if (subStatus) {
         setSubscriptionStatus(subStatus);
       }
@@ -99,7 +107,13 @@ export default function DashboardScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Καλώς ήρθατε 👋</Text>
-            <Text testID="app-title" style={styles.appTitle}>{subscriptionStatus.app_name}</Text>
+            {(subscriptionStatus.is_premium || user?.account_type === 'paid') ? (
+              <Text testID="app-title" style={styles.appTitle}>
+                apodixxi<Text style={{ color: '#f59e0b' }}>+</Text>
+              </Text>
+            ) : (
+              <Text testID="app-title" style={styles.appTitle}>apodixxi</Text>
+            )}
           </View>
           <TouchableOpacity 
             style={styles.settingsBtn}
@@ -108,6 +122,31 @@ export default function DashboardScreen() {
             <Ionicons name="settings-outline" size={24} color={theme.text} />
           </TouchableOpacity>
         </View>
+
+        {/* Cached-data notice (shown when serving offline data) */}
+        {fromCache && (
+          <View testID="dashboard-cached-notice" style={styles.cachedNotice}>
+            <Ionicons name="cloud-offline-outline" size={14} color={theme.textSecondary} />
+            <Text style={styles.cachedNoticeText}>{t('showing_cached')}</Text>
+          </View>
+        )}
+
+        {/* Recommendations & Promotions - visible to all users regardless of receipts */}
+        {deviceId && (
+          <Recommendations 
+            deviceId={deviceId} 
+            location="dashboard"
+            limit={5}
+            onPress={(rec) => {
+              if (rec.url) {
+                const cleanUrl = rec.url.startsWith('http') ? rec.url : 'https://' + rec.url;
+                Linking.openURL(cleanUrl).catch(() => {});
+              } else if (rec.store_name) {
+                router.push('/(tabs)/compare');
+              }
+            }}
+          />
+        )}
 
         {!hasData ? (
           /* Empty State */
@@ -209,20 +248,6 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Recommendations */}
-            {deviceId && (
-              <Recommendations 
-                deviceId={deviceId} 
-                location="dashboard"
-                limit={5}
-                onPress={(rec) => {
-                  if (rec.store_name) {
-                    router.push('/(tabs)/compare');
-                  }
-                }}
-              />
-            )}
-
             {/* Monthly Spending Chart */}
             {analytics && analytics.monthly_spending && analytics.monthly_spending.length > 0 && (
               <View style={styles.chartCard}>
@@ -243,6 +268,25 @@ export default function DashboardScreen() {
                     <Text style={styles.chartFooterValue}>{formatPrice(analytics.total_this_month)}</Text>
                   </View>
                 )}
+              </View>
+            )}
+
+            {/* Category Drill-down */}
+            {categoryStats && categoryStats.categories.length > 0 && (
+              <View style={styles.chartCard}>
+                <CategoryDrilldown
+  
+                  categories={categoryStats.categories}
+  
+                  grandTotal={categoryStats.grand_total}
+  
+                  onSubcategoryPress={(cat, sub) => {
+  
+                    router.push(`/category-products?category=${encodeURIComponent(cat)}&subcategory=${encodeURIComponent(sub)}`);
+  
+                  }}
+  
+                />
               </View>
             )}
 
@@ -428,9 +472,6 @@ export default function DashboardScreen() {
         )}
       </ScrollView>
       
-      {/* Sticky AdBanner for Free Users */}
-      <AdBanner position="bottom" />
-
       {/* AI Assistant Floating Button */}
       {deviceId && hasData && (
         <TouchableOpacity
@@ -465,7 +506,22 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
   },
   scroll: { 
     padding: Spacing.base,
-    paddingBottom: 80  // Extra padding for sticky AdBanner
+    paddingBottom: 80
+  },
+  cachedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm,
+    borderRadius: Radius.md,
+    backgroundColor: theme.surface,
+  },
+  cachedNoticeText: {
+    fontSize: Typography.xs,
+    color: theme.textSecondary,
+    fontWeight: Typography.medium,
   },
   center: { 
     flex: 1, 

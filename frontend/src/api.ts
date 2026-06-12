@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-const API_BASE = `${BACKEND_URL}/api`;
+import { API_BASE } from './services/config';
+import { httpFetch, withRetry, ApiError, isOfflineError } from './services/http';
+import { cache } from './services/cache';
 
 async function getStoredToken(): Promise<string | null> {
   if (Platform.OS === 'web') {
@@ -21,20 +21,54 @@ async function getDeviceId(): Promise<string> {
   return id;
 }
 
-async function request(path: string, options: RequestInit = {}) {
+async function request(
+  path: string,
+  options: RequestInit = {},
+  cfg: { retries?: number; timeoutMs?: number } = {},
+) {
   const url = `${API_BASE}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: { 
-      'Content-Type': 'application/json', 
-      ...(options.headers || {})  // Custom headers override defaults
-    },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+  const method = ((options.method as string) || 'GET').toUpperCase();
+  // Retry idempotent reads on connectivity failures; never auto-retry writes.
+  const retries = cfg.retries ?? (method === 'GET' ? 2 : 0);
+  return withRetry(async () => {
+    const res = await httpFetch(
+      url,
+      {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options.headers || {}), // Custom headers override defaults
+        },
+      },
+      cfg.timeoutMs,
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Request failed' }));
+      throw new ApiError(err.detail || `HTTP ${res.status}`, res.status);
+    }
+    return res.json();
+  }, { retries });
+}
+
+/**
+ * Wraps a read so its last successful result is cached and served when the
+ * device is offline. The returned payload is tagged with `__fromCache` so the
+ * UI can show a "showing saved data" hint.
+ */
+async function cachedGet<T extends object>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  try {
+    const data = await fetcher();
+    cache.set(key, data).catch(() => {});
+    return data;
+  } catch (e) {
+    if (isOfflineError(e)) {
+      const cached = await cache.get<T>(key);
+      if (cached) {
+        return { ...cached.data, __fromCache: true, __cachedAt: cached.t };
+      }
+    }
+    throw e;
   }
-  return res.json();
 }
 
 export const api = {
@@ -76,7 +110,7 @@ export const api = {
       type: 'text/xml',
     } as any);
     const url = `${API_BASE}/receipts/import-xml`;
-    const res = await fetch(url, { method: 'POST', body: formData });
+    const res = await httpFetch(url, { method: 'POST', body: formData }, 60000);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -96,7 +130,12 @@ export const api = {
     const device_id = await getDeviceId();
     const params = new URLSearchParams({ device_id, skip: String(skip), limit: String(limit) });
     if (search) params.append('search', search);
-    return request(`/receipts?${params}`);
+    const path = `/receipts?${params}`;
+    // Cache only the default (unfiltered first page) so it stays viewable offline.
+    if (!search && skip === 0) {
+      return cachedGet(`receipts:${device_id}`, () => request(path));
+    }
+    return request(path);
   },
 
   getReceipt: async (id: string) => {
@@ -118,12 +157,15 @@ export const api = {
 
   getStats: async () => {
     const device_id = await getDeviceId();
-    return request(`/stats?device_id=${device_id}`);
+    return cachedGet(`stats:${device_id}`, () => request(`/stats?device_id=${device_id}`));
   },
 
   getAnalytics: async (months: number = 6) => {
     const device_id = await getDeviceId();
-    return request(`/stats/analytics?device_id=${device_id}&months=${months}`);
+    return cachedGet(
+      `analytics:${device_id}:${months}`,
+      () => request(`/stats/analytics?device_id=${device_id}&months=${months}`),
+    );
   },
 
   getReceiptsByStore: async (storeName: string, skip = 0, limit = 100) => {
@@ -171,7 +213,7 @@ export const api = {
   // Export functions (requires auth token)
   checkExportAccess: async (accessToken: string) => {
     const url = `${API_BASE}/export/check-access`;
-    const res = await fetch(url, {
+    const res = await httpFetch(url, {
       headers: { 
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
@@ -186,11 +228,11 @@ export const api = {
 
   exportReceipts: async (accessToken: string): Promise<Blob> => {
     const url = `${API_BASE}/export/receipts`;
-    const res = await fetch(url, {
+    const res = await httpFetch(url, {
       headers: { 
         'Authorization': `Bearer ${accessToken}`,
       },
-    });
+    }, 60000);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Export failed' }));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -205,7 +247,7 @@ export const api = {
     if (accessToken) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
-    const res = await fetch(`${API_BASE}/subscription/status?device_id=${deviceId}`, {
+    const res = await httpFetch(`${API_BASE}/subscription/status?device_id=${deviceId}`, {
       headers
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -249,7 +291,7 @@ export const api = {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
     const params = new URLSearchParams({ description });
-    const res = await fetch(`${API_BASE}/products/prices?${params}`, { headers });
+    const res = await httpFetch(`${API_BASE}/products/prices?${params}`, { headers });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Request failed' }));
       throw new Error(err.detail || `HTTP ${res.status}`);

@@ -84,6 +84,12 @@ export const translations = {
     view_all: "Προβολή Όλων",
     no_data_yet: "Δεν υπάρχουν δεδομένα ακόμα",
     start_adding: "Ξεκινήστε προσθέτοντας αποδείξεις",
+    offline_banner: "Χωρίς σύνδεση στο διαδίκτυο",
+    back_online: "Η σύνδεση αποκαταστάθηκε",
+    retry: "Επανάληψη",
+    showing_cached: "Εμφάνιση αποθηκευμένων δεδομένων",
+    offline_no_data: "Χωρίς σύνδεση",
+    offline_no_data_desc: "Δεν υπάρχουν αποθηκευμένα δεδομένα. Συνδεθείτε στο διαδίκτυο και δοκιμάστε ξανά.",
   },
   en: {
     app_name: "apodixxi",
@@ -170,6 +176,12 @@ export const translations = {
     view_all: "View All",
     no_data_yet: "No data yet",
     start_adding: "Start by adding receipts",
+    offline_banner: "No internet connection",
+    back_online: "Connection restored",
+    retry: "Retry",
+    showing_cached: "Showing saved data",
+    offline_no_data: "No connection",
+    offline_no_data_desc: "No saved data available. Connect to the internet and try again.",
   }
 };
 

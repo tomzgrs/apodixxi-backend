@@ -10,6 +10,7 @@ import mobileAds from 'react-native-google-mobile-ads';
 import { AuthProvider, useAuth } from '../src/AuthContext';
 import { initSentry, Sentry } from '../src/sentry';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
+import { OfflineBanner } from '../src/components/OfflineBanner';
 
 // Initialize crash reporting as early as possible (no-op in dev / without DSN).
 initSentry();
@@ -119,6 +120,7 @@ function AppContent() {
   return (
     <I18nContext.Provider value={{ lang, setLang, t }}>
       <NavigationContent />
+      <OfflineBanner />
     </I18nContext.Provider>
   );
 }

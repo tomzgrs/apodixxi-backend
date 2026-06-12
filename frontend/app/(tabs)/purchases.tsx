@@ -9,16 +9,20 @@ import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants
 import { Typography, Spacing, Radius } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
+import { useConnectivity } from '../../src/hooks/useConnectivity';
 
 export default function PurchasesScreen() {
   const { t } = useContext(I18nContext);
   const { theme } = useTheme();
   const router = useRouter();
+  const online = useConnectivity();
   const [receipts, setReceipts] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const styles = createStyles(theme);
 
@@ -27,8 +31,11 @@ export default function PurchasesScreen() {
       const data = await api.getReceipts(0, 100, searchQuery);
       setReceipts(data.receipts);
       setTotal(data.total);
+      setFromCache(!!data.__fromCache);
+      setLoadError(false);
     } catch (e) {
       console.log('Load receipts error:', e);
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -50,9 +57,9 @@ export default function PurchasesScreen() {
     
     return (
       <TouchableOpacity
-        testID={`receipt-card-${item.id}`}
+        testID={`receipt-card-${item.id || item._id}`}
         style={styles.receiptCard}
-        onPress={() => router.push(`/receipt/${item.id}`)}
+        onPress={() => { const rid = item.id || item._id; if (rid) router.push(`/receipt/${rid}`); }}
         activeOpacity={0.7}
       >
         {logoUrl ? (
@@ -112,6 +119,14 @@ export default function PurchasesScreen() {
         </View>
       </View>
 
+      {/* Cached-data notice */}
+      {fromCache && receipts.length > 0 && (
+        <View testID="cached-notice" style={styles.cachedNotice}>
+          <Ionicons name="cloud-offline-outline" size={14} color={theme.textSecondary} />
+          <Text style={styles.cachedNoticeText}>{t('showing_cached')}</Text>
+        </View>
+      )}
+
       {/* Content */}
       {loading && !refreshing ? (
         <View style={styles.center}>
@@ -120,15 +135,27 @@ export default function PurchasesScreen() {
       ) : receipts.length === 0 ? (
         <View style={styles.empty}>
           <View style={styles.emptyIconContainer}>
-            <Ionicons name="receipt-outline" size={48} color={theme.primary} />
+            <Ionicons
+              name={loadError && !online ? 'cloud-offline-outline' : 'receipt-outline'}
+              size={48}
+              color={theme.primary}
+            />
           </View>
           <Text style={styles.emptyTitle}>
-            {search ? 'Δεν βρέθηκαν αποτελέσματα' : 'Δεν υπάρχουν αποδείξεις'}
+            {loadError && !online
+              ? t('offline_no_data')
+              : search
+                ? 'Δεν βρέθηκαν αποτελέσματα'
+                : 'Δεν υπάρχουν αποδείξεις'}
           </Text>
           <Text style={styles.emptyDesc}>
-            {search ? 'Δοκιμάστε διαφορετική αναζήτηση' : 'Προσθέστε την πρώτη σας απόδειξη'}
+            {loadError && !online
+              ? t('offline_no_data_desc')
+              : search
+                ? 'Δοκιμάστε διαφορετική αναζήτηση'
+                : 'Προσθέστε την πρώτη σας απόδειξη'}
           </Text>
-          {!search && (
+          {!search && !loadError && (
             <TouchableOpacity
               style={styles.addBtn}
               onPress={() => router.push('/(tabs)/add')}
@@ -141,7 +168,7 @@ export default function PurchasesScreen() {
       ) : (
         <FlatList
           data={receipts}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item.id || item._id || ''}
           renderItem={renderReceipt}
           contentContainerStyle={styles.list}
           refreshControl={
@@ -206,6 +233,24 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.text 
   },
   
+  // Cached notice
+  cachedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.base,
+    marginBottom: Spacing.sm,
+    borderRadius: Radius.md,
+    backgroundColor: theme.surface,
+  },
+  cachedNoticeText: {
+    fontSize: Typography.xs,
+    color: theme.textSecondary,
+    fontWeight: Typography.medium,
+  },
+
   // Content
   center: { 
     flex: 1, 
@@ -215,6 +260,7 @@ const createStyles = (theme: any) => StyleSheet.create({
   list: { 
     padding: Spacing.base,
     paddingTop: 0,
+    paddingBottom: 140,
   },
   separator: {
     height: Spacing.sm,
