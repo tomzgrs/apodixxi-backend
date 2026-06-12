@@ -142,7 +142,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // This ensures the device sees all user's receipts
     if (data.device_id) {
       await AsyncStorage.setItem('device_id', data.device_id);
-      console.log('Device ID synced:', data.device_id);
     }
     
     setAccessToken(data.access_token);
