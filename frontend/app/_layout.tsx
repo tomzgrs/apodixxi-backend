@@ -24,7 +24,7 @@ type I18nContextType = {
 export const I18nContext = createContext<I18nContextType>({
   lang: 'el',
   setLang: () => {},
-  t: (key) => key,
+  t: (key) => translations.el[key] || key,
 });
 
 export const useI18n = () => useContext(I18nContext);

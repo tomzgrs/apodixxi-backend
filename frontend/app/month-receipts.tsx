@@ -106,7 +106,7 @@ export default function MonthReceiptsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel={t('back')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="chevron-back" size={24} color={theme.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{monthName} {year}</Text>
@@ -134,12 +134,12 @@ export default function MonthReceiptsScreen() {
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{receipts.length}</Text>
-                <Text style={styles.statLabel}>{lang === 'el' ? 'Αποδείξεις' : 'Receipts'}</Text>
+                <Text style={styles.statLabel}>{t('total_receipts')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, { color: theme.primary }]}>{formatPrice(totalSpent)}</Text>
-                <Text style={styles.statLabel}>{lang === 'el' ? 'Σύνολο' : 'Total'}</Text>
+                <Text style={styles.statLabel}>{t('total')}</Text>
               </View>
             </View>
           </View>
@@ -147,14 +147,14 @@ export default function MonthReceiptsScreen() {
 
         {/* Receipt List */}
         <Text style={styles.sectionTitle}>
-          {lang === 'el' ? 'Αγορές αυτού του μήνα' : 'Purchases this month'}
+          {t('purchases_this_month')}
         </Text>
 
         {receipts.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="receipt-outline" size={48} color={theme.textMuted} />
             <Text style={styles.emptyText}>
-              {lang === 'el' ? 'Δεν υπάρχουν αγορές αυτόν τον μήνα' : 'No purchases this month'}
+              {t('no_purchases_this_month')}
             </Text>
           </View>
         ) : (
@@ -178,7 +178,7 @@ export default function MonthReceiptsScreen() {
                   <Text style={styles.receiptStore} numberOfLines={1}>{receipt.store_name}</Text>
                   <Text style={styles.receiptDate}>{receipt.date}</Text>
                   <Text style={styles.receiptItems}>
-                    {receipt.items?.length || 0} {lang === 'el' ? 'προϊόντα' : 'items'}
+                    {receipt.items?.length || 0} {t('products')}
                   </Text>
                 </View>
                 <View style={styles.receiptRight}>

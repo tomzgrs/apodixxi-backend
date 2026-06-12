@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { TouchableOpacity, Text, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { I18nContext } from '../../app/_layout';
 
 interface AppleSignInButtonProps {
   onSignIn: (data: {
@@ -23,6 +24,7 @@ export default function AppleSignInButton({
   setError,
   style,
 }: AppleSignInButtonProps) {
+  const { t } = useContext(I18nContext);
   const [isAvailable, setIsAvailable] = useState(false);
 
   useEffect(() => {
@@ -60,7 +62,7 @@ export default function AppleSignInButton({
       if (err.code === 'ERR_REQUEST_CANCELED') {
         return;
       }
-      setError(err.message || 'Αποτυχία σύνδεσης με Apple');
+      setError(err.message || t('apple_signin_failed'));
     } finally {
       setIsLoading(false);
     }
@@ -76,6 +78,8 @@ export default function AppleSignInButton({
       style={[styles.socialButton, style, isLoading && styles.buttonDisabled]}
       onPress={handleAppleSignIn}
       disabled={isLoading}
+      accessibilityRole="button"
+      accessibilityLabel={t('signin_with_apple')}
     >
       {isLoading ? (
         <ActivityIndicator color="#fff" size="small" />

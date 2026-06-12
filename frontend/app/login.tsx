@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { useTheme } from '../src/ThemeContext';
 import * as WebBrowser from 'expo-web-browser';
 import AppleSignInButton from '../src/components/AppleSignInButton';
 import GoogleSignInButton from '../src/components/GoogleSignInButton';
+import { I18nContext } from './_layout';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -31,6 +32,7 @@ type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password';
 export default function LoginScreen() {
   const { signUp, signIn, signInWithGoogle, signInWithApple, isLoading } = useAuth();
   const { theme, isDark } = useTheme();
+  const { t } = useContext(I18nContext);
   
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
@@ -64,23 +66,23 @@ export default function LoginScreen() {
     setError('');
     
     if (!email || !password) {
-      setError('Παρακαλώ συμπληρώστε όλα τα πεδία');
+      setError(t('fill_all_fields'));
       return;
     }
 
     if (!validateEmail(email)) {
-      setError('Μη έγκυρη διεύθυνση email');
+      setError(t('invalid_email'));
       return;
     }
 
     if (password.length < 8) {
-      setError('Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες');
+      setError(t('password_min_8'));
       return;
     }
 
     if (mode === 'signup') {
       if (password !== confirmPassword) {
-        setError('Οι κωδικοί δεν ταιριάζουν');
+        setError(t('passwords_no_match'));
         return;
       }
     }
@@ -97,7 +99,7 @@ export default function LoginScreen() {
         }
       }
     } catch (err: any) {
-      setError(err.message || 'Κάτι πήγε στραβά');
+      setError(err.message || t('something_went_wrong'));
     }
   };
 
@@ -107,11 +109,11 @@ export default function LoginScreen() {
     const handleForgotPassword = async () => {
       setError('');
       if (!email) {
-        setError('Παρακαλώ εισάγετε το email σας');
+        setError(t('enter_your_email'));
         return;
       }
       if (!validateEmail(email)) {
-        setError('Μη έγκυρη διεύθυνση email');
+        setError(t('invalid_email'));
         return;
       }
       
@@ -127,17 +129,17 @@ export default function LoginScreen() {
           data = await response.json();
         } catch {
           if (!response.ok) {
-            setError('Σφάλμα διακομιστή. Παρακαλώ δοκιμάστε ξανά αργότερα.');
+            setError(t('server_error_retry'));
             return;
           }
         }
         if (response.ok) {
           setForgotPasswordSuccess(true);
         } else {
-          setError(data.detail || 'Κάτι πήγε στραβά');
+          setError(data.detail || t('something_went_wrong'));
         }
       } catch (err: any) {
-        setError('Σφάλμα σύνδεσης. Ελέγξτε τη σύνδεσή σας.');
+        setError(t('connection_error'));
       } finally {
         setForgotPasswordLoading(false);
       }
@@ -151,32 +153,36 @@ export default function LoginScreen() {
               <View style={styles.logoContainer}>
                 <Ionicons name="mail-open" size={40} color={theme.primary} />
               </View>
-              <Text style={styles.title}>Ελέγξτε το Email σας</Text>
+              <Text style={styles.title}>{t('check_your_email')}</Text>
               <Text style={styles.subtitle}>
-                Αν υπάρχει λογαριασμός με αυτό το email, θα λάβετε οδηγίες για επαναφορά κωδικού.
+                {t('reset_email_sent')}
               </Text>
             </View>
             
             <View style={styles.form}>
               <TouchableOpacity 
                 style={styles.primaryButton}
+                accessibilityRole="button"
+                accessibilityLabel={t('have_reset_code')}
                 onPress={() => {
                   setMode('reset-password');
                   setForgotPasswordSuccess(false);
                 }}
               >
-                <Text style={styles.primaryButtonText}>Έχω τον κωδικό επαναφοράς</Text>
+                <Text style={styles.primaryButtonText}>{t('have_reset_code')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 style={[styles.primaryButton, { backgroundColor: theme.card, marginTop: 12 }]}
+                accessibilityRole="button"
+                accessibilityLabel={t('back_to_login')}
                 onPress={() => {
                   setMode('login');
                   setForgotPasswordSuccess(false);
                   setEmail('');
                 }}
               >
-                <Text style={[styles.primaryButtonText, { color: theme.text }]}>Επιστροφή στη σύνδεση</Text>
+                <Text style={[styles.primaryButtonText, { color: theme.text }]}>{t('back_to_login')}</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -192,14 +198,20 @@ export default function LoginScreen() {
         >
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <View style={styles.header}>
-              <TouchableOpacity onPress={() => setMode('login')} style={styles.backButton}>
+              <TouchableOpacity
+                onPress={() => setMode('login')}
+                style={styles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel={t('back')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name="arrow-back" size={24} color={theme.text} />
               </TouchableOpacity>
               <View style={styles.logoContainer}>
                 <Ionicons name="key" size={40} color={theme.primary} />
               </View>
-              <Text style={styles.title}>Ξέχασα τον κωδικό</Text>
-              <Text style={styles.subtitle}>Εισάγετε το email σας για να λάβετε κωδικό επαναφοράς</Text>
+              <Text style={styles.title}>{t('forgot_password_title')}</Text>
+              <Text style={styles.subtitle}>{t('forgot_password_desc')}</Text>
             </View>
 
             <View style={styles.form}>
@@ -209,6 +221,7 @@ export default function LoginScreen() {
                   style={styles.input}
                   placeholder="Email"
                   placeholderTextColor={theme.textSecondary}
+                  accessibilityLabel={t('email')}
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
@@ -223,11 +236,13 @@ export default function LoginScreen() {
                 style={[styles.primaryButton, forgotPasswordLoading && styles.buttonDisabled]} 
                 onPress={handleForgotPassword}
                 disabled={forgotPasswordLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('send_code')}
               >
                 {forgotPasswordLoading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Αποστολή κωδικού</Text>
+                  <Text style={styles.primaryButtonText}>{t('send_code')}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -242,11 +257,11 @@ export default function LoginScreen() {
     const handleResetPassword = async () => {
       setError('');
       if (!resetToken) {
-        setError('Παρακαλώ εισάγετε τον κωδικό επαναφοράς');
+        setError(t('enter_reset_code'));
         return;
       }
       if (!newPassword || newPassword.length < 8) {
-        setError('Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες');
+        setError(t('password_min_8'));
         return;
       }
       
@@ -262,14 +277,14 @@ export default function LoginScreen() {
           data = await response.json();
         } catch {
           if (!response.ok) {
-            setError('Σφάλμα διακομιστή. Παρακαλώ δοκιμάστε ξανά αργότερα.');
+            setError(t('server_error_retry'));
             return;
           }
         }
         if (response.ok) {
           Alert.alert(
-            'Επιτυχία!',
-            'Ο κωδικός σας άλλαξε. Μπορείτε τώρα να συνδεθείτε.',
+            t('success'),
+            t('password_changed'),
             [{ text: 'OK', onPress: () => {
               setMode('login');
               setResetToken('');
@@ -277,10 +292,10 @@ export default function LoginScreen() {
             }}]
           );
         } else {
-          setError(data.detail || 'Κάτι πήγε στραβά');
+          setError(data.detail || t('something_went_wrong'));
         }
       } catch (err: any) {
-        setError('Σφάλμα σύνδεσης. Ελέγξτε τη σύνδεσή σας.');
+        setError(t('connection_error'));
       } finally {
         setForgotPasswordLoading(false);
       }
@@ -294,14 +309,20 @@ export default function LoginScreen() {
         >
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <View style={styles.header}>
-              <TouchableOpacity onPress={() => setMode('forgot-password')} style={styles.backButton}>
+              <TouchableOpacity
+                onPress={() => setMode('forgot-password')}
+                style={styles.backButton}
+                accessibilityRole="button"
+                accessibilityLabel={t('back')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name="arrow-back" size={24} color={theme.text} />
               </TouchableOpacity>
               <View style={styles.logoContainer}>
                 <Ionicons name="lock-open" size={40} color={theme.primary} />
               </View>
-              <Text style={styles.title}>Νέος Κωδικός</Text>
-              <Text style={styles.subtitle}>Εισάγετε τον κωδικό που λάβατε στο email</Text>
+              <Text style={styles.title}>{t('new_password_title')}</Text>
+              <Text style={styles.subtitle}>{t('enter_code_from_email')}</Text>
             </View>
 
             <View style={styles.form}>
@@ -311,6 +332,7 @@ export default function LoginScreen() {
                   style={[styles.input, { letterSpacing: 4, fontWeight: '600', fontSize: 18 }]}
                   placeholder="000000"
                   placeholderTextColor={theme.textSecondary}
+                  accessibilityLabel={t('enter_reset_code')}
                   value={resetToken}
                   onChangeText={setResetToken}
                   autoCapitalize="none"
@@ -324,13 +346,20 @@ export default function LoginScreen() {
                 <Ionicons name="lock-closed" size={20} color={theme.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Νέος κωδικός"
+                  placeholder={t('new_password')}
                   placeholderTextColor={theme.textSecondary}
+                  accessibilityLabel={t('new_password')}
                   value={newPassword}
                   onChangeText={setNewPassword}
                   secureTextEntry={!showPassword}
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.eyeButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('toggle_password_visibility')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <Ionicons name={showPassword ? "eye-off" : "eye"} size={20} color={theme.textSecondary} />
                 </TouchableOpacity>
               </View>
@@ -341,11 +370,13 @@ export default function LoginScreen() {
                 style={[styles.primaryButton, forgotPasswordLoading && styles.buttonDisabled]} 
                 onPress={handleResetPassword}
                 disabled={forgotPasswordLoading}
+                accessibilityRole="button"
+                accessibilityLabel={t('change_password')}
               >
                 {forgotPasswordLoading ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Αλλαγή κωδικού</Text>
+                  <Text style={styles.primaryButtonText}>{t('change_password')}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -370,7 +401,7 @@ export default function LoginScreen() {
             </View>
             <Text style={styles.title}>apodixxi</Text>
             <Text style={styles.subtitle}>
-              {mode === 'login' ? 'Καλώς ήρθατε!' : 'Δημιουργία λογαριασμού'}
+              {mode === 'login' ? t('welcome') : t('create_account')}
             </Text>
           </View>
 
@@ -381,8 +412,9 @@ export default function LoginScreen() {
                 <Ionicons name="person" size={20} color={theme.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Ονοματεπώνυμο"
+                  placeholder={t('full_name')}
                   placeholderTextColor={theme.textSecondary}
+                  accessibilityLabel={t('full_name')}
                   value={name}
                   onChangeText={setName}
                   autoCapitalize="words"
@@ -396,6 +428,7 @@ export default function LoginScreen() {
                 style={styles.input}
                 placeholder="Email"
                 placeholderTextColor={theme.textSecondary}
+                accessibilityLabel={t('email')}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -407,13 +440,20 @@ export default function LoginScreen() {
               <Ionicons name="lock-closed" size={20} color={theme.textSecondary} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Κωδικός"
+                placeholder={t('password')}
                 placeholderTextColor={theme.textSecondary}
+                accessibilityLabel={t('password')}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
               />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeButton}
+                accessibilityRole="button"
+                accessibilityLabel={t('toggle_password_visibility')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name={showPassword ? "eye-off" : "eye"} size={20} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -423,8 +463,9 @@ export default function LoginScreen() {
                 <Ionicons name="lock-closed" size={20} color={theme.textSecondary} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Επιβεβαίωση κωδικού"
+                  placeholder={t('confirm_password')}
                   placeholderTextColor={theme.textSecondary}
+                  accessibilityLabel={t('confirm_password')}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   secureTextEntry={!showPassword}
@@ -440,12 +481,14 @@ export default function LoginScreen() {
                 style={styles.rememberMeRow}
                 onPress={() => setRememberMe(v => !v)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={t('remember_me')}
               >
                 <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
                   {rememberMe && <Ionicons name="checkmark" size={13} color="#fff" />}
                 </View>
                 <Text style={[styles.rememberMeText, { color: theme.textSecondary }]}>
-                  Να με θυμάσαι
+                  {t('remember_me')}
                 </Text>
               </TouchableOpacity>
             )}
@@ -455,8 +498,10 @@ export default function LoginScreen() {
               <TouchableOpacity 
                 style={styles.forgotPasswordContainer}
                 onPress={() => setMode('forgot-password' as AuthMode)}
+                accessibilityRole="button"
+                accessibilityLabel={t('forgot_my_password')}
               >
-                <Text style={styles.forgotPasswordText}>Ξέχασα τον κωδικό μου</Text>
+                <Text style={styles.forgotPasswordText}>{t('forgot_my_password')}</Text>
               </TouchableOpacity>
             )}
 
@@ -464,12 +509,14 @@ export default function LoginScreen() {
               style={[styles.primaryButton, isLoading && styles.buttonDisabled]} 
               onPress={handleEmailAuth}
               disabled={isLoading}
+              accessibilityRole="button"
+              accessibilityLabel={mode === 'login' ? t('login') : t('signup')}
             >
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.primaryButtonText}>
-                  {mode === 'login' ? 'Σύνδεση' : 'Εγγραφή'}
+                  {mode === 'login' ? t('login') : t('signup')}
                 </Text>
               )}
             </TouchableOpacity>
@@ -478,7 +525,7 @@ export default function LoginScreen() {
           {/* Divider */}
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>ή συνεχίστε με</Text>
+            <Text style={styles.dividerText}>{t('or_continue_with')}</Text>
             <View style={styles.dividerLine} />
           </View>
 
@@ -503,21 +550,25 @@ export default function LoginScreen() {
           {/* Toggle Login/Signup */}
           <View style={styles.toggleContainer}>
             <Text style={styles.toggleText}>
-              {mode === 'login' ? 'Δεν έχετε λογαριασμό;' : 'Έχετε ήδη λογαριασμό;'}
+              {mode === 'login' ? t('no_account') : t('have_account')}
             </Text>
-            <TouchableOpacity onPress={() => {
-              setMode(mode === 'login' ? 'signup' : 'login');
-              setError('');
-            }}>
+            <TouchableOpacity
+              onPress={() => {
+                setMode(mode === 'login' ? 'signup' : 'login');
+                setError('');
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={mode === 'login' ? t('signup') : t('login')}
+            >
               <Text style={styles.toggleLink}>
-                {mode === 'login' ? 'Εγγραφή' : 'Σύνδεση'}
+                {mode === 'login' ? t('signup') : t('login')}
               </Text>
             </TouchableOpacity>
           </View>
           
           {/* App Version */}
           <Text style={styles.versionText}>
-            Έκδοση {APP_VERSION} ({BUILD_NUMBER})
+            {t('version')} {APP_VERSION} ({BUILD_NUMBER})
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

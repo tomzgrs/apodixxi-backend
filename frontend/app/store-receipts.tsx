@@ -12,7 +12,7 @@ import { api } from '../src/api';
 
 export default function StoreReceiptsScreen() {
   const { store } = useLocalSearchParams<{ store: string }>();
-  const { t, lang } = useContext(I18nContext);
+  const { t } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
   const router = useRouter();
   const [receipts, setReceipts] = useState<any[]>([]);
@@ -56,7 +56,7 @@ export default function StoreReceiptsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel={t('back')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Ionicons name="chevron-back" size={24} color={theme.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{store}</Text>
@@ -88,12 +88,12 @@ export default function StoreReceiptsScreen() {
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{receipts.length}</Text>
-                <Text style={styles.statLabel}>{lang === 'el' ? 'Αποδείξεις' : 'Receipts'}</Text>
+                <Text style={styles.statLabel}>{t('total_receipts')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, { color: theme.primary }]}>{formatPrice(totalSpent)}</Text>
-                <Text style={styles.statLabel}>{lang === 'el' ? 'Σύνολο' : 'Total'}</Text>
+                <Text style={styles.statLabel}>{t('total')}</Text>
               </View>
             </View>
           </View>
@@ -101,14 +101,14 @@ export default function StoreReceiptsScreen() {
 
         {/* Receipt List */}
         <Text style={styles.sectionTitle}>
-          {lang === 'el' ? 'Όλες οι αγορές' : 'All purchases'}
+          {t('all_purchases')}
         </Text>
 
         {receipts.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="receipt-outline" size={48} color={theme.textMuted} />
             <Text style={styles.emptyText}>
-              {lang === 'el' ? 'Δεν υπάρχουν αποδείξεις' : 'No receipts found'}
+              {t('no_receipts')}
             </Text>
           </View>
         ) : (
@@ -118,6 +118,8 @@ export default function StoreReceiptsScreen() {
               style={styles.receiptCard}
               onPress={() => router.push(`/receipt/${receipt.id}`)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={receipt.store_name || store}
             >
               <View style={styles.receiptDate}>
                 <Ionicons name="calendar-outline" size={16} color={theme.textSecondary} />
@@ -125,7 +127,7 @@ export default function StoreReceiptsScreen() {
               </View>
               <View style={styles.receiptInfo}>
                 <Text style={styles.receiptItems}>
-                  {receipt.items?.length || 0} {lang === 'el' ? 'προϊόντα' : 'items'}
+                  {receipt.items?.length || 0} {t('products')}
                 </Text>
                 {receipt.receipt_number && (
                   <Text style={styles.receiptNumber}>#{receipt.receipt_number}</Text>

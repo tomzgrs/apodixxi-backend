@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
 import { useAuth } from '../AuthContext';
+import { I18nContext } from '../../app/_layout';
+import { TranslationKey } from '../i18n';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -34,17 +36,17 @@ interface SubscriptionPlan {
 const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
     id: PRODUCT_IDS.MONTHLY,
-    title: 'apodixxi+ Μηνιαία',
-    description: 'Ξεκλείδωσε όλες τις δυνατότητες',
+    title: 'plan_monthly_title',
+    description: 'plan_unlock_all',
     price: '€2.99',
-    period: '/μήνα',
+    period: 'per_month',
   },
   {
     id: PRODUCT_IDS.YEARLY,
-    title: 'apodixxi+ Ετήσια',
-    description: 'Εξοικονόμησε 40%!',
+    title: 'plan_yearly_title',
+    description: 'plan_save_40',
     price: '€19.99',
-    period: '/έτος',
+    period: 'per_year',
     popular: true,
   },
 ];
@@ -56,6 +58,7 @@ interface InAppPurchaseScreenProps {
 
 export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InAppPurchaseScreenProps) {
   const { theme, isDark } = useTheme();
+  const { t } = useContext(I18nContext);
   const { user, refreshUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [purchaseLoading, setPurchaseLoading] = useState<string | null>(null);
@@ -67,12 +70,12 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
     
     // Simulate purchase flow - in production, this would use react-native-iap
     Alert.alert(
-      'In-App Purchases',
-      'Οι αγορές μέσα στην εφαρμογή θα ενεργοποιηθούν σύντομα. Επικοινώνησε μαζί μας για να αναβαθμίσεις τον λογαριασμό σου.',
+      t('iap_title'),
+      t('iap_coming_soon_msg'),
       [
-        { text: 'Ακύρωση', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         { 
-          text: 'Επικοινωνία', 
+          text: t('contact'), 
           onPress: () => Linking.openURL('mailto:support@apodixxi.app?subject=Premium%20Αναβάθμιση')
         }
       ]
@@ -91,16 +94,16 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
         if (response.ok) {
           const data = await response.json();
           if (data.is_premium) {
-            Alert.alert('Επιτυχία', 'Οι αγορές σου επαναφέρθηκαν!');
+            Alert.alert(t('success_title'), t('purchases_restored'));
             refreshUser?.();
             onPurchaseComplete?.();
           } else {
-            Alert.alert('Πληροφορία', 'Δεν βρέθηκαν προηγούμενες αγορές.');
+            Alert.alert(t('info_title'), t('no_previous_purchases'));
           }
         }
       }
     } catch (error) {
-      Alert.alert('Σφάλμα', 'Η επαναφορά αγορών απέτυχε.');
+      Alert.alert(t('error'), t('restore_failed'));
     }
     
     setLoading(false);
@@ -109,19 +112,25 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
   const styles = createStyles(theme, isDark);
 
   const features = [
-    { icon: 'download-outline', text: 'Εξαγωγή σε Excel' },
-    { icon: 'analytics-outline', text: 'Προηγμένα στατιστικά' },
-    { icon: 'sparkles-outline', text: 'AI Προτάσεις εξοικονόμησης' },
-    { icon: 'notifications-outline', text: 'Ειδοποιήσεις τιμών' },
-    { icon: 'shield-checkmark-outline', text: 'Χωρίς διαφημίσεις' },
-    { icon: 'cloud-upload-outline', text: 'Cloud backup' },
+    { icon: 'download-outline', text: t('feature_excel_export') },
+    { icon: 'analytics-outline', text: t('feature_advanced_stats') },
+    { icon: 'sparkles-outline', text: t('feature_ai_savings') },
+    { icon: 'notifications-outline', text: t('feature_price_alerts') },
+    { icon: 'shield-checkmark-outline', text: t('feature_no_ads') },
+    { icon: 'cloud-upload-outline', text: t('feature_cloud_backup') },
   ];
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+        <TouchableOpacity
+          onPress={onClose}
+          style={styles.closeButton}
+          accessibilityRole="button"
+          accessibilityLabel={t('close')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Ionicons name="close" size={24} color={theme.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>apodixxi+</Text>
@@ -134,15 +143,15 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
           <View style={styles.premiumBadge}>
             <Ionicons name="star" size={24} color="#FFD700" />
           </View>
-          <Text style={styles.heroTitle}>Αναβάθμισε στο Premium</Text>
+          <Text style={styles.heroTitle}>{t('upgrade_to_premium')}</Text>
           <Text style={styles.heroSubtitle}>
-            Ξεκλείδωσε όλες τις δυνατότητες και πάρε τον πλήρη έλεγχο των εξόδων σου
+            {t('premium_hero_subtitle')}
           </Text>
         </View>
 
         {/* Features */}
         <View style={styles.featuresSection}>
-          <Text style={styles.sectionTitle}>Τι περιλαμβάνει:</Text>
+          <Text style={styles.sectionTitle}>{t('whats_included')}</Text>
           <View style={styles.featuresGrid}>
             {features.map((feature, index) => (
               <View key={index} style={styles.featureItem}>
@@ -167,24 +176,26 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
                 ]}
                 onPress={() => handlePurchase(plan.id)}
                 disabled={purchaseLoading !== null}
+                accessibilityRole="button"
+                accessibilityLabel={t(plan.title as TranslationKey)}
               >
                 {plan.popular && (
                   <View style={styles.popularBadge}>
-                    <Text style={styles.popularBadgeText}>Δημοφιλές</Text>
+                    <Text style={styles.popularBadgeText}>{t('popular_badge')}</Text>
                   </View>
                 )}
                 <Text style={[styles.planTitle, plan.popular && styles.popularText]}>
-                  {plan.title}
+                  {t(plan.title as TranslationKey)}
                 </Text>
                 <Text style={[styles.planDescription, plan.popular && styles.popularTextLight]}>
-                  {plan.description}
+                  {t(plan.description as TranslationKey)}
                 </Text>
                 <View style={styles.priceContainer}>
                   <Text style={[styles.planPrice, plan.popular && styles.popularText]}>
                     {plan.price}
                   </Text>
                   <Text style={[styles.planPeriod, plan.popular && styles.popularTextLight]}>
-                    {plan.period}
+                    {t(plan.period as TranslationKey)}
                   </Text>
                 </View>
                 {purchaseLoading === plan.id ? (
@@ -192,7 +203,7 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
                 ) : (
                   <View style={[styles.purchaseButton, plan.popular && styles.popularButton]}>
                     <Text style={[styles.purchaseButtonText, plan.popular && styles.popularButtonText]}>
-                      Επιλογή
+                      {t('select')}
                     </Text>
                   </View>
                 )}
@@ -205,19 +216,23 @@ export default function InAppPurchaseScreen({ onClose, onPurchaseComplete }: InA
         <View style={styles.noticeContainer}>
           <Ionicons name="information-circle-outline" size={20} color={theme.textSecondary} />
           <Text style={styles.noticeText}>
-            Οι αγορές μέσα στην εφαρμογή έρχονται σύντομα. Επικοινώνησε μαζί μας για premium πρόσβαση.
+            {t('iap_notice')}
           </Text>
         </View>
 
         {/* Restore Purchases */}
-        <TouchableOpacity style={styles.restoreButton} onPress={handleRestorePurchases}>
-          <Text style={styles.restoreButtonText}>Επαναφορά αγορών</Text>
+        <TouchableOpacity
+          style={styles.restoreButton}
+          onPress={handleRestorePurchases}
+          accessibilityRole="button"
+          accessibilityLabel={t('restore_purchases')}
+        >
+          <Text style={styles.restoreButtonText}>{t('restore_purchases')}</Text>
         </TouchableOpacity>
 
         {/* Terms */}
         <Text style={styles.terms}>
-          Η συνδρομή ανανεώνεται αυτόματα εκτός αν ακυρωθεί τουλάχιστον 24 ώρες πριν τη λήξη. 
-          Η χρέωση γίνεται μέσω του λογαριασμού σου {Platform.OS === 'ios' ? 'Apple' : 'Google Play'}.
+          {t('terms_subscription')}{Platform.OS === 'ios' ? 'Apple' : 'Google Play'}.
         </Text>
       </ScrollView>
     </View>

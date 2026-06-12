@@ -12,7 +12,7 @@ import { api } from '../../src/api';
 type Tab = 'url' | 'manual';
 
 export default function AddReceiptScreen() {
-  const { t, lang } = useContext(I18nContext);
+  const { t } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('url');
@@ -41,14 +41,12 @@ export default function AddReceiptScreen() {
       if (result.status === 'duplicate') {
         setLoading(false);
         Alert.alert(
-          lang === 'el' ? 'Απόδειξη υπάρχει ήδη' : 'Receipt already exists',
-          lang === 'el' 
-            ? `Αυτή η απόδειξη έχει ήδη εισαχθεί από ${result.existing_receipt.store_name} στις ${result.existing_receipt.date}. Θέλετε να την εισάγετε ξανά;`
-            : `This receipt was already imported from ${result.existing_receipt.store_name} on ${result.existing_receipt.date}. Do you want to import it again?`,
+          t('receipt_exists'),
+          `${t('receipt_duplicate_from')}${result.existing_receipt.store_name}${t('receipt_duplicate_on')}${result.existing_receipt.date}${t('receipt_duplicate_again')}`,
           [
-            { text: lang === 'el' ? 'Προβολή υπάρχουσας' : 'View existing', onPress: () => router.push(`/receipt/${result.existing_receipt.id}`) },
-            { text: lang === 'el' ? 'Εισαγωγή ξανά' : 'Import again', onPress: () => handleUrlImport(true) },
-            { text: lang === 'el' ? 'Άκυρο' : 'Cancel', style: 'cancel' }
+            { text: t('view_existing'), onPress: () => router.push(`/receipt/${result.existing_receipt.id}`) },
+            { text: t('import_again'), onPress: () => handleUrlImport(true) },
+            { text: t('cancel_short'), style: 'cancel' }
           ]
         );
         return;
@@ -259,6 +257,8 @@ export default function AddReceiptScreen() {
             style={styles.scannerBtn}
             onPress={() => router.push('/scanner')}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={t('scan_qr')}
           >
             <View style={styles.scannerIcon}>
               <Ionicons name="qr-code" size={26} color={theme.textInverse} />
@@ -279,6 +279,8 @@ export default function AddReceiptScreen() {
                 style={[styles.tab, activeTab === tab && styles.tabActive]}
                 onPress={() => setActiveTab(tab)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={tab === 'url' ? t('paste_url') : t('manual_entry')}
               >
                 <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
                   {tab === 'url' ? t('paste_url') : t('manual_entry')}
@@ -296,6 +298,7 @@ export default function AddReceiptScreen() {
                 style={styles.input}
                 placeholder={t('url_placeholder')}
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel={t('url_placeholder')}
                 value={url}
                 onChangeText={setUrl}
                 autoCapitalize="none"
@@ -308,6 +311,8 @@ export default function AddReceiptScreen() {
                 onPress={() => handleUrlImport(false)}
                 disabled={!url.trim() || loading}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={t('import_btn')}
               >
                 {loading ? <ActivityIndicator color={theme.textInverse} /> : <Text style={styles.primaryBtnText}>{t('import_btn')}</Text>}
               </TouchableOpacity>
@@ -317,7 +322,7 @@ export default function AddReceiptScreen() {
                 {['Σκλαβενίτης', 'Μασούτης', 'Jumbo', 'My Market', 'Lidl'].map(s => (
                   <Text key={s} style={styles.supportedItem}>✓ {s}</Text>
                 ))}
-                <Text style={[styles.supportedTitle, { marginTop: 12 }]}>{lang === 'el' ? 'Με WebView (ανοίγει στην εφαρμογή):' : 'With WebView (opens in app):'}</Text>
+                <Text style={[styles.supportedTitle, { marginTop: 12 }]}>{t('with_webview')}</Text>
                 {['ΑΒ Βασιλόπουλος', 'Market In', 'Bazaar'].map(s => (
                   <Text key={s} style={styles.supportedItem}>⎔ {s}</Text>
                 ))}
@@ -333,6 +338,7 @@ export default function AddReceiptScreen() {
                 style={styles.input}
                 placeholder={t('enter_store_name')}
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel={t('enter_store_name')}
                 value={storeName}
                 onChangeText={handleStoreNameChange}
                 autoCapitalize="characters"
@@ -342,6 +348,7 @@ export default function AddReceiptScreen() {
                 style={styles.input}
                 placeholder={t('enter_date')}
                 placeholderTextColor={theme.textMuted}
+                accessibilityLabel={t('date')}
                 value={dateStr}
                 onChangeText={setDateStr}
               />
@@ -353,6 +360,7 @@ export default function AddReceiptScreen() {
                     style={[styles.input, { flex: 2 }]}
                     placeholder={t('enter_description')}
                     placeholderTextColor={theme.textMuted}
+                    accessibilityLabel={t('enter_description')}
                     value={item.description}
                     onChangeText={(v) => handleDescriptionChange(i, v)}
                     autoCapitalize="characters"
@@ -361,6 +369,7 @@ export default function AddReceiptScreen() {
                     style={[styles.input, { width: 50 }]}
                     placeholder={t('enter_quantity')}
                     placeholderTextColor={theme.textMuted}
+                    accessibilityLabel={t('quantity')}
                     value={item.quantity}
                     onChangeText={(v) => updateManualItem(i, 'quantity', v)}
                     keyboardType="numeric"
@@ -369,19 +378,32 @@ export default function AddReceiptScreen() {
                     style={[styles.input, { width: 70 }]}
                     placeholder={t('enter_price')}
                     placeholderTextColor={theme.textMuted}
+                    accessibilityLabel={t('price')}
                     value={item.price}
                     onChangeText={(v) => updateManualItem(i, 'price', v)}
                     keyboardType="numeric"
                   />
                   {manualItems.length > 1 && (
-                    <TouchableOpacity onPress={() => removeManualItem(i)} style={styles.removeBtn}>
+                    <TouchableOpacity
+                      onPress={() => removeManualItem(i)}
+                      style={styles.removeBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('remove_item')}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
                       <Text style={styles.removeBtnText}>✕</Text>
                     </TouchableOpacity>
                   )}
                 </View>
               ))}
 
-              <TouchableOpacity testID="add-item-btn" style={styles.addItemBtn} onPress={addManualItem}>
+              <TouchableOpacity
+                testID="add-item-btn"
+                style={styles.addItemBtn}
+                onPress={addManualItem}
+                accessibilityRole="button"
+                accessibilityLabel={t('add_item')}
+              >
                 <Text style={styles.addItemText}>+ {t('add_item')}</Text>
               </TouchableOpacity>
 
@@ -395,6 +417,8 @@ export default function AddReceiptScreen() {
                 onPress={handleManualSave}
                 disabled={loading}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={t('save_receipt')}
               >
                 {loading ? <ActivityIndicator color={theme.textInverse} /> : <Text style={styles.primaryBtnText}>{t('save_receipt')}</Text>}
               </TouchableOpacity>

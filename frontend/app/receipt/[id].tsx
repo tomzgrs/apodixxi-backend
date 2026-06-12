@@ -13,7 +13,7 @@ import PriceComparisonSheet from '../../src/components/PriceComparisonSheet';
 
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t, lang } = useContext(I18nContext);
+  const { t } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
   const router = useRouter();
   const [receipt, setReceipt] = useState<any>(null);
@@ -289,11 +289,25 @@ export default function ReceiptDetailScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity testID="back-btn" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          testID="back-btn"
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('back')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Ionicons name="chevron-back" size={24} color={theme.primary} />
         </TouchableOpacity>
         <Text style={styles.topTitle}>{t('receipt_detail')}</Text>
-        <TouchableOpacity testID="delete-receipt-btn" onPress={handleDelete} style={styles.deleteBtn}>
+        <TouchableOpacity
+          testID="delete-receipt-btn"
+          onPress={handleDelete}
+          style={styles.deleteBtn}
+          accessibilityRole="button"
+          accessibilityLabel={t('delete')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <Ionicons name="trash-outline" size={20} color={theme.error} />
         </TouchableOpacity>
       </View>
@@ -346,10 +360,10 @@ export default function ReceiptDetailScreen() {
           {/* Table Header */}
           <View style={styles.tableHeader}>
             <Text style={[styles.tableHeaderText, styles.colNo]}>#</Text>
-            <Text style={[styles.tableHeaderText, styles.colDesc]}>{lang === 'el' ? 'Περιγραφή' : 'Description'}</Text>
-            <Text style={[styles.tableHeaderText, styles.colQty]}>{lang === 'el' ? 'Ποσ.' : 'Qty'}</Text>
-            <Text style={[styles.tableHeaderText, styles.colPrice]}>{lang === 'el' ? 'Τιμή' : 'Price'}</Text>
-            <Text style={[styles.tableHeaderText, styles.colTotal]}>{lang === 'el' ? 'Σύνολο' : 'Total'}</Text>
+            <Text style={[styles.tableHeaderText, styles.colDesc]}>{t('description')}</Text>
+            <Text style={[styles.tableHeaderText, styles.colQty]}>{t('enter_quantity')}</Text>
+            <Text style={[styles.tableHeaderText, styles.colPrice]}>{t('price')}</Text>
+            <Text style={[styles.tableHeaderText, styles.colTotal]}>{t('total')}</Text>
           </View>
           
           {/* Table Rows */}
@@ -374,6 +388,9 @@ export default function ReceiptDetailScreen() {
               <TouchableOpacity
                 style={styles.heartBtn}
                 onPress={() => toggleFavorite(item.description)}
+                accessibilityRole="button"
+                accessibilityLabel={t('toggle_favorite')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Ionicons
                   name={favoriteNames.has((item.description || '').toLowerCase().trim()) ? 'heart' : 'heart-outline'}
@@ -384,6 +401,9 @@ export default function ReceiptDetailScreen() {
               <TouchableOpacity
                 style={styles.compareBtn}
                 onPress={() => setCompareItem({ description: item.description, price: item.total_value })}
+                accessibilityRole="button"
+                accessibilityLabel={t('compare_prices')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Ionicons name="git-compare-outline" size={14} color={theme.primary} />
               </TouchableOpacity>
@@ -426,17 +446,21 @@ export default function ReceiptDetailScreen() {
         {/* Source Card */}
         <View style={styles.sourceCard}>
           <View style={styles.sourceRow}>
-            <Text style={styles.sourceLabel}>{lang === 'el' ? 'Πηγή' : 'Source'}:</Text>
+            <Text style={styles.sourceLabel}>{t('source')}:</Text>
             <Text style={styles.sourceValue}>{receipt.provider}</Text>
           </View>
           <View style={styles.sourceRow}>
-            <Text style={styles.sourceLabel}>{lang === 'el' ? 'Τύπος' : 'Type'}:</Text>
+            <Text style={styles.sourceLabel}>{t('type')}:</Text>
             <Text style={styles.sourceValue}>{receipt.source_type}</Text>
           </View>
           {receipt.source_url ? (
             <View style={styles.sourceLinkContainer}>
-              <Text style={styles.sourceLabel}>{lang === 'el' ? 'Link' : 'Link'}:</Text>
-              <TouchableOpacity onPress={() => Linking.openURL(receipt.source_url)}>
+              <Text style={styles.sourceLabel}>{t('link')}:</Text>
+              <TouchableOpacity
+                onPress={() => Linking.openURL(receipt.source_url)}
+                accessibilityRole="button"
+                accessibilityLabel={t('link')}
+              >
                 <Text style={[styles.sourceLink, { color: '#0D9488', textDecorationLine: 'underline' }]} numberOfLines={2}>{receipt.source_url}</Text>
               </TouchableOpacity>
             </View>

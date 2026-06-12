@@ -74,7 +74,7 @@ export default function PurchasesScreen() {
           </View>
         )}
         <View style={styles.receiptInfo}>
-          <Text style={styles.storeName} numberOfLines={1}>{item.store_name || 'Άγνωστο'}</Text>
+          <Text style={styles.storeName} numberOfLines={1}>{item.store_name || t('unknown')}</Text>
           <View style={styles.receiptMeta}>
             <Ionicons name="calendar-outline" size={12} color={theme.textMuted} />
             <Text style={styles.receiptDate}>{item.date}</Text>
@@ -106,7 +106,7 @@ export default function PurchasesScreen() {
           <TextInput
             testID="search-input"
             style={styles.searchInput}
-            placeholder="Αναζήτηση καταστήματος ή προϊόντος..."
+            placeholder={t('search_store_or_product')}
             placeholderTextColor={theme.textMuted}
             value={search}
             onChangeText={handleSearch}

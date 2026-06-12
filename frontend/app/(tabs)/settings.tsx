@@ -39,7 +39,7 @@ export default function SettingsScreen() {
 
   const handleExport = async () => {
     if (!accessToken) {
-      Alert.alert('Σφάλμα', 'Παρακαλώ συνδεθείτε πρώτα');
+      Alert.alert(t('error'), t('please_login_first'));
       return;
     }
 
@@ -50,10 +50,10 @@ export default function SettingsScreen() {
       if (!accessCheck.can_export) {
         Alert.alert(
           'apodixxi+',
-          'Η εξαγωγή δεδομένων είναι διαθέσιμη μόνο για συνδρομητές apodixxi+.\n\nΑναβαθμίστε τώρα για να αποκτήσετε πρόσβαση!',
+          t('export_premium_only'),
           [
-            { text: 'Αργότερα', style: 'cancel' },
-            { text: 'Αναβάθμιση', onPress: () => Alert.alert('apodixxi+', 'Η δυνατότητα πληρωμής θα είναι σύντομα διαθέσιμη!') }
+            { text: t('later'), style: 'cancel' },
+            { text: t('upgrade'), onPress: () => Alert.alert('apodixxi+', t('payment_coming_soon')) }
           ]
         );
         return;
@@ -79,37 +79,37 @@ export default function SettingsScreen() {
         );
 
         if (downloadResult.status !== 200) {
-          throw new Error('Αποτυχία λήψης αρχείου');
+          throw new Error(t('download_failed'));
         }
 
         // Share the file
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(downloadResult.uri, {
             mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            dialogTitle: 'Εξαγωγή Δεδομένων apodixxi',
+            dialogTitle: t('export_dialog_title'),
           });
         } else {
-          Alert.alert('Επιτυχία', `Το αρχείο αποθηκεύτηκε: ${filename}`);
+          Alert.alert(t('success_title'), `${t('file_saved')}${filename}`);
         }
       } catch (err: any) {
         console.error('Export error:', err);
-        Alert.alert('Σφάλμα', err.message || 'Αποτυχία αποθήκευσης αρχείου');
+        Alert.alert(t('error'), err.message || t('file_save_failed'));
       }
       setIsExporting(false);
       
     } catch (e: any) {
       setIsExporting(false);
-      Alert.alert('Σφάλμα', e.message || 'Αποτυχία εξαγωγής');
+      Alert.alert(t('error'), e.message || t('export_failed'));
     }
   };
 
   const handleLogout = () => {
     Alert.alert(
-      'Αποσύνδεση',
-      'Είστε σίγουροι ότι θέλετε να αποσυνδεθείτε;',
+      t('logout'),
+      t('logout_confirm'),
       [
-        { text: 'Άκυρο', style: 'cancel' },
-        { text: 'Αποσύνδεση', style: 'destructive', onPress: signOut }
+        { text: t('cancel_short'), style: 'cancel' },
+        { text: t('logout'), style: 'destructive', onPress: signOut }
       ]
     );
   };
@@ -361,7 +361,7 @@ export default function SettingsScreen() {
 
         {/* Account Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{lang === 'el' ? 'Λογαριασμός' : 'Account'}</Text>
+          <Text style={styles.sectionTitle}>{t('account')}</Text>
           <View style={styles.accountCard}>
             <View style={styles.accountInfo}>
               <View style={[styles.accountAvatar, { backgroundColor: theme.primaryLight }]}>
@@ -402,8 +402,8 @@ export default function SettingsScreen() {
                   { color: user?.is_premium === true ? '#92400e' : theme.primary }
                 ]}>
                   {user?.is_premium === true
-                    ? (lang === 'el' ? 'Paid Έκδοση' : 'Paid Edition')
-                    : (lang === 'el' ? 'Free Έκδοση' : 'Free Edition')}
+                    ? t('paid_edition')
+                    : t('free_edition')}
                 </Text>
               </View>
             </View>
@@ -412,9 +412,11 @@ export default function SettingsScreen() {
               style={styles.logoutBtn}
               onPress={handleLogout}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('logout')}
             >
               <Ionicons name="log-out-outline" size={20} color="#ef4444" />
-              <Text style={styles.logoutText}>{lang === 'el' ? 'Αποσύνδεση' : 'Logout'}</Text>
+              <Text style={styles.logoutText}>{t('logout')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -428,6 +430,8 @@ export default function SettingsScreen() {
               style={[styles.langBtn, lang === 'el' && styles.langBtnActive]}
               onPress={() => setLang('el')}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('greek')}
             >
               <Text style={styles.langFlag}>🇬🇷</Text>
               <Text style={[styles.langText, lang === 'el' && styles.langTextActive]}>{t('greek')}</Text>
@@ -437,6 +441,8 @@ export default function SettingsScreen() {
               style={[styles.langBtn, lang === 'en' && styles.langBtnActive]}
               onPress={() => setLang('en')}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('english')}
             >
               <Text style={styles.langFlag}>🇬🇧</Text>
               <Text style={[styles.langText, lang === 'en' && styles.langTextActive]}>{t('english')}</Text>
@@ -446,17 +452,19 @@ export default function SettingsScreen() {
 
         {/* Theme Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{lang === 'el' ? 'Θέμα Εμφάνισης' : 'Appearance'}</Text>
+          <Text style={styles.sectionTitle}>{t('appearance')}</Text>
           <View style={styles.themeRow}>
             <TouchableOpacity
               testID="theme-light-btn"
               style={[styles.themeBtn, mode === 'light' && styles.themeBtnActive]}
               onPress={() => setMode('light')}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('theme_light')}
             >
               <Ionicons name="sunny" size={22} color={mode === 'light' ? theme.primary : theme.textMuted} />
               <Text style={[styles.themeText, mode === 'light' && styles.themeTextActive]}>
-                {lang === 'el' ? 'Φωτεινό' : 'Light'}
+                {t('theme_light')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -464,10 +472,12 @@ export default function SettingsScreen() {
               style={[styles.themeBtn, mode === 'dark' && styles.themeBtnActive]}
               onPress={() => setMode('dark')}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('theme_dark')}
             >
               <Ionicons name="moon" size={22} color={mode === 'dark' ? theme.primary : theme.textMuted} />
               <Text style={[styles.themeText, mode === 'dark' && styles.themeTextActive]}>
-                {lang === 'el' ? 'Σκοτεινό' : 'Dark'}
+                {t('theme_dark')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -475,10 +485,12 @@ export default function SettingsScreen() {
               style={[styles.themeBtn, mode === 'system' && styles.themeBtnActive]}
               onPress={() => setMode('system')}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('theme_system')}
             >
               <Ionicons name="phone-portrait-outline" size={22} color={mode === 'system' ? theme.primary : theme.textMuted} />
               <Text style={[styles.themeText, mode === 'system' && styles.themeTextActive]}>
-                {lang === 'el' ? 'Σύστημα' : 'System'}
+                {t('theme_system')}
               </Text>
             </TouchableOpacity>
           </View>
@@ -491,7 +503,7 @@ export default function SettingsScreen() {
             <View>
               <Text style={styles.settingLabel}>{t('auto_backup')}</Text>
               <Text style={styles.settingDesc}>
-                {lang === 'el' ? 'Αυτόματος συγχρονισμός με τον server' : 'Auto sync with server'}
+                {t('auto_backup_desc')}
               </Text>
             </View>
             <Switch
@@ -508,6 +520,8 @@ export default function SettingsScreen() {
             onPress={handleExport}
             activeOpacity={0.7}
             disabled={isExporting}
+            accessibilityRole="button"
+            accessibilityLabel={t('export_data')}
           >
             <View style={styles.actionIconWrap}>
               {isExporting ? (
@@ -519,7 +533,7 @@ export default function SettingsScreen() {
             <View style={styles.actionInfo}>
               <Text style={styles.actionLabel}>{t('export_data')}</Text>
               <Text style={styles.actionDesc}>
-                {lang === 'el' ? 'Εξαγωγή δεδομένων σε Excel (μόνο apodixxi+)' : 'Export data to Excel (apodixxi+ only)'}
+                {t('export_data_desc')}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />

@@ -88,35 +88,35 @@ export default function TabLayout() {
           <Tabs.Screen
             name="index"
             options={{
-              title: 'Αρχική',
+              title: t('dashboard'),
               tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
             }}
           />
           <Tabs.Screen
             name="add"
             options={{
-              title: 'Προσθήκη',
+              title: t('add_receipt'),
               tabBarIcon: ({ focused }) => <TabIcon name="add" focused={focused} />,
             }}
           />
           <Tabs.Screen
             name="purchases"
             options={{
-              title: 'Αγορές',
+              title: t('purchases'),
               tabBarIcon: ({ focused }) => <TabIcon name="purchases" focused={focused} />,
             }}
           />
           <Tabs.Screen
             name="compare"
             options={{
-              title: 'Σύγκριση',
+              title: t('compare'),
               tabBarIcon: ({ focused }) => <TabIcon name="compare" focused={focused} />,
             }}
           />
           <Tabs.Screen
             name="settings"
             options={{
-              title: 'Προφίλ',
+              title: t('profile'),
               tabBarIcon: ({ focused }) => <TabIcon name="settings" focused={focused} />,
             }}
           />

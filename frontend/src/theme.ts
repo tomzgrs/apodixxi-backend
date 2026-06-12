@@ -23,7 +23,7 @@ export const LightTheme = {
   // Text colors
   text: '#0F172A',           // Slate-900
   textSecondary: '#475569',  // Slate-600
-  textMuted: '#94A3B8',      // Slate-400
+  textMuted: '#64748B',      // Slate-500 (AA contrast on light surfaces)
   textInverse: '#FFFFFF',
   
   // Border colors
@@ -44,7 +44,7 @@ export const LightTheme = {
   tabBar: '#FFFFFF',
   tabBarBorder: '#E2E8F0',
   tabActive: '#0D9488',
-  tabInactive: '#94A3B8',
+  tabInactive: '#64748B',
   
   // Special
   overlay: 'rgba(15, 23, 42, 0.5)',
@@ -73,7 +73,7 @@ export const DarkTheme = {
   // Text colors
   text: '#F1F5F9',           // Slate-100
   textSecondary: '#CBD5E1',  // Slate-300
-  textMuted: '#64748B',      // Slate-500
+  textMuted: '#94A3B8',      // Slate-400 (AA contrast on dark surfaces)
   textInverse: '#0F172A',
   
   // Border colors

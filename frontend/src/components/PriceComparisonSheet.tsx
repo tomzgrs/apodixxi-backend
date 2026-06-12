@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { Typography, Spacing, Radius, Shadows } from '../theme';
 import { api } from '../api';
 import { formatPrice } from '../constants';
 import { getSavingsBadge } from '../services/priceCompare';
+import { I18nContext } from '../../app/_layout';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -62,6 +63,7 @@ interface Props {
 
 export default function PriceComparisonSheet({ visible, description, currentPrice, onClose }: Props) {
   const { theme, isDark } = useTheme();
+  const { t } = useContext(I18nContext);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PriceResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
       const result = await api.getProductPrices(description);
       setData(result);
     } catch (e: any) {
-      setError(e.message || 'Σφάλμα σύνδεσης');
+      setError(e.message || t('connection_error_short'));
     } finally {
       setLoading(false);
     }
@@ -306,7 +308,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
         <View style={{ alignItems: 'center', paddingVertical: Spacing['2xl'] }}>
           <ActivityIndicator size="large" color={theme.primary} />
           <Text style={{ marginTop: Spacing.sm, fontSize: Typography.sm, color: theme.textMuted }}>
-            Αναζήτηση τιμών...
+            {t('searching_prices')}
           </Text>
         </View>
       );
@@ -316,10 +318,15 @@ export default function PriceComparisonSheet({ visible, description, currentPric
       return (
         <View style={styles.emptyState}>
           <Ionicons name="wifi-outline" size={40} color={theme.textMuted} style={styles.emptyIcon} />
-          <Text style={styles.emptyTitle}>Σφάλμα σύνδεσης</Text>
+          <Text style={styles.emptyTitle}>{t('connection_error_short')}</Text>
           <Text style={styles.emptySub}>{error}</Text>
-          <TouchableOpacity onPress={fetchPrices} style={{ marginTop: Spacing.base }}>
-            <Text style={{ color: theme.primary, fontWeight: Typography.semibold }}>Δοκιμή ξανά</Text>
+          <TouchableOpacity
+            onPress={fetchPrices}
+            style={{ marginTop: Spacing.base }}
+            accessibilityRole="button"
+            accessibilityLabel={t('try_again')}
+          >
+            <Text style={{ color: theme.primary, fontWeight: Typography.semibold }}>{t('try_again')}</Text>
           </TouchableOpacity>
         </View>
       );
@@ -329,13 +336,13 @@ export default function PriceComparisonSheet({ visible, description, currentPric
       return (
         <View style={styles.emptyState}>
           <Ionicons name="search-outline" size={40} color={theme.textMuted} style={styles.emptyIcon} />
-          <Text style={styles.emptyTitle}>Δεν βρέθηκαν δεδομένα</Text>
-          <Text style={styles.emptySub}>Δεν υπάρχουν ακόμα καταγεγραμμένες τιμές{'\n'}για αυτό το προϊόν.</Text>
+          <Text style={styles.emptyTitle}>{t('no_data_found')}</Text>
+          <Text style={styles.emptySub}>{t('no_recorded_prices_desc')}</Text>
           {data?.tier === 'free' && (
             <View style={[styles.upgradeBanner, { marginTop: Spacing.base }]}>
               <Ionicons name="star" size={16} color={isDark ? '#818CF8' : '#4338CA'} />
               <Text style={styles.upgradeText}>
-                <Text style={styles.upgradeBold}>apodixxi+</Text> — Δες σε ποιο σούπερ μάρκετ βρίσκεται κάθε τιμή με πλήρες ιστορικό 3 μηνών.
+                <Text style={styles.upgradeBold}>apodixxi+</Text>{t('upgrade_nudge_text')}
               </Text>
             </View>
           )}
@@ -348,7 +355,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
         {/* Current price reference */}
         {currentPrice > 0 && (
           <View style={styles.currentPriceRow}>
-            <Text style={styles.currentLabel}>Τιμή αγοράς σου</Text>
+            <Text style={styles.currentLabel}>{t('your_purchase_price')}</Text>
             <Text style={styles.currentPrice}>{formatPrice(currentPrice)}</Text>
           </View>
         )}
@@ -361,7 +368,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
             color={isPaid ? theme.primary : theme.textMuted}
           />
           <Text style={[styles.tierBadgeText, isPaid ? styles.tierBadgeTextPaid : styles.tierBadgeTextFree]}>
-            {isPaid ? 'apodixxi+' : 'Free'}
+            {isPaid ? 'apodixxi+' : t('tier_free')}
           </Text>
         </View>
 
@@ -370,13 +377,13 @@ export default function PriceComparisonSheet({ visible, description, currentPric
           <>
             <View style={styles.freeBand}>
               <View style={[styles.freeCard, styles.freeCardMin]}>
-                <Text style={[styles.freeCardLabel, styles.freeCardLabelMin]}>Χαμηλότερη</Text>
+                <Text style={[styles.freeCardLabel, styles.freeCardLabelMin]}>{t('price_lowest')}</Text>
                 <Text style={[styles.freeCardPrice, styles.freeCardPriceMin]}>
                   {formatPrice(data.min_price!)}
                 </Text>
               </View>
               <View style={[styles.freeCard, styles.freeCardMax]}>
-                <Text style={[styles.freeCardLabel, styles.freeCardLabelMax]}>Υψηλότερη</Text>
+                <Text style={[styles.freeCardLabel, styles.freeCardLabelMax]}>{t('price_highest')}</Text>
                 <Text style={[styles.freeCardPrice, styles.freeCardPriceMax]}>
                   {formatPrice(data.max_price!)}
                 </Text>
@@ -385,7 +392,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
 
             {data.sample_count != null && (
               <Text style={styles.sampleCount}>
-                Βασίζεται σε {data.sample_count} καταγραφές των τελευταίων 6 μηνών
+                {t('based_on_prefix')}{data.sample_count}{t('based_on_suffix')}
               </Text>
             )}
 
@@ -393,8 +400,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
             <View style={styles.upgradeBanner}>
               <Ionicons name="star" size={16} color={isDark ? '#818CF8' : '#4338CA'} />
               <Text style={styles.upgradeText}>
-                <Text style={styles.upgradeBold}>apodixxi+</Text> — Δες σε ποιο σούπερ μάρκετ βρίσκεται κάθε τιμή
-                με πλήρες ιστορικό 3 μηνών.
+                <Text style={styles.upgradeBold}>apodixxi+</Text>{t('upgrade_nudge_text')}
               </Text>
             </View>
           </>
@@ -460,7 +466,13 @@ export default function PriceComparisonSheet({ visible, description, currentPric
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
+      <TouchableOpacity
+        style={styles.overlay}
+        activeOpacity={1}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel={t('close')}
+      >
         <Animated.View
           style={[styles.sheet, { transform: [{ translateY: slideAnim }] }]}
         >
@@ -468,10 +480,16 @@ export default function PriceComparisonSheet({ visible, description, currentPric
             <View style={styles.handle} />
             <View style={styles.header}>
               <View style={styles.headerLeft}>
-                <Text style={styles.headerTitle}>Σύγκριση τιμών</Text>
+                <Text style={styles.headerTitle}>{t('price_comparison_title')}</Text>
                 <Text style={styles.headerDesc} numberOfLines={1}>{description}</Text>
               </View>
-              <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+              <TouchableOpacity
+                onPress={onClose}
+                style={styles.closeBtn}
+                accessibilityRole="button"
+                accessibilityLabel={t('close')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name="close" size={18} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>

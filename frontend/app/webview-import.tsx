@@ -336,7 +336,7 @@ export default function WebViewImportScreen() {
   const pageUrl = rawUrl || '';
   // Κρύψε την οδηγία/χειρισμό του PDF διακόπτη για Σκλαβενίτη· δείξε την για ΑΒ Βασιλόπουλο (και τα υπόλοιπα).
   const showPdfToggle = !pageUrl.includes('sklavenitis');
-  const { lang } = useContext(I18nContext);
+  const { t, lang } = useContext(I18nContext);
   const router = useRouter();
   const webviewRef = useRef<any>(null);
   const [loading, setLoading] = useState(true);
@@ -358,14 +358,12 @@ export default function WebViewImportScreen() {
     try {
       await api.requestStoreReview(unknownVat, unknownStoreName, pageUrl);
       Alert.alert(
-        lang === 'el' ? 'Ευχαριστούμε!' : 'Thank you!',
-        lang === 'el' 
-          ? 'Η αίτηση σας στάλθηκε για έλεγχο. Θα προστεθεί σύντομα αν είναι έγκυρο κατάστημα.'
-          : 'Your request has been sent for review. The store will be added soon if valid.',
+        t('thank_you'),
+        t('review_request_sent'),
         [{ text: 'OK', onPress: () => { setShowVatModal(false); router.back(); } }]
       );
     } catch (e) {
-      Alert.alert(lang === 'el' ? 'Σφάλμα' : 'Error', lang === 'el' ? 'Αποτυχία αποστολής' : 'Failed to send');
+      Alert.alert(t('error'), t('send_failed'));
     } finally {
       setSendingReview(false);
     }
@@ -392,12 +390,12 @@ export default function WebViewImportScreen() {
         found_final_total: data.found_final_total || 0,
       });
       Alert.alert(
-        lang === 'el' ? 'Επιτυχία!' : 'Success!',
-        lang === 'el' ? 'Η απόδειξη εισήχθη επιτυχώς!' : 'Receipt imported successfully!',
+        t('success'),
+        t('receipt_imported'),
         [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
       );
     } catch (e: any) {
-      Alert.alert(lang === 'el' ? 'Σφάλμα' : 'Error', e.message);
+      Alert.alert(t('error'), e.message);
     }
   };
 
@@ -412,21 +410,15 @@ export default function WebViewImportScreen() {
         setExtracted(false);
         const d = lastDebugRef.current;
         const bridgeTxt = d && d.bridge !== undefined
-          ? (lang === 'el' ? (d.bridge ? ', γέφυρα=ΟΚ' : ', γέφυρα=ΝΕΚΡΗ') : (d.bridge ? ', bridge=OK' : ', bridge=DEAD'))
+          ? (d.bridge ? t('bridge_ok') : t('bridge_dead'))
           : '';
         const framesTxt = d && d.iframes !== undefined ? `, ${d.iframes} iframes` : '';
         const diag = d
-          ? (lang === 'el'
-              ? `\n\nΔιαγνωστικά συσκευής: ${d.attempt || 0} προσπάθειες, ${d.tables || 0} πίνακες${framesTxt}, ${d.bodyLen || 0} χαρ.${bridgeTxt}.`
-              : `\n\nDevice diagnostics: ${d.attempt || 0} attempts, ${d.tables || 0} tables${framesTxt}, ${d.bodyLen || 0} chars${bridgeTxt}.`)
-          : (lang === 'el'
-              ? '\n\n(Δεν ελήφθη κανένα μήνυμα από τη σελίδα — το script δεν εκτελέστηκε.)'
-              : '\n\n(No message received from the page — the script did not run.)');
+          ? `\n\n${t('device_diagnostics')} ${d.attempt || 0} ${t('attempts_word')}, ${d.tables || 0} ${t('tables_word')}${framesTxt}, ${d.bodyLen || 0} ${t('chars_word')}${bridgeTxt}.`
+          : t('no_message_from_page');
         Alert.alert(
-          lang === 'el' ? 'Χρονικό όριο' : 'Timeout',
-          (lang === 'el' 
-            ? 'Η εξαγωγή δεδομένων πήρε πολύ χρόνο. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF) και δοκιμάστε ξανά.'
-            : 'Data extraction took too long. Make sure you see products in a table (not PDF) and try again.') + diag,
+          t('timeout'),
+          t('extraction_timeout_msg') + diag,
           [{ text: 'OK' }]
         );
       }, 25000); // 25 second timeout (πάντα > JS polling 20s)
@@ -496,19 +488,17 @@ export default function WebViewImportScreen() {
         } else {
           // No items - show raw text option
           Alert.alert(
-            lang === 'el' ? 'Δεν βρέθηκαν προϊόντα' : 'No products found',
-            lang === 'el'
-              ? 'Η σελίδα φόρτωσε αλλά δεν βρέθηκαν δομημένα δεδομένα. Δοκιμάστε ξανά ή χρησιμοποιήστε χειροκίνητη εισαγωγή.'
-              : 'The page loaded but no structured data was found. Try again or use manual entry.',
+            t('no_products_found'),
+            t('no_structured_data'),
             [
-              { text: lang === 'el' ? 'Δοκιμή ξανά' : 'Try again', onPress: () => { setExtracted(false); setExtracting(false); } },
-              { text: lang === 'el' ? 'Πίσω' : 'Back', onPress: () => router.back() },
+              { text: t('try_again'), onPress: () => { setExtracted(false); setExtracting(false); } },
+              { text: t('back'), onPress: () => router.back() },
             ]
           );
         }
         setExtracting(false);
       } else if (msg.type === 'error') {
-        Alert.alert('Error', msg.message);
+        Alert.alert(t('error'), msg.message);
         setExtracting(false);
       }
     } catch (e) {
@@ -518,21 +508,21 @@ export default function WebViewImportScreen() {
 
   // Κανάλι ΑΝΕΞΑΡΤΗΤΟ από τη γέφυρα postMessage: διαβάζει δεδομένα/σφάλματα/διαγνωστικά από τον τίτλο της σελίδας.
   const handleNavState = useCallback((navState: any) => {
-    const t = navState && navState.title;
-    if (typeof t !== 'string') return;
+    const title = navState && navState.title;
+    if (typeof title !== 'string') return;
     try {
-      if (t.indexOf('APXJSON::') === 0) {
-        const data = JSON.parse(t.slice(9));
+      if (title.indexOf('APXJSON::') === 0) {
+        const data = JSON.parse(title.slice(9));
         handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'extracted', data }) } } as any);
         return;
       }
-      if (t.indexOf('APXERR::') === 0) {
-        handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'error', message: 'Δεν βρέθηκαν προϊόντα στη σελίδα. Βεβαιωθείτε ότι βλέπετε τα προϊόντα σε πίνακα (όχι PDF). [' + t.slice(8) + ']' }) } } as any);
+      if (title.indexOf('APXERR::') === 0) {
+        handleMessage({ nativeEvent: { data: JSON.stringify({ type: 'error', message: t('no_products_on_page') + '[' + title.slice(8) + ']' }) } } as any);
         return;
       }
-      if (t.indexOf('APX::') === 0) {
+      if (title.indexOf('APX::') === 0) {
         const m: any = { viaTitle: true };
-        t.slice(5).split('|').forEach((p: string) => {
+        title.slice(5).split('|').forEach((p: string) => {
           const k = p[0];
           const v = parseInt(p.slice(1), 10);
           if (k === 'a') m.attempt = v;
@@ -553,11 +543,11 @@ export default function WebViewImportScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity testID="webview-back-btn" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity testID="webview-back-btn" onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel={t('back')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Text style={styles.backText}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.topTitle} numberOfLines={1}>
-          {lang === 'el' ? 'Εισαγωγή Απόδειξης' : 'Import Receipt'}
+          {t('import_btn')}
         </Text>
         <View style={{ width: 44 }} />
       </View>
@@ -565,16 +555,12 @@ export default function WebViewImportScreen() {
       {/* Instructions */}
       <View style={styles.instructions}>
         <Text style={styles.instructionText}>
-          {lang === 'el'
-            ? '1. Περιμένετε να φορτώσει η σελίδα'
-            : '1. Wait for the page to load'}
+          {t('instruction_1')}
         </Text>
         {showPdfToggle && (
           <View style={styles.pdfToggleInstruction}>
             <Text style={styles.instructionText}>
-              {lang === 'el'
-                ? '2. Κλείστε τον μπλε διακόπτη PDF →'
-                : '2. Turn off the blue PDF toggle →'}
+              {t('instruction_2_pdf')}
             </Text>
             <View style={styles.toggleExample}>
               <View style={styles.toggleTrack}>
@@ -584,13 +570,7 @@ export default function WebViewImportScreen() {
           </View>
         )}
         <Text style={styles.instructionText}>
-          {lang === 'el'
-            ? showPdfToggle
-              ? '3. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
-              : '2. Πατήστε "Εξαγωγή Δεδομένων" όταν δείτε τα προϊόντα'
-            : showPdfToggle
-              ? '3. Tap "Extract Data" when you see the products'
-              : '2. Tap "Extract Data" when you see the products'}
+          {`${showPdfToggle ? '3' : '2'}. ${t('instruction_tap_extract')}`}
         </Text>
       </View>
 
@@ -598,15 +578,13 @@ export default function WebViewImportScreen() {
         <View style={styles.center}>
           <Text style={styles.noWebviewIcon}>🌐</Text>
           <Text style={styles.noWebviewTitle}>
-            {lang === 'el' ? 'WebView δεν διαθέσιμο στο web' : 'WebView not available on web'}
+            {t('webview_not_available')}
           </Text>
           <Text style={styles.noWebviewDesc}>
-            {lang === 'el'
-              ? 'Χρησιμοποιήστε το Expo Go στο κινητό σας ή ανεβάστε XML αρχείο.'
-              : 'Use Expo Go on your phone or upload an XML file.'}
+            {t('use_expo_go_xml')}
           </Text>
-          <TouchableOpacity style={styles.goBackBtn} onPress={() => router.back()}>
-            <Text style={styles.goBackText}>{lang === 'el' ? 'Πίσω' : 'Go back'}</Text>
+          <TouchableOpacity style={styles.goBackBtn} onPress={() => router.back()} accessibilityRole="button" accessibilityLabel={t('back')}>
+            <Text style={styles.goBackText}>{t('back')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -631,7 +609,7 @@ export default function WebViewImportScreen() {
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color={COLORS.primary} />
               <Text style={styles.loadingText}>
-                {lang === 'el' ? 'Φόρτωση σελίδας...' : 'Loading page...'}
+                {t('loading_page')}
               </Text>
             </View>
           )}
@@ -644,12 +622,14 @@ export default function WebViewImportScreen() {
               onPress={handleExtract}
               disabled={!pageLoaded || extracting}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={t('extract_data')}
             >
               {extracting ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
                 <Text style={styles.extractBtnText}>
-                  {lang === 'el' ? '📋 Εξαγωγή Δεδομένων' : '📋 Extract Data'}
+                  {t('extract_data')}
                 </Text>
               )}
             </TouchableOpacity>
@@ -671,34 +651,32 @@ export default function WebViewImportScreen() {
             </View>
             
             <Text style={styles.modalTitle}>
-              {lang === 'el' ? 'Άγνωστο Κατάστημα' : 'Unknown Store'}
+              {t('unknown_store')}
             </Text>
             
             <Text style={styles.modalMessage}>
-              {lang === 'el' 
-                ? `Το ΑΦΜ "${unknownVat}" δεν βρέθηκε στη λίστα υποστηριζόμενων καταστημάτων.`
-                : `VAT number "${unknownVat}" was not found in the supported stores list.`}
+              {t('vat_not_found').replace('{vat}', unknownVat)}
             </Text>
             
             {unknownStoreName && (
               <Text style={styles.modalStoreName}>
-                {lang === 'el' ? 'Κατάστημα: ' : 'Store: '}{unknownStoreName}
+                {t('store_label')}{unknownStoreName}
               </Text>
             )}
             
             <Text style={styles.modalQuestion}>
-              {lang === 'el' 
-                ? 'Θέλετε να στείλετε αυτήν την απόδειξη για έλεγχο ώστε να προστεθεί το κατάστημα;'
-                : 'Would you like to send this receipt for review so the store can be added?'}
+              {t('send_for_review_question')}
             </Text>
             
             <View style={styles.modalButtons}>
               <TouchableOpacity 
                 style={styles.modalBtnSecondary}
                 onPress={() => { setShowVatModal(false); router.back(); }}
+                accessibilityRole="button"
+                accessibilityLabel={t('no_cancel')}
               >
                 <Text style={styles.modalBtnSecondaryText}>
-                  {lang === 'el' ? 'Όχι, Ακύρωση' : 'No, Cancel'}
+                  {t('no_cancel')}
                 </Text>
               </TouchableOpacity>
               
@@ -706,12 +684,14 @@ export default function WebViewImportScreen() {
                 style={styles.modalBtnPrimary}
                 onPress={handleSendForReview}
                 disabled={sendingReview}
+                accessibilityRole="button"
+                accessibilityLabel={t('yes_send')}
               >
                 {sendingReview ? (
                   <ActivityIndicator color="#FFF" size="small" />
                 ) : (
                   <Text style={styles.modalBtnPrimaryText}>
-                    {lang === 'el' ? 'Ναι, Αποστολή' : 'Yes, Send'}
+                    {t('yes_send')}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -720,9 +700,11 @@ export default function WebViewImportScreen() {
             <TouchableOpacity 
               style={styles.modalProceedLink}
               onPress={handleProceedAnyway}
+              accessibilityRole="button"
+              accessibilityLabel={t('continue_without_sending')}
             >
               <Text style={styles.modalProceedLinkText}>
-                {lang === 'el' ? 'Συνέχεια χωρίς αποστολή →' : 'Continue without sending →'}
+                {t('continue_without_sending')}
               </Text>
             </TouchableOpacity>
           </View>

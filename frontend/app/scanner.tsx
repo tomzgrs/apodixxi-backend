@@ -20,7 +20,7 @@ try {
 }
 
 function ScannerContent() {
-  const { t, lang } = useContext(I18nContext);
+  const { t } = useContext(I18nContext);
   const { accessToken } = useAuth();
   const router = useRouter();
   const [scanned, setScanned] = useState(false);
@@ -40,16 +40,14 @@ function ScannerContent() {
       <View style={styles.center}>
         <Text style={styles.permIcon}>📷</Text>
         <Text style={styles.permTitle}>
-          {lang === 'el' ? 'Απαιτείται πρόσβαση κάμερας' : 'Camera access required'}
+          {t('camera_access_required')}
         </Text>
         <Text style={styles.permDesc}>
-          {lang === 'el'
-            ? 'Σκανάρετε τον QR κωδικό της απόδειξής σας για αυτόματη εισαγωγή'
-            : 'Scan your receipt QR code for automatic import'}
+          {t('camera_access_desc')}
         </Text>
-        <TouchableOpacity testID="grant-camera-btn" style={styles.permBtn} onPress={requestPermission} activeOpacity={0.8}>
+        <TouchableOpacity testID="grant-camera-btn" style={styles.permBtn} onPress={requestPermission} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={t('grant_access')}>
           <Text style={styles.permBtnText}>
-            {lang === 'el' ? 'Παραχώρηση πρόσβασης' : 'Grant access'}
+            {t('grant_access')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -69,7 +67,7 @@ function ScannerContent() {
         const result = await api.importFromUrl(data, false, accessToken);
 
         if (!result) {
-          Alert.alert(t('error'), lang === 'el' ? 'Δεν ήταν δυνατή η ανάλυση της απόδειξης.' : 'Could not parse the receipt.', [{ text: 'OK', onPress: () => setScanned(false) }]);
+          Alert.alert(t('error'), t('could_not_parse'), [{ text: 'OK', onPress: () => setScanned(false) }]);
           return;
         }
 
@@ -77,11 +75,11 @@ function ScannerContent() {
         if (result.status === 'duplicate') {
           setLoading(false);
           Alert.alert(
-            lang === 'el' ? 'Απόδειξη υπάρχει ήδη' : 'Receipt exists',
-            lang === 'el' ? 'Θέλετε να τη δείτε;' : 'Do you want to view it?',
+            t('receipt_exists'),
+            t('want_to_view'),
             [
-              { text: lang === 'el' ? 'Ναι' : 'Yes', onPress: () => router.replace(`/receipt/${result.existing_receipt?.id}`) },
-              { text: lang === 'el' ? 'Όχι' : 'No', onPress: () => setScanned(false) }
+              { text: t('yes'), onPress: () => router.replace(`/receipt/${result.existing_receipt?.id}`) },
+              { text: t('no'), onPress: () => setScanned(false) }
             ]
           );
           return;
@@ -98,7 +96,7 @@ function ScannerContent() {
           Alert.alert(t('success'), t('receipt_imported'), [{ text: 'OK', onPress: () => setScanned(false) }]);
         }
       } catch (e: any) {
-        Alert.alert(t('error'), e.message || (lang === 'el' ? 'Άγνωστο σφάλμα' : 'Unknown error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
+        Alert.alert(t('error'), e.message || t('unknown_error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {
         setLoading(false);
       }
@@ -112,7 +110,7 @@ function ScannerContent() {
         const result = await api.importFromUrl(data, false, accessToken);
 
         if (!result) {
-          Alert.alert(t('error'), lang === 'el' ? 'Δεν ήταν δυνατή η ανάλυση της απόδειξης.' : 'Could not parse the receipt.', [{ text: 'OK', onPress: () => setScanned(false) }]);
+          Alert.alert(t('error'), t('could_not_parse'), [{ text: 'OK', onPress: () => setScanned(false) }]);
           return;
         }
 
@@ -127,16 +125,14 @@ function ScannerContent() {
           { text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt?.id}`) }
         ]);
       } catch (e: any) {
-        Alert.alert(t('error'), e.message || (lang === 'el' ? 'Άγνωστο σφάλμα' : 'Unknown error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
+        Alert.alert(t('error'), e.message || t('unknown_error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {
         setLoading(false);
       }
     } else {
       Alert.alert(
         t('error'),
-        lang === 'el'
-          ? 'Αυτός ο κωδικός δεν περιέχει link απόδειξης.'
-          : 'This code does not contain a receipt link.',
+        t('no_receipt_link'),
         [{ text: 'OK', onPress: () => setScanned(false) }]
       );
     }
@@ -170,8 +166,8 @@ function ScannerContent() {
         <View style={styles.overlayBottom}>
           <Text style={styles.scanHint}>
             {loading
-              ? (lang === 'el' ? 'Εισαγωγή απόδειξης...' : 'Importing receipt...')
-              : (lang === 'el' ? 'Σκανάρετε τον QR κωδικό της απόδειξης' : 'Scan the receipt QR code')}
+              ? t('importing_receipt')
+              : t('scan_qr_desc')}
           </Text>
           {loading && <ActivityIndicator color="#FFF" style={{ marginTop: 12 }} />}
         </View>
@@ -181,7 +177,7 @@ function ScannerContent() {
 }
 
 export default function ScannerScreen() {
-  const { lang } = useContext(I18nContext);
+  const { t } = useContext(I18nContext);
   const router = useRouter();
 
   const cameraAvailable = CameraView !== null && useCameraPermissions !== null;
@@ -189,11 +185,11 @@ export default function ScannerScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
-        <TouchableOpacity testID="scanner-back-btn" onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity testID="scanner-back-btn" onPress={() => router.back()} style={styles.backBtn} accessibilityRole="button" accessibilityLabel={t('back')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Text style={styles.backText}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.topTitle}>
-          {lang === 'el' ? 'Σκαν QR Κωδικού' : 'Scan QR Code'}
+          {t('scan_qr_code_title')}
         </Text>
         <View style={{ width: 44 }} />
       </View>
@@ -204,21 +200,21 @@ export default function ScannerScreen() {
         <View style={styles.center}>
           <Text style={styles.permIcon}>📷</Text>
           <Text style={styles.permTitle}>
-            {lang === 'el' ? 'Η κάμερα δεν είναι διαθέσιμη' : 'Camera not available'}
+            {t('camera_unavailable')}
           </Text>
           <Text style={styles.permDesc}>
-            {lang === 'el'
-              ? 'Η σάρωση QR κωδικού απαιτεί φυσική συσκευή. Χρησιμοποιήστε το Expo Go στο κινητό σας.'
-              : 'QR scanning requires a physical device. Use Expo Go on your phone.'}
+            {t('qr_requires_device')}
           </Text>
           <TouchableOpacity
             testID="go-to-url-btn"
             style={styles.permBtn}
             onPress={() => router.back()}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={t('paste_url')}
           >
             <Text style={styles.permBtnText}>
-              {lang === 'el' ? 'Επικόλληση Link' : 'Paste URL instead'}
+              {t('paste_url')}
             </Text>
           </TouchableOpacity>
         </View>

@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useContext } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Linking, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../theme';
+import { I18nContext } from '../../app/_layout';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -16,6 +17,7 @@ interface Recommendation {
   original_price?: number;
   store_name?: string;
   image_url?: string;
+  url?: string;
   barcode_code?: string;
   savings?: number;
   is_sponsored: boolean;
@@ -31,6 +33,7 @@ interface RecommendationsProps {
 
 export function Recommendations({ deviceId, location, receiptId, limit = 3, onPress }: RecommendationsProps) {
   const { theme, isDark } = useTheme();
+  const { t } = useContext(I18nContext);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -68,6 +71,14 @@ export function Recommendations({ deviceId, location, receiptId, limit = 3, onPr
     // Track click
     if (rec.is_sponsored) {
       fetch(`${API_URL}/api/recommendations/${rec.id}/click`, { method: 'POST' });
+    }
+    // Open external URL if present
+    if (rec.url) {
+      const cleanUrl = rec.url.startsWith('http') ? rec.url : 'https://' + rec.url;
+      Linking.openURL(cleanUrl).catch(() => {
+          Alert.alert(t('cannot_connect_title'), t('cannot_open_page'));
+        });
+      return;
     }
     onPress?.(rec);
   };
@@ -107,7 +118,7 @@ export function Recommendations({ deviceId, location, receiptId, limit = 3, onPr
       <View style={styles.header}>
         <Ionicons name="bulb-outline" size={18} color={theme.primary} />
         <Text style={styles.headerTitle}>
-          {location === 'after_save' ? 'Ήξερες ότι...' : 'Προτάσεις για εσάς'}
+          {location === 'after_save' ? t('did_you_know') : t('suggestions_for_you')}
         </Text>
       </View>
       
@@ -122,6 +133,8 @@ export function Recommendations({ deviceId, location, receiptId, limit = 3, onPr
             style={styles.card}
             onPress={() => handlePress(rec)}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={rec.title}
           >
             {/* Header with icon and type */}
             <View style={styles.cardHeader}>
@@ -129,10 +142,19 @@ export function Recommendations({ deviceId, location, receiptId, limit = 3, onPr
                 <Ionicons name={getIcon(rec.type)} size={16} color={getIconColor(rec.type)} />
               </View>
               {rec.is_sponsored && (
-                <Text style={styles.sponsoredBadge}>Προσφορά</Text>
+                <Text style={styles.sponsoredBadge}>{t('sponsored')}</Text>
               )}
             </View>
             
+            {/* Product image */}
+            {rec.image_url ? (
+              <Image
+                source={{ uri: rec.image_url }}
+                style={styles.productImage}
+                resizeMode="contain"
+              />
+            ) : null}
+
             {/* Title */}
             <Text style={styles.cardTitle} numberOfLines={2}>{rec.title}</Text>
             
@@ -166,11 +188,19 @@ export function Recommendations({ deviceId, location, receiptId, limit = 3, onPr
               </View>
             )}
             
+            {/* External link indicator */}
+            {rec.url ? (
+              <View style={styles.linkIndicator}>
+                <Ionicons name="open-outline" size={12} color={theme.primary} />
+                <Text style={styles.linkText}>{t('see_offer')}</Text>
+              </View>
+            ) : null}
+
             {/* Barcode indicator */}
             {rec.barcode_code && (
               <View style={styles.barcodeIndicator}>
                 <Ionicons name="barcode-outline" size={14} color={theme.primary} />
-                <Text style={styles.barcodeText}>Με κουπόνι</Text>
+                <Text style={styles.barcodeText}>{t('with_coupon')}</Text>
               </View>
             )}
           </TouchableOpacity>
@@ -183,6 +213,7 @@ export function Recommendations({ deviceId, location, receiptId, limit = 3, onPr
 // Compact version for after-save popup
 export function RecommendationCard({ recommendation, onPress }: { recommendation: Recommendation; onPress?: () => void }) {
   const { theme, isDark } = useTheme();
+  const { t } = useContext(I18nContext);
   const styles = createStyles(theme, isDark);
 
   return (
@@ -190,6 +221,8 @@ export function RecommendationCard({ recommendation, onPress }: { recommendation
       style={styles.compactCard} 
       onPress={onPress}
       activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={recommendation.title}
     >
       <View style={styles.compactIcon}>
         <Ionicons 
@@ -205,7 +238,7 @@ export function RecommendationCard({ recommendation, onPress }: { recommendation
         </Text>
         {recommendation.savings && (
           <Text style={styles.compactSavings}>
-            Εξοικονόμηση €{recommendation.savings.toFixed(2)}
+            {t('savings_label')} €{recommendation.savings.toFixed(2)}
           </Text>
         )}
       </View>
@@ -324,6 +357,27 @@ const createStyles = (theme: any, isDark: boolean) => StyleSheet.create({
     borderTopColor: theme.borderLight,
   },
   barcodeText: {
+    fontSize: Typography.xs,
+    color: theme.primary,
+    marginLeft: 4,
+    fontWeight: Typography.medium,
+  },
+  productImage: {
+    width: '100%',
+    height: 80,
+    borderRadius: Radius.sm,
+    marginBottom: Spacing.sm,
+    backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
+  },
+  linkIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.borderLight,
+  },
+  linkText: {
     fontSize: Typography.xs,
     color: theme.primary,
     marginLeft: 4,

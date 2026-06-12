@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useContext } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import Svg, { Path, Circle, Line, Rect, G, Text as SvgText, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Typography, Spacing, Radius } from '../theme';
+import { I18nContext } from '../../app/_layout';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -13,6 +14,7 @@ interface BarChartProps {
 }
 
 export function BarChart({ data, theme, height = 180, onBarPress }: BarChartProps) {
+  const { t } = useContext(I18nContext);
   if (!data || data.length === 0) return null;
 
   const chartWidth = SCREEN_WIDTH - Spacing.base * 4;
@@ -108,6 +110,8 @@ export function BarChart({ data, theme, height = 180, onBarPress }: BarChartProp
                 }}
                 onPress={() => item.month && onBarPress(item.month)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={item.label || t('month')}
               />
             );
           })}
@@ -124,6 +128,7 @@ interface DonutChartProps {
 }
 
 export function DonutChart({ data, theme, size = 140 }: DonutChartProps) {
+  const { t } = useContext(I18nContext);
   if (!data || data.length === 0) return null;
 
   const radius = size / 2 - 10;
@@ -187,7 +192,7 @@ export function DonutChart({ data, theme, size = 140 }: DonutChartProps) {
           {totalAmount >= 1000 ? `${(totalAmount / 1000).toFixed(1)}k` : totalAmount.toFixed(0)}€
         </Text>
         <Text style={[styles.donutCenterLabel, { color: theme.textSecondary }]}>
-          Σύνολο
+          {t('total')}
         </Text>
       </View>
     </View>
@@ -224,11 +229,12 @@ interface TrendIndicatorProps {
 }
 
 export function TrendIndicator({ trend, changePercent, theme }: TrendIndicatorProps) {
+  const { t } = useContext(I18nContext);
   const isUp = trend === 'up';
   const isDown = trend === 'down';
   const color = isUp ? theme.error : isDown ? theme.success : theme.textSecondary;
   const icon = isUp ? '↑' : isDown ? '↓' : '→';
-  const label = isUp ? 'Αύξηση' : isDown ? 'Μείωση' : 'Σταθερό';
+  const label = isUp ? t('trend_up') : isDown ? t('trend_down') : t('trend_stable');
 
   return (
     <View style={[styles.trendContainer, { backgroundColor: isUp ? theme.errorLight : isDown ? theme.successLight : theme.borderLight }]}>

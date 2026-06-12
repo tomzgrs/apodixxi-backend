@@ -17,7 +17,7 @@ import {
   type SortOption,
 } from '../../src/services/priceCompare';
 export default function CompareScreen() {
-  const { t, lang } = useContext(I18nContext);
+  const { t } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any>(null);
@@ -166,7 +166,7 @@ export default function CompareScreen() {
         >
           <Text style={styles.title}>{t('compare_prices')}</Text>
           <Text style={styles.subtitle}>
-            {lang === 'el' ? 'Βρείτε τις καλύτερες τιμές για τα προϊόντα σας' : 'Find the best prices for your products'}
+            {t('compare_subtitle')}
           </Text>
 
           {/* Mode Toggle: Search / Favorites */}
@@ -175,20 +175,24 @@ export default function CompareScreen() {
               style={[styles.modeChip, mode === 'search' && styles.modeChipActive]}
               onPress={() => setMode('search')}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={t('search')}
             >
               <Ionicons name="search" size={16} color={mode === 'search' ? theme.textInverse : theme.textSecondary} />
               <Text style={[styles.modeChipText, mode === 'search' && styles.modeChipTextActive]}>
-                {lang === 'el' ? 'Αναζήτηση' : 'Search'}
+                {t('search')}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.modeChip, mode === 'favorites' && styles.modeChipActive]}
               onPress={() => setMode('favorites')}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={t('favorites')}
             >
               <Ionicons name="heart" size={16} color={mode === 'favorites' ? theme.textInverse : theme.error} />
               <Text style={[styles.modeChipText, mode === 'favorites' && styles.modeChipTextActive]}>
-                {lang === 'el' ? 'Αγαπημένα' : 'Favorites'}{favoritesList.length > 0 ? ` (${favoritesList.length})` : ''}
+                {t('favorites')}{favoritesList.length > 0 ? ` (${favoritesList.length})` : ''}
               </Text>
             </TouchableOpacity>
           </View>
@@ -202,16 +206,23 @@ export default function CompareScreen() {
               <TextInput
                 testID="compare-search-input"
                 style={styles.searchInput}
-                placeholder={lang === 'el' ? 'Αναζήτηση προϊόντος...' : 'Search product...'}
+                placeholder={t('search_product')}
                 placeholderTextColor={theme.textMuted}
                 value={query}
                 onChangeText={(text) => setQuery(text.toUpperCase())}
                 onSubmitEditing={handleSearch}
                 returnKeyType="search"
                 autoCapitalize="characters"
+                accessibilityLabel={t('search_product')}
               />
               {query.length > 0 && (
-                <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
+                <TouchableOpacity
+                  onPress={handleClear}
+                  style={styles.clearBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('clear_search')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
                   <Ionicons name="close-circle" size={20} color={theme.textMuted} />
                 </TouchableOpacity>
               )}
@@ -221,6 +232,8 @@ export default function CompareScreen() {
               style={styles.searchBtn}
               onPress={handleSearch}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={t('search')}
             >
               <Ionicons name="search" size={22} color={theme.textInverse} />
             </TouchableOpacity>
@@ -231,7 +244,7 @@ export default function CompareScreen() {
             <View style={styles.center}>
               <ActivityIndicator size="large" color={theme.primary} />
               <Text style={styles.loadingText}>
-                {lang === 'el' ? 'Αναζήτηση τιμών...' : 'Searching prices...'}
+                {t('searching_prices')}
               </Text>
             </View>
           )}
@@ -244,7 +257,7 @@ export default function CompareScreen() {
               </View>
               <Text style={styles.emptyTitle}>{t('no_results')}</Text>
               <Text style={styles.emptyDesc}>
-                {lang === 'el' ? 'Δοκιμάστε διαφορετική αναζήτηση' : 'Try a different search'}
+                {t('try_different')}
               </Text>
             </View>
           )}
@@ -258,7 +271,7 @@ export default function CompareScreen() {
                   <View style={styles.summaryRow}>
                     <View style={[styles.summaryCard, { backgroundColor: theme.successLight }]}>
                       <Ionicons name="trending-down" size={20} color={theme.success} />
-                      <Text style={styles.summaryLabel}>{lang === 'el' ? 'Φθηνότερο' : 'Cheapest'}</Text>
+                      <Text style={styles.summaryLabel}>{t('cheapest')}</Text>
                       <Text style={styles.summaryStore} numberOfLines={1}>{cheapest.store_name}</Text>
                       <Text style={[styles.summaryPrice, { color: theme.success }]}>
                         {formatPrice(cheapest.last_price)}
@@ -266,7 +279,7 @@ export default function CompareScreen() {
                     </View>
                     <View style={[styles.summaryCard, { backgroundColor: theme.errorLight }]}>
                       <Ionicons name="trending-up" size={20} color={theme.error} />
-                      <Text style={styles.summaryLabel}>{lang === 'el' ? 'Ακριβότερο' : 'Most Expensive'}</Text>
+                      <Text style={styles.summaryLabel}>{t('most_expensive')}</Text>
                       <Text style={styles.summaryStore} numberOfLines={1}>{mostExpensive.store_name}</Text>
                       <Text style={[styles.summaryPrice, { color: theme.error }]}>
                         {formatPrice(mostExpensive.last_price)}
@@ -278,10 +291,7 @@ export default function CompareScreen() {
                   <View style={styles.savingsBanner}>
                     <Ionicons name="wallet-outline" size={20} color={theme.primary} />
                     <Text style={styles.savingsText}>
-                      {lang === 'el' 
-                        ? `Εξοικονόμηση έως ${formatPrice(priceDifference)} (${savingsPercent}%)`
-                        : `Save up to ${formatPrice(priceDifference)} (${savingsPercent}%)`
-                      }
+                      {`${t('save_up_to')} ${formatPrice(priceDifference)} (${savingsPercent}%)`}
                     </Text>
                   </View>
                 </View>
@@ -290,20 +300,22 @@ export default function CompareScreen() {
               {/* Sort Options */}
               <View style={styles.sortRow}>
                 <Text style={styles.resultsCount}>
-                  {sortedProducts.length} {lang === 'el' ? 'αποτελέσματα' : 'results'}
+                  {sortedProducts.length} {t('results_word')}
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={styles.sortOptions}>
                     {[
-                      { key: 'price_asc', label: lang === 'el' ? 'Τιμή ↑' : 'Price ↑', icon: 'arrow-up' },
-                      { key: 'price_desc', label: lang === 'el' ? 'Τιμή ↓' : 'Price ↓', icon: 'arrow-down' },
-                      { key: 'store', label: lang === 'el' ? 'Κατάστημα' : 'Store', icon: 'storefront-outline' },
-                      { key: 'date', label: lang === 'el' ? 'Ημερομηνία' : 'Date', icon: 'calendar-outline' },
+                      { key: 'price_asc', label: t('price_asc'), icon: 'arrow-up' },
+                      { key: 'price_desc', label: t('price_desc'), icon: 'arrow-down' },
+                      { key: 'store', label: t('store'), icon: 'storefront-outline' },
+                      { key: 'date', label: t('date'), icon: 'calendar-outline' },
                     ].map(option => (
                       <TouchableOpacity
                         key={option.key}
                         style={[styles.sortChip, sortBy === option.key && styles.sortChipActive]}
                         onPress={() => setSortBy(option.key as SortOption)}
+                        accessibilityRole="button"
+                        accessibilityLabel={option.label}
                       >
                         <Text style={[styles.sortChipText, sortBy === option.key && styles.sortChipTextActive]}>
                           {option.label}
@@ -330,6 +342,8 @@ export default function CompareScreen() {
                         style={styles.productMain}
                         onPress={() => hasHistory ? showPriceHistory(product) : null}
                         activeOpacity={hasHistory ? 0.7 : 1}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('price_history')}
                       >
                         {logoUrl ? (
                           <Image source={{ uri: logoUrl }} style={styles.storeLogo} resizeMode="contain" />
@@ -352,6 +366,8 @@ export default function CompareScreen() {
                         style={styles.heartBtn}
                         onPress={() => toggleFavorite(product.description)}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('toggle_favorite')}
                       >
                         <Ionicons
                           name={favoriteNames.has(product.description.toLowerCase().trim()) ? 'heart' : 'heart-outline'}
@@ -367,7 +383,7 @@ export default function CompareScreen() {
                           <View style={styles.cheapBadge}>
                             <Ionicons name="checkmark-circle" size={12} color={theme.success} />
                             <Text style={styles.cheapBadgeText}>
-                              {lang === 'el' ? 'Φθηνότερο' : 'Cheapest'}
+                              {t('cheapest')}
                             </Text>
                           </View>
                         )}
@@ -375,7 +391,7 @@ export default function CompareScreen() {
                           <View style={styles.historyBadge}>
                             <Ionicons name="time-outline" size={12} color={theme.accent} />
                             <Text style={styles.historyBadgeText}>
-                              {product.price_history!.length} {lang === 'el' ? 'αγορές' : 'purchases'}
+                              {product.price_history!.length} {t('purchases_word')}
                             </Text>
                           </View>
                         )}
@@ -394,19 +410,16 @@ export default function CompareScreen() {
                 <Ionicons name="pricetags-outline" size={48} color={theme.primary} />
               </View>
               <Text style={styles.emptyTitle}>
-                {lang === 'el' ? 'Σύγκριση Τιμών' : 'Price Comparison'}
+                {t('compare_prices')}
               </Text>
               <Text style={styles.emptyDesc}>
-                {lang === 'el' 
-                  ? 'Αναζητήστε ένα προϊόν για να δείτε τις τιμές σε διαφορετικά καταστήματα'
-                  : 'Search for a product to see prices across different stores'
-                }
+                {t('compare_initial_desc')}
               </Text>
               
               {/* Quick Search Suggestions */}
               <View style={styles.suggestions}>
                 <Text style={styles.suggestionsTitle}>
-                  {lang === 'el' ? 'Δοκιμάστε:' : 'Try:'}
+                  {t('try_label')}
                 </Text>
                 <View style={styles.suggestionChips}>
                   {['Γάλα', 'Ψωμί', 'Αυγά', 'Τυρί'].map(suggestion => (
@@ -417,6 +430,8 @@ export default function CompareScreen() {
                         setQuery(suggestion);
                         handleSearch();
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={suggestion}
                     >
                       <Text style={styles.suggestionChipText}>{suggestion}</Text>
                     </TouchableOpacity>
@@ -442,19 +457,17 @@ export default function CompareScreen() {
                     <Ionicons name="heart-outline" size={48} color={theme.error} />
                   </View>
                   <Text style={styles.emptyTitle}>
-                    {lang === 'el' ? 'Δεν έχετε αγαπημένα' : 'No favorites yet'}
+                    {t('no_favorites')}
                   </Text>
                   <Text style={styles.emptyDesc}>
-                    {lang === 'el'
-                      ? 'Πατήστε την καρδιά ♥ σε ένα προϊόν στην Αναζήτηση για να το προσθέσετε εδώ'
-                      : 'Tap the heart ♥ on a product in Search to add it here'}
+                    {t('no_favorites_desc')}
                   </Text>
                 </View>
               )}
 
               {!favLoading && favoritesList.length > 0 && (
                 <Text style={styles.resultsCount}>
-                  {favoritesList.length} {lang === 'el' ? 'αγαπημένα' : 'favorites'}
+                  {favoritesList.length} {t('favorites_word')}
                 </Text>
               )}
 
@@ -465,6 +478,8 @@ export default function CompareScreen() {
                       style={styles.productMain}
                       onPress={() => openFavorite(fav.name)}
                       activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={fav.name}
                     >
                       <View style={[styles.storeIcon, { backgroundColor: theme.primaryLight }]}>
                         <Ionicons name="heart" size={18} color={theme.error} />
@@ -473,11 +488,11 @@ export default function CompareScreen() {
                         <Text style={styles.productName} numberOfLines={2}>{fav.name}</Text>
                         {fav.best_store ? (
                           <Text style={styles.productStore}>
-                            {(lang === 'el' ? 'Φθηνότερα: ' : 'Cheapest: ') + fav.best_store}
+                            {t('cheapest_at') + fav.best_store}
                           </Text>
                         ) : (
                           <Text style={styles.productStore}>
-                            {lang === 'el' ? 'Χωρίς τιμές ακόμη' : 'No prices yet'}
+                            {t('no_prices_yet')}
                           </Text>
                         )}
                         {!!fav.last_date && (
@@ -497,6 +512,8 @@ export default function CompareScreen() {
                         onPress={() => toggleFavorite(fav.name)}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         style={{ marginTop: 6 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('toggle_favorite')}
                       >
                         <Ionicons name="heart" size={20} color={theme.error} />
                       </TouchableOpacity>
@@ -520,9 +537,15 @@ export default function CompareScreen() {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
-                {lang === 'el' ? 'Ιστορικό Τιμών' : 'Price History'}
+                {t('price_history')}
               </Text>
-              <TouchableOpacity onPress={() => setShowHistoryModal(false)} style={styles.modalClose}>
+              <TouchableOpacity
+                onPress={() => setShowHistoryModal(false)}
+                style={styles.modalClose}
+                accessibilityRole="button"
+                accessibilityLabel={t('close')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
                 <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
             </View>
@@ -548,6 +571,8 @@ export default function CompareScreen() {
                             router.push(`/receipt/${entry.receipt_id}`);
                           }
                         }}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('receipt_detail')}
                       >
                         <View style={styles.historyDate}>
                           <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { useTheme } from '../ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { I18nContext } from '../../app/_layout';
 
 const API_BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api`;
 
@@ -33,6 +34,7 @@ interface AIAssistantProps {
 
 export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
   const { theme, isDark } = useTheme();
+  const { t } = useContext(I18nContext);
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -56,7 +58,7 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
     if (messages.length === 0) {
       setMessages([{
         id: 'welcome',
-        text: 'Γεια σου! Είμαι ο AI βοηθός του apodixxi. Μπορώ να σε βοηθήσω με:\n\n• Ανάλυση εξόδων\n• Συμβουλές εξοικονόμησης\n• Σύγκριση τιμών\n• Προτάσεις αγορών\n\nΤι θα ήθελες να μάθεις;',
+        text: t('ai_welcome_message'),
         isUser: false,
         timestamp: new Date(),
       }]);
@@ -142,7 +144,7 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
       console.log('AI Chat Error:', error);
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: 'Συγγνώμη, κάτι πήγε στραβά. Δοκίμασε ξανά.',
+        text: t('ai_error_message'),
         isUser: false,
         timestamp: new Date(),
       };
@@ -153,9 +155,9 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
   };
 
   const quickActions = [
-    { label: 'Ανάλυση εξόδων', query: 'Κάνε μια ανάλυση των εξόδων μου' },
-    { label: 'Εξοικονόμηση', query: 'Πώς μπορώ να εξοικονομήσω χρήματα;' },
-    { label: 'Προτάσεις', query: 'Τι προϊόντα μου προτείνεις;' },
+    { label: t('ai_quick_analysis_label'), query: t('ai_quick_analysis_query') },
+    { label: t('ai_quick_savings_label'), query: t('ai_quick_savings_query') },
+    { label: t('ai_quick_suggestions_label'), query: t('ai_quick_suggestions_query') },
   ];
 
   const styles = createStyles(theme, isDark);
@@ -169,12 +171,18 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
             <Ionicons name="sparkles" size={20} color="#fff" />
           </View>
           <View>
-            <Text style={styles.headerTitle}>AI Βοηθός</Text>
-            <Text style={styles.headerSubtitle}>Apodixxi AI Ψηφιακός Βοηθός</Text>
+            <Text style={styles.headerTitle}>{t('ai_assistant')}</Text>
+            <Text style={styles.headerSubtitle}>{t('ai_subtitle')}</Text>
           </View>
         </View>
         {onClose && (
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity
+            onPress={onClose}
+            style={styles.closeButton}
+            accessibilityRole="button"
+            accessibilityLabel={t('close')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Ionicons name="close" size={24} color={theme.text} />
           </TouchableOpacity>
         )}
@@ -241,6 +249,8 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
               onPress={() => {
                 setInputText(action.query);
               }}
+              accessibilityRole="button"
+              accessibilityLabel={action.label}
             >
               <Text style={styles.quickActionText}>{action.label}</Text>
             </TouchableOpacity>
@@ -256,18 +266,22 @@ export default function AIAssistant({ deviceId, onClose }: AIAssistantProps) {
         <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <TextInput
             style={styles.input}
-            placeholder="Ρώτησέ με οτιδήποτε..."
+            placeholder={t('ai_input_placeholder')}
             placeholderTextColor={theme.textSecondary}
             value={inputText}
             onChangeText={setInputText}
             multiline
             maxLength={500}
             onSubmitEditing={sendMessage}
+            accessibilityLabel={t('ai_input_placeholder')}
           />
           <TouchableOpacity
             style={[styles.sendButton, (!inputText.trim() || isLoading) && styles.sendButtonDisabled]}
             onPress={sendMessage}
             disabled={!inputText.trim() || isLoading}
+            accessibilityRole="button"
+            accessibilityLabel={t('send_message')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons 
               name="send" 
