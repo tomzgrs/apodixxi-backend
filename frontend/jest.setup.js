@@ -57,6 +57,14 @@ jest.mock('expo-web-browser', () => ({
   openBrowserAsync: jest.fn(async () => ({ type: 'dismiss' })),
 }));
 
+jest.mock('@sentry/react-native', () => ({
+  init: jest.fn(),
+  wrap: (component) => component,
+  captureException: jest.fn(),
+  captureMessage: jest.fn(),
+  ErrorBoundary: ({ children }) => children,
+}));
+
 /* Silence noisy logs that are expected during error-path tests. */
 jest.spyOn(console, 'error').mockImplementation(() => {});
 jest.spyOn(console, 'warn').mockImplementation(() => {});

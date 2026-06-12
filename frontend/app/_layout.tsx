@@ -5,7 +5,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { translations, Language, TranslationKey } from '../src/i18n';
 import { api } from '../src/api';
 import { ThemeProvider, useTheme } from '../src/ThemeContext';
+import * as Updates from 'expo-updates';
+import mobileAds from 'react-native-google-mobile-ads';
 import { AuthProvider, useAuth } from '../src/AuthContext';
+import { initSentry, Sentry } from '../src/sentry';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
+
+// Initialize crash reporting as early as possible (no-op in dev / without DSN).
+initSentry();
 
 type I18nContextType = {
   lang: Language;
@@ -53,6 +60,7 @@ function NavigationContent() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="category-products" options={{ headerShown: false }} />
         <Stack.Screen name="receipt/[id]" options={{ headerShown: false, presentation: 'card' }} />
         <Stack.Screen name="scanner" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
         <Stack.Screen name="webview-import" options={{ headerShown: false, presentation: 'card' }} />
@@ -66,7 +74,28 @@ function AppContent() {
   const { isDark } = useTheme();
   const { user } = useAuth();
 
-  useEffect(() => {
+  // Initialize AdMob SDK once at startup
+    useEffect(() => {
+      mobileAds().initialize().catch(() => {});
+    }, []);
+
+    // Check for OTA updates on startup (silent — never blocks the app)
+    useEffect(() => {
+      if (__DEV__) return;
+      (async () => {
+        try {
+          const update = await Updates.checkForUpdateAsync();
+          if (update.isAvailable) {
+            await Updates.fetchUpdateAsync();
+            await Updates.reloadAsync();
+          }
+        } catch (_) {
+          // Silently ignore — app continues normally
+        }
+      })();
+    }, []);
+
+    useEffect(() => {
     (async () => {
       const saved = await AsyncStorage.getItem('language');
       if (saved === 'en' || saved === 'el') setLangState(saved);
@@ -94,12 +123,16 @@ function AppContent() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
+
+export default Sentry.wrap(RootLayout);

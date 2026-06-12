@@ -13,8 +13,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.apodixxi.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Scan receipt QR codes to import purchases"
+        "NSCameraUsageDescription": "Scan receipt QR codes to import purchases",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -48,7 +50,9 @@
       [
         "react-native-google-mobile-ads",
         {
-          "androidAppId": "ca-app-pub-2145791775687228~3322381104"
+          "androidAppId": "ca-app-pub-2145791775687228~3322381104",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+          "userTrackingUsageDescription": "Η συγκατάθεσή σας θα χρησιμοποιηθεί για την προβολή σχετικότερων διαφημίσεων."
         }
       ],
       [
@@ -70,8 +74,21 @@
       "expo-localization",
       "expo-secure-store",
       "expo-web-browser",
-      "@react-native-google-signin/google-signin",
-      "expo-updates"
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.REPLACE_WITH_IOS_CLIENT_ID"
+        }
+      ],
+      "expo-updates",
+      [
+        "@sentry/react-native",
+        {
+          "organization": "REPLACE_WITH_SENTRY_ORG",
+          "project": "REPLACE_WITH_SENTRY_PROJECT",
+          "url": "https://sentry.io/"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
