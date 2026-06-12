@@ -6,6 +6,7 @@ import { I18nContext } from './_layout';
 import { COLORS } from '../src/constants';
 import { api } from '../src/api';
 import { useAuth } from '../src/AuthContext';
+import { classifyReceiptUrl } from '../src/services/receiptUrl';
 
 let CameraView: any = null;
 let useCameraPermissions: any = null;
@@ -59,15 +60,19 @@ function ScannerContent() {
     if (scanned || loading) return;
     setScanned(true);
 
-    // Check if the scanned data is a supported URL
-    const isSupported = data.includes('e-invoicing.gr') || data.includes('einvoice.impact.gr');
-    const isEpsilon = data.includes('epsilondigital') || data.includes('epsilonnet.gr');
+    // Classify the scanned data to decide how to import it
+    const kind = classifyReceiptUrl(data);
 
-    if (isSupported) {
+    if (kind === 'supported') {
       setLoading(true);
       try {
         const result = await api.importFromUrl(data, false, accessToken);
-        
+
+        if (!result) {
+          Alert.alert(t('error'), lang === 'el' ? 'Δεν ήταν δυνατή η ανάλυση της απόδειξης.' : 'Could not parse the receipt.', [{ text: 'OK', onPress: () => setScanned(false) }]);
+          return;
+        }
+
         // Check for duplicate
         if (result.status === 'duplicate') {
           setLoading(false);
@@ -75,13 +80,13 @@ function ScannerContent() {
             lang === 'el' ? 'Απόδειξη υπάρχει ήδη' : 'Receipt exists',
             lang === 'el' ? 'Θέλετε να τη δείτε;' : 'Do you want to view it?',
             [
-              { text: lang === 'el' ? 'Ναι' : 'Yes', onPress: () => router.replace(`/receipt/${result.existing_receipt.id}`) },
+              { text: lang === 'el' ? 'Ναι' : 'Yes', onPress: () => router.replace(`/receipt/${result.existing_receipt?.id}`) },
               { text: lang === 'el' ? 'Όχι' : 'No', onPress: () => setScanned(false) }
             ]
           );
           return;
         }
-        
+
         // Check if receipt exists in response
         if (result.receipt && result.receipt.id) {
           Alert.alert(
@@ -93,31 +98,36 @@ function ScannerContent() {
           Alert.alert(t('success'), t('receipt_imported'), [{ text: 'OK', onPress: () => setScanned(false) }]);
         }
       } catch (e: any) {
-        Alert.alert(t('error'), e.message, [{ text: 'OK', onPress: () => setScanned(false) }]);
+        Alert.alert(t('error'), e.message || (lang === 'el' ? 'Άγνωστο σφάλμα' : 'Unknown error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {
         setLoading(false);
       }
-    } else if (isEpsilon) {
+    } else if (kind === 'epsilon') {
       // Navigate directly to WebView for Epsilon Digital (AB, Market In, Bazaar)
       router.replace(`/webview-import?url=${encodeURIComponent(data)}`);
-    } else if (data.startsWith('http')) {
+    } else if (kind === 'http') {
       // Unknown URL - try anyway
       setLoading(true);
       try {
         const result = await api.importFromUrl(data, false, accessToken);
-        
+
+        if (!result) {
+          Alert.alert(t('error'), lang === 'el' ? 'Δεν ήταν δυνατή η ανάλυση της απόδειξης.' : 'Could not parse the receipt.', [{ text: 'OK', onPress: () => setScanned(false) }]);
+          return;
+        }
+
         // Check if WebView is required
         if (result.status === 'webview_required') {
           setLoading(false);
           router.replace(`/webview-import?url=${encodeURIComponent(result.url)}`);
           return;
         }
-        
+
         Alert.alert(t('success'), t('receipt_imported'), [
-          { text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }
+          { text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt?.id}`) }
         ]);
       } catch (e: any) {
-        Alert.alert(t('error'), e.message, [{ text: 'OK', onPress: () => setScanned(false) }]);
+        Alert.alert(t('error'), e.message || (lang === 'el' ? 'Άγνωστο σφάλμα' : 'Unknown error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {
         setLoading(false);
       }

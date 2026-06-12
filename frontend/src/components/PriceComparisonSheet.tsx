@@ -15,6 +15,7 @@ import { useTheme } from '../ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../theme';
 import { api } from '../api';
 import { formatPrice } from '../constants';
+import { getSavingsBadge } from '../services/priceCompare';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -99,14 +100,6 @@ export default function PriceComparisonSheet({ visible, description, currentPric
   }, [visible]);
 
   const isPaid = data?.tier === 'paid';
-
-  const getSavingsBadge = (price: number) => {
-    if (!currentPrice || price <= 0) return null;
-    const diff = currentPrice - price;
-    const pct = Math.round((diff / currentPrice) * 100);
-    if (Math.abs(pct) < 1) return null;
-    return { diff, pct };
-  };
 
   const styles = StyleSheet.create({
     overlay: {
@@ -411,7 +404,7 @@ export default function PriceComparisonSheet({ visible, description, currentPric
         {isPaid && data.tier === 'paid' && data.found && data.results && (
           <>
             {data.results.map((store, i) => {
-              const savings = getSavingsBadge(store.last_price);
+              const savings = getSavingsBadge(currentPrice, store.last_price);
               const isCheapest = i === 0;
               return (
                 <View key={store.store_name} style={styles.storeRow}>

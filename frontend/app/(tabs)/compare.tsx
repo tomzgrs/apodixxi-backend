@@ -9,23 +9,13 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { getStoreLogo } from '../../src/storeLogos';
 import { api } from '../../src/api';
-type SortOption = 'price_asc' | 'price_desc' | 'store' | 'date';
-
-interface ProductResult {
-  description: string;
-  store_name: string;
-  last_price: number;
-  last_unit_price: number;
-  last_date: string;
-  price_history?: Array<{
-    price: number;
-    unit_price: number;
-    date: string;
-    quantity: number;
-    receipt_id: string;
-  }>;
-}
-
+import {
+  flattenStores,
+  sortProducts,
+  computePriceStats,
+  type ProductResult,
+  type SortOption,
+} from '../../src/services/priceCompare';
 export default function CompareScreen() {
   const { t, lang } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
@@ -137,35 +127,10 @@ export default function CompareScreen() {
   };
 
   // Flatten and sort products
-  const allProducts: ProductResult[] = results 
-    ? Object.entries(results.stores).flatMap(([store, products]: [string, any]) =>
-        products.map((p: any) => ({ ...p, store_name: store }))
-      )
-    : [];
-
-  const sortedProducts = [...allProducts].sort((a, b) => {
-    switch (sortBy) {
-      case 'price_asc': return a.last_price - b.last_price;
-      case 'price_desc': return b.last_price - a.last_price;
-      case 'store': return a.store_name.localeCompare(b.store_name);
-      case 'date': return (b.last_date || '').localeCompare(a.last_date || '');
-      default: return 0;
-    }
-  });
-
-  const cheapest = allProducts.length > 0 
-    ? allProducts.reduce((min, p) => p.last_price < min.last_price ? p : min, allProducts[0])
-    : null;
-  const mostExpensive = allProducts.length > 0 
-    ? allProducts.reduce((max, p) => p.last_price > max.last_price ? p : max, allProducts[0])
-    : null;
-
-  const priceDifference = cheapest && mostExpensive 
-    ? mostExpensive.last_price - cheapest.last_price 
-    : 0;
-  const savingsPercent = mostExpensive && mostExpensive.last_price > 0
-    ? ((priceDifference / mostExpensive.last_price) * 100).toFixed(0)
-    : 0;
+  const allProducts: ProductResult[] = flattenStores(results);
+  const sortedProducts = sortProducts(allProducts, sortBy);
+  const { cheapest, mostExpensive, priceDifference, savingsPercent } =
+    computePriceStats(allProducts);
 
   // Group by unique products
   const uniqueProducts = new Map<string, ProductResult[]>();
