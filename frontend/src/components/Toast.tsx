@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useCallback, useRef, useState } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../ThemeContext';
@@ -45,6 +45,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     },
     [translateY, opacity, hide]
   );
+
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
 
   const config = {
     success: { icon: 'checkmark-circle' as const, color: theme.success },
