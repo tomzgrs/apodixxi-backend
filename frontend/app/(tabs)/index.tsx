@@ -15,6 +15,8 @@ import { Recommendations } from '../../src/components/Recommendations';
 import AIAssistant from '../../src/components/AIAssistant';
 import CategoryDrilldown from '../../src/components/CategoryDrilldown';
 import { useConnectivity } from '../../src/hooks/useConnectivity';
+import { DashboardSkeleton } from '../../src/components/Skeleton';
+import { hapticLight } from '../../src/haptics';
 export default function DashboardScreen() {
   const { t, lang } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
@@ -80,9 +82,7 @@ export default function DashboardScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={theme.primary} />
-        </View>
+        <DashboardSkeleton />
       </SafeAreaView>
     );
   }
@@ -159,7 +159,7 @@ export default function DashboardScreen() {
             <TouchableOpacity
               testID="add-first-receipt-btn"
               style={styles.addBtn}
-              onPress={() => router.push('/(tabs)/add')}
+              onPress={() => { hapticLight(); router.push('/(tabs)/add'); }}
               activeOpacity={0.8}
             >
               <Ionicons name="add" size={20} color={theme.textInverse} />
@@ -205,7 +205,7 @@ export default function DashboardScreen() {
             <View style={styles.quickActions}>
               <TouchableOpacity 
                 style={styles.quickActionBtn}
-                onPress={() => router.push('/(tabs)/add')}
+                onPress={() => { hapticLight(); router.push('/(tabs)/add'); }}
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.primaryLight }]}>
@@ -216,7 +216,7 @@ export default function DashboardScreen() {
               
               <TouchableOpacity 
                 style={styles.quickActionBtn}
-                onPress={() => router.push('/(tabs)/purchases')}
+                onPress={() => { hapticLight(); router.push('/(tabs)/purchases'); }}
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.accentLight }]}>
@@ -227,7 +227,7 @@ export default function DashboardScreen() {
               
               <TouchableOpacity 
                 style={styles.quickActionBtn}
-                onPress={() => router.push('/(tabs)/compare')}
+                onPress={() => { hapticLight(); router.push('/(tabs)/compare'); }}
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.warningLight }]}>
@@ -238,7 +238,7 @@ export default function DashboardScreen() {
               
               <TouchableOpacity 
                 style={styles.quickActionBtn}
-                onPress={() => router.push('/(tabs)/purchases')}
+                onPress={() => { hapticLight(); router.push('/(tabs)/purchases'); }}
                 activeOpacity={0.7}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.infoLight }]}>

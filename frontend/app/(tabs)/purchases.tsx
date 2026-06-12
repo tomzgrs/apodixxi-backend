@@ -1,5 +1,5 @@
 import React, { useContext, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, RefreshControl, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, RefreshControl, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { Typography, Spacing, Radius } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
 import { useConnectivity } from '../../src/hooks/useConnectivity';
+import { ReceiptListSkeleton } from '../../src/components/Skeleton';
 
 export default function PurchasesScreen() {
   const { t } = useContext(I18nContext);
@@ -136,8 +137,8 @@ export default function PurchasesScreen() {
 
       {/* Content */}
       {loading && !refreshing ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={theme.primary} />
+        <View style={{ paddingTop: Spacing.base }}>
+          <ReceiptListSkeleton />
         </View>
       ) : receipts.length === 0 ? (
         <View style={styles.empty}>

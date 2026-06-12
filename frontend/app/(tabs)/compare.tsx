@@ -9,6 +9,8 @@ import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants';
 import { getStoreLogo } from '../../src/storeLogos';
 import { api } from '../../src/api';
+import { hapticLight, hapticSelection } from '../../src/haptics';
+import { useToast } from '../../src/components/Toast';
 import {
   flattenStores,
   sortProducts,
@@ -19,6 +21,7 @@ import {
 export default function CompareScreen() {
   const { t } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
+  const { showToast } = useToast();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -64,6 +67,8 @@ export default function CompareScreen() {
       if (wasFav) next.delete(key); else next.add(key);
       return next;
     });
+    hapticSelection();
+    showToast(wasFav ? t('favorite_removed') : t('favorite_added'), 'success');
 
     try {
       if (wasFav) {
@@ -97,6 +102,7 @@ export default function CompareScreen() {
 
   const handleSearch = async () => {
     if (!query.trim() || query.trim().length < 2) return;
+    hapticLight();
     setLoading(true);
     setSearched(true);
     try {

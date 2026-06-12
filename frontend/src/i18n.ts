@@ -341,6 +341,8 @@ export const translations = {
     signin_with_google: "Σύνδεση με Google",
     apple_signin_failed: "Αποτυχία σύνδεσης με Apple",
     signin_with_apple: "Σύνδεση με Apple",
+    favorite_added: "Προστέθηκε στα αγαπημένα",
+    favorite_removed: "Αφαιρέθηκε από τα αγαπημένα",
   },
   en: {
     app_name: "apodixxi",
@@ -684,6 +686,8 @@ export const translations = {
     signin_with_google: "Sign in with Google",
     apple_signin_failed: "Apple sign-in failed",
     signin_with_apple: "Sign in with Apple",
+    favorite_added: "Added to favorites",
+    favorite_removed: "Removed from favorites",
   }
 };
 

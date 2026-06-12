@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,11 +10,15 @@ import { getStoreColor, getStoreInitial, formatPrice } from '../../src/constants
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
 import PriceComparisonSheet from '../../src/components/PriceComparisonSheet';
+import { ReceiptDetailSkeleton } from '../../src/components/Skeleton';
+import { hapticSelection, hapticWarning, hapticSuccess } from '../../src/haptics';
+import { useToast } from '../../src/components/Toast';
 
 export default function ReceiptDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useContext(I18nContext);
   const { theme, isDark } = useTheme();
+  const { showToast } = useToast();
   const router = useRouter();
   const [receipt, setReceipt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -60,6 +64,8 @@ export default function ReceiptDetailScreen() {
       if (wasFav) next.delete(key); else next.add(key);
       return next;
     });
+    hapticSelection();
+    showToast(wasFav ? t('favorite_removed') : t('favorite_added'), 'success');
 
     try {
       if (wasFav) {
@@ -80,12 +86,14 @@ export default function ReceiptDetailScreen() {
   };
 
   const handleDelete = () => {
+    hapticWarning();
     Alert.alert(t('delete'), t('confirm_delete'), [
       { text: t('cancel'), style: 'cancel' },
       {
         text: t('yes'), style: 'destructive', onPress: async () => {
           try {
             await api.deleteReceipt(id);
+            hapticSuccess();
             router.back();
           } catch (e: any) {
             Alert.alert(t('error'), e.message);
@@ -273,7 +281,7 @@ export default function ReceiptDetailScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.center}><ActivityIndicator size="large" color={theme.primary} /></View>
+        <ReceiptDetailSkeleton />
       </SafeAreaView>
     );
   }

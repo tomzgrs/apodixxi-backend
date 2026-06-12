@@ -8,6 +8,7 @@ import { I18nContext } from '../_layout';
 import { useTheme } from '../../src/ThemeContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
+import { hapticSuccess, hapticError, hapticWarning } from '../../src/haptics';
 
 type Tab = 'url' | 'manual';
 
@@ -40,6 +41,7 @@ export default function AddReceiptScreen() {
       
       if (result.status === 'duplicate') {
         setLoading(false);
+        hapticWarning();
         Alert.alert(
           t('receipt_exists'),
           `${t('receipt_duplicate_from')}${result.existing_receipt.store_name}${t('receipt_duplicate_on')}${result.existing_receipt.date}${t('receipt_duplicate_again')}`,
@@ -59,10 +61,12 @@ export default function AddReceiptScreen() {
         return;
       }
       
+      hapticSuccess();
       Alert.alert(t('success'), t('receipt_imported'), [
         { text: 'OK', onPress: () => { setUrl(''); router.push(`/receipt/${result.receipt.id}`); } }
       ]);
     } catch (e: any) {
+      hapticError();
       Alert.alert(t('error'), e.message);
     } finally {
       setLoading(false);
@@ -92,7 +96,7 @@ export default function AddReceiptScreen() {
   };
 
   const handleManualSave = async () => {
-    if (!storeName.trim()) { Alert.alert(t('error'), t('enter_store_name')); return; }
+    if (!storeName.trim()) { hapticError(); Alert.alert(t('error'), t('enter_store_name')); return; }
     const items = manualItems.filter(i => i.description.trim() && i.price).map(i => ({
       code: '',
       description: i.description,
@@ -104,7 +108,7 @@ export default function AddReceiptScreen() {
       vat_percent: 0,
       total_value: (parseFloat(i.quantity) || 1) * (parseFloat(i.price) || 0),
     }));
-    if (!items.length) { Alert.alert(t('error'), t('add_item')); return; }
+    if (!items.length) { hapticError(); Alert.alert(t('error'), t('add_item')); return; }
     setLoading(true);
     try {
       const total = items.reduce((s, i) => s + i.total_value, 0);
@@ -115,6 +119,7 @@ export default function AddReceiptScreen() {
         total,
         payment_method: '',
       });
+      hapticSuccess();
       Alert.alert(t('success'), t('receipt_imported'), [
         { text: 'OK', onPress: () => {
           setStoreName(''); setDateStr(''); setManualItems([{ description: '', quantity: '1', price: '' }]); setManualTotal('');
@@ -122,6 +127,7 @@ export default function AddReceiptScreen() {
         }}
       ]);
     } catch (e: any) {
+      hapticError();
       Alert.alert(t('error'), e.message);
     } finally {
       setLoading(false);

@@ -7,6 +7,7 @@ import { COLORS } from '../src/constants';
 import { api } from '../src/api';
 import { useAuth } from '../src/AuthContext';
 import { classifyReceiptUrl } from '../src/services/receiptUrl';
+import { hapticSuccess, hapticError, hapticWarning } from '../src/haptics';
 
 let CameraView: any = null;
 let useCameraPermissions: any = null;
@@ -67,6 +68,7 @@ function ScannerContent() {
         const result = await api.importFromUrl(data, false, accessToken);
 
         if (!result) {
+          hapticError();
           Alert.alert(t('error'), t('could_not_parse'), [{ text: 'OK', onPress: () => setScanned(false) }]);
           return;
         }
@@ -74,6 +76,7 @@ function ScannerContent() {
         // Check for duplicate
         if (result.status === 'duplicate') {
           setLoading(false);
+          hapticWarning();
           Alert.alert(
             t('receipt_exists'),
             t('want_to_view'),
@@ -87,15 +90,18 @@ function ScannerContent() {
 
         // Check if receipt exists in response
         if (result.receipt && result.receipt.id) {
+          hapticSuccess();
           Alert.alert(
             t('success'),
             t('receipt_imported'),
             [{ text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt.id}`) }]
           );
         } else {
+          hapticSuccess();
           Alert.alert(t('success'), t('receipt_imported'), [{ text: 'OK', onPress: () => setScanned(false) }]);
         }
       } catch (e: any) {
+        hapticError();
         Alert.alert(t('error'), e.message || t('unknown_error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {
         setLoading(false);
@@ -110,6 +116,7 @@ function ScannerContent() {
         const result = await api.importFromUrl(data, false, accessToken);
 
         if (!result) {
+          hapticError();
           Alert.alert(t('error'), t('could_not_parse'), [{ text: 'OK', onPress: () => setScanned(false) }]);
           return;
         }
@@ -121,10 +128,12 @@ function ScannerContent() {
           return;
         }
 
+        hapticSuccess();
         Alert.alert(t('success'), t('receipt_imported'), [
           { text: 'OK', onPress: () => router.replace(`/receipt/${result.receipt?.id}`) }
         ]);
       } catch (e: any) {
+        hapticError();
         Alert.alert(t('error'), e.message || t('unknown_error'), [{ text: 'OK', onPress: () => setScanned(false) }]);
       } finally {
         setLoading(false);
