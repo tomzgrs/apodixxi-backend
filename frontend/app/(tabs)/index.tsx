@@ -106,7 +106,7 @@ export default function DashboardScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Καλώς ήρθατε 👋</Text>
+            <Text style={styles.greeting}>{t('welcome_emoji')}</Text>
             {(subscriptionStatus.is_premium || user?.account_type === 'paid') ? (
               <Text testID="app-title" style={styles.appTitle}>
                 apodixxi<Text style={{ color: '#f59e0b' }}>+</Text>
@@ -172,7 +172,7 @@ export default function DashboardScreen() {
             <View style={styles.mainStatsCard}>
               <View style={styles.mainStatsHeader}>
                 <View>
-                  <Text style={styles.mainStatsLabel}>Συνολικές Δαπάνες</Text>
+                  <Text style={styles.mainStatsLabel}>{t('total_expenses')}</Text>
                   <Text style={styles.mainStatsValue}>{formatPrice(stats.total_spent)}</Text>
                 </View>
                 {analytics && (
@@ -186,17 +186,17 @@ export default function DashboardScreen() {
               <View style={styles.mainStatsRow}>
                 <View style={styles.mainStatItem}>
                   <Text style={styles.mainStatItemValue}>{stats.total_receipts}</Text>
-                  <Text style={styles.mainStatItemLabel}>Αποδείξεις</Text>
+                  <Text style={styles.mainStatItemLabel}>{t('total_receipts')}</Text>
                 </View>
                 <View style={styles.mainStatDivider} />
                 <View style={styles.mainStatItem}>
                   <Text style={styles.mainStatItemValue}>{stats.total_products}</Text>
-                  <Text style={styles.mainStatItemLabel}>Προϊόντα</Text>
+                  <Text style={styles.mainStatItemLabel}>{t('products_label')}</Text>
                 </View>
                 <View style={styles.mainStatDivider} />
                 <View style={styles.mainStatItem}>
                   <Text style={styles.mainStatItemValue}>{formatPrice(stats.avg_receipt)}</Text>
-                  <Text style={styles.mainStatItemLabel}>Μ.Ο. Απόδειξης</Text>
+                  <Text style={styles.mainStatItemLabel}>{t('avg_receipt_label')}</Text>
                 </View>
               </View>
             </View>
@@ -211,7 +211,7 @@ export default function DashboardScreen() {
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.primaryLight }]}>
                   <Ionicons name="scan-outline" size={24} color={theme.primary} />
                 </View>
-                <Text style={styles.quickActionText}>Σάρωση</Text>
+                <Text style={styles.quickActionText}>{t('scan')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -222,7 +222,7 @@ export default function DashboardScreen() {
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.accentLight }]}>
                   <Ionicons name="time-outline" size={24} color={theme.accent} />
                 </View>
-                <Text style={styles.quickActionText}>Ιστορικό</Text>
+                <Text style={styles.quickActionText}>{t('history')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -233,7 +233,7 @@ export default function DashboardScreen() {
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.warningLight }]}>
                   <Ionicons name="pricetag-outline" size={24} color={theme.warning} />
                 </View>
-                <Text style={styles.quickActionText}>Σύγκριση</Text>
+                <Text style={styles.quickActionText}>{t('compare')}</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -244,7 +244,7 @@ export default function DashboardScreen() {
                 <View style={[styles.quickActionIcon, { backgroundColor: theme.infoLight }]}>
                   <Ionicons name="search-outline" size={24} color={theme.info} />
                 </View>
-                <Text style={styles.quickActionText}>Αναζήτηση</Text>
+                <Text style={styles.quickActionText}>{t('search')}</Text>
               </TouchableOpacity>
             </View>
 
@@ -253,8 +253,8 @@ export default function DashboardScreen() {
               <View style={styles.chartCard}>
                 <View style={styles.chartHeader}>
                   <Ionicons name="bar-chart-outline" size={20} color={theme.primary} />
-                  <Text style={styles.chartTitle}>Μηνιαίες Δαπάνες</Text>
-                  <Text style={styles.chartHint}>(πατήστε μήνα)</Text>
+                  <Text style={styles.chartTitle}>{t('monthly_expenses')}</Text>
+                  <Text style={styles.chartHint}>{t('tap_month_hint')}</Text>
                 </View>
                 <BarChart 
                   data={analytics.monthly_spending.map(function(m: any) { return { label: m.label, amount: m.amount, month: m.month }; })}
@@ -264,7 +264,7 @@ export default function DashboardScreen() {
                 />
                 {analytics.total_this_month > 0 && (
                   <View style={styles.chartFooter}>
-                    <Text style={styles.chartFooterLabel}>Τρέχων μήνας:</Text>
+                    <Text style={styles.chartFooterLabel}>{t('current_month_colon')}</Text>
                     <Text style={styles.chartFooterValue}>{formatPrice(analytics.total_this_month)}</Text>
                   </View>
                 )}
@@ -295,7 +295,7 @@ export default function DashboardScreen() {
               <View style={styles.chartCard}>
                 <View style={styles.chartHeader}>
                   <Ionicons name="pie-chart-outline" size={20} color={theme.primary} />
-                  <Text style={styles.chartTitle}>Κατανομή ανά Κατάστημα</Text>
+                  <Text style={styles.chartTitle}>{t('distribution_by_store')}</Text>
                   
                   {/* Dropdown */}
                   <TouchableOpacity 
@@ -303,7 +303,7 @@ export default function DashboardScreen() {
                     onPress={() => setShowDistributionDropdown(!showDistributionDropdown)}
                   >
                     <Text style={styles.dropdownText}>
-                      {distributionMode === 'total' ? 'Σύνολο' : 'Μήνας'}
+                      {distributionMode === 'total' ? t('total') : t('month')}
                     </Text>
                     <Ionicons 
                       name={showDistributionDropdown ? "chevron-up" : "chevron-down"} 
@@ -366,7 +366,7 @@ export default function DashboardScreen() {
             {analytics && analytics.top_products && analytics.top_products.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Συχνότερα Προϊόντα</Text>
+                  <Text style={styles.sectionTitle}>{t('frequent_products')}</Text>
                 </View>
                 {analytics.top_products.slice(0, 4).map((product: any, i: number) => (
                   <View key={i} style={styles.productRow}>
@@ -389,7 +389,7 @@ export default function DashboardScreen() {
             {stats.stores && stats.stores.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Κορυφαία Καταστήματα</Text>
+                  <Text style={styles.sectionTitle}>{t('top_stores')}</Text>
                 </View>
                 {stats.stores.slice(0, 4).map((store: any, i: number) => {
                   const logoUrl = getStoreLogo(store.name || '');
@@ -429,9 +429,9 @@ export default function DashboardScreen() {
             {stats.recent_receipts && stats.recent_receipts.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Πρόσφατες Αγορές</Text>
+                  <Text style={styles.sectionTitle}>{t('recent_purchases')}</Text>
                   <TouchableOpacity onPress={() => router.push('/(tabs)/purchases')}>
-                    <Text style={styles.viewAll}>Όλες</Text>
+                    <Text style={styles.viewAll}>{t('view_all')}</Text>
                   </TouchableOpacity>
                 </View>
                 {stats.recent_receipts.slice(0, 3).map((receipt: any, i: number) => {

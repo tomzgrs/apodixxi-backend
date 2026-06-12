@@ -166,6 +166,8 @@ export default function MonthReceiptsScreen() {
                 style={styles.receiptCard}
                 onPress={() => router.push(`/receipt/${receipt.id}`)}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`${receipt.store_name || t('unknown')}, ${formatPrice(receipt.total)}`}
               >
                 {logoUrl ? (
                   <Image source={{ uri: logoUrl }} style={styles.storeLogo} resizeMode="contain" />

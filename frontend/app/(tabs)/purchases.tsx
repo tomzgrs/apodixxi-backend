@@ -61,6 +61,8 @@ export default function PurchasesScreen() {
         style={styles.receiptCard}
         onPress={() => { const rid = item.id || item._id; if (rid) router.push(`/receipt/${rid}`); }}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.store_name || t('unknown')}, ${formatPrice(item.total)}`}
       >
         {logoUrl ? (
           <Image 
@@ -80,7 +82,7 @@ export default function PurchasesScreen() {
             <Text style={styles.receiptDate}>{item.date}</Text>
             <Text style={styles.receiptDot}>•</Text>
             <Ionicons name="cart-outline" size={12} color={theme.textMuted} />
-            <Text style={styles.receiptItems}>{item.items?.length || 0} προϊόντα</Text>
+            <Text style={styles.receiptItems}>{item.items?.length || 0} {t('products')}</Text>
           </View>
         </View>
         <View style={styles.receiptRight}>
@@ -95,8 +97,8 @@ export default function PurchasesScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Οι Αγορές μου</Text>
-        <Text style={styles.subtitle}>{total} αποδείξεις</Text>
+        <Text style={styles.title}>{t('my_purchases')}</Text>
+        <Text style={styles.subtitle}>{total} {t('receipts')}</Text>
       </View>
 
       {/* Search */}
@@ -112,7 +114,12 @@ export default function PurchasesScreen() {
             onChangeText={handleSearch}
           />
           {search.length > 0 && (
-            <TouchableOpacity onPress={() => handleSearch('')}>
+            <TouchableOpacity
+              onPress={() => handleSearch('')}
+              accessibilityRole="button"
+              accessibilityLabel={t('clear_search')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Ionicons name="close-circle" size={20} color={theme.textMuted} />
             </TouchableOpacity>
           )}
@@ -145,23 +152,25 @@ export default function PurchasesScreen() {
             {loadError && !online
               ? t('offline_no_data')
               : search
-                ? 'Δεν βρέθηκαν αποτελέσματα'
-                : 'Δεν υπάρχουν αποδείξεις'}
+                ? t('no_results')
+                : t('no_receipts')}
           </Text>
           <Text style={styles.emptyDesc}>
             {loadError && !online
               ? t('offline_no_data_desc')
               : search
-                ? 'Δοκιμάστε διαφορετική αναζήτηση'
-                : 'Προσθέστε την πρώτη σας απόδειξη'}
+                ? t('try_different')
+                : t('add_first_receipt')}
           </Text>
           {!search && !loadError && (
             <TouchableOpacity
               style={styles.addBtn}
               onPress={() => router.push('/(tabs)/add')}
+              accessibilityRole="button"
+              accessibilityLabel={t('add_receipt')}
             >
               <Ionicons name="add" size={20} color={theme.textInverse} />
-              <Text style={styles.addBtnText}>Προσθήκη</Text>
+              <Text style={styles.addBtnText}>{t('add_receipt')}</Text>
             </TouchableOpacity>
           )}
         </View>

@@ -234,6 +234,9 @@ import { I18nContext } from './_layout';
                   <TouchableOpacity
                     style={[styles.row, selectionMode && isSelected && styles.rowSelected]}
                     activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.name}
+                    accessibilityState={selectionMode ? { selected: isSelected } : undefined}
                     onPress={selectionMode ? () => toggleSelection(item.name) : undefined}
                     onLongPress={() => {
                       if (!selectionMode) {

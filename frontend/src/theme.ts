@@ -94,7 +94,7 @@ export const DarkTheme = {
   tabBar: '#1E293B',
   tabBarBorder: '#334155',
   tabActive: '#2DD4BF',
-  tabInactive: '#64748B',
+  tabInactive: '#94A3B8',
   
   // Special
   overlay: 'rgba(0, 0, 0, 0.7)',

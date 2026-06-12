@@ -341,7 +341,7 @@ export default function ReceiptDetailScreen() {
           </View>
           {receipt.receipt_number ? (
             <View style={styles.metaItem}>
-              <Text style={styles.metaLabel}>Αρ.</Text>
+              <Text style={styles.metaLabel}>{t('number_abbr')}</Text>
               <Text style={styles.metaValue} numberOfLines={1}>{receipt.receipt_number}</Text>
             </View>
           ) : null}
