@@ -9,37 +9,59 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "gradleCommand": ":app:assembleDebug",
+        "image": "ubuntu-22.04-jdk-17-ndk-r21e"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "image": "ubuntu-22.04-jdk-17-ndk-r21e"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app"
-      }
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "889769499922-6p2t89jofqvp5711qvhn2hh20mdvmgrc.apps.googleusercontent.com"
+      },
+      "channel": "preview"
     },
     "preview-production": {
       "distribution": "internal",
       "extends": "production",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "image": "ubuntu-22.04-jdk-17-ndk-r21e"
       },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app"
       }
     },
-    "production": {
-      "android": {
-        "buildType": "app-bundle"
-      },
+    "preview-ios": {
+      "distribution": "internal",
       "ios": {
-        "resourceClass": "m1-medium"
+        "simulator": true,
+        "resourceClass": "m-medium"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app"
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com"
+      }
+    },
+    "production": {
+      "credentialsSource": "local",
+      "android": {
+        "buildType": "app-bundle",
+        "image": "ubuntu-22.04-jdk-17-ndk-r21e"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com"
       }
     }
   },
