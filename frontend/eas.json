@@ -46,7 +46,7 @@
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "889769499922-i22pgttm5dnai4804fvsft7l8sacrn0n.apps.googleusercontent.com"
       }
     },
     "production": {
@@ -61,7 +61,7 @@
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "REPLACE_WITH_IOS_CLIENT_ID.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "889769499922-i22pgttm5dnai4804fvsft7l8sacrn0n.apps.googleusercontent.com"
       }
     }
   },

@@ -51,7 +51,7 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-2145791775687228~3322381104",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+          "iosAppId": "ca-app-pub-2145791775687228~7716615162",
           "userTrackingUsageDescription": "Η συγκατάθεσή σας θα χρησιμοποιηθεί για την προβολή σχετικότερων διαφημίσεων."
         }
       ],
@@ -77,7 +77,7 @@
       [
         "@react-native-google-signin/google-signin",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.REPLACE_WITH_IOS_CLIENT_ID"
+          "iosUrlScheme": "com.googleusercontent.apps.889769499922-i22pgttm5dnai4804fvsft7l8sacrn0n"
         }
       ],
       "expo-updates",
