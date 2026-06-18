@@ -26,12 +26,18 @@ export function OfflineBanner(): React.ReactElement {
   const translateY = useRef(new Animated.Value(-120)).current;
 
   // Establish initial state and re-check when the app is foregrounded.
+  // Delay the first probe by 3 s: on Android the network stack is not ready
+  // immediately at app launch, so an instant probe gives a false "offline"
+  // result and shows the red banner unnecessarily.
   useEffect(() => {
-    connectivity.probe();
+    const initialTimer = setTimeout(() => connectivity.probe(), 3000);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') connectivity.probe();
     });
-    return () => sub.remove();
+    return () => {
+      clearTimeout(initialTimer);
+      sub.remove();
+    };
   }, []);
 
   // While offline, poll for recovery.
