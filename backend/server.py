@@ -6478,6 +6478,232 @@ async def request_account_deletion(email: str = Form(...)):
     
     return {"success": True, "message": "Το αίτημα διαγραφής καταχωρήθηκε. Θα επεξεργαστεί εντός 48 ωρών."}
 
+# Privacy Policy Page
+@api_router.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    """Serve the app privacy policy."""
+    html = '''<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Πολιτική Απορρήτου – apodixxi+</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      line-height: 1.7;
+      padding: 24px 16px 64px;
+    }
+    .container { max-width: 760px; margin: 0 auto; }
+    .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 40px; }
+    .logo-icon {
+      width: 48px; height: 48px; background: #6366f1;
+      border-radius: 12px; display: flex; align-items: center;
+      justify-content: center; font-size: 24px;
+    }
+    .logo-text { font-size: 22px; font-weight: 700; color: #f1f5f9; }
+    .logo-sub { font-size: 12px; color: #94a3b8; }
+    h1 { font-size: 28px; font-weight: 700; color: #f1f5f9; margin-bottom: 8px; }
+    .updated { font-size: 13px; color: #64748b; margin-bottom: 36px; }
+    h2 {
+      font-size: 16px; font-weight: 600; color: #818cf8;
+      text-transform: uppercase; letter-spacing: .05em;
+      margin: 36px 0 12px; padding-bottom: 6px;
+      border-bottom: 1px solid #1e293b;
+    }
+    p { margin-bottom: 12px; color: #cbd5e1; font-size: 15px; }
+    ul { padding-left: 20px; margin-bottom: 12px; }
+    li { color: #cbd5e1; font-size: 15px; margin-bottom: 6px; }
+    .tag {
+      display: inline-block; background: #1e293b; color: #94a3b8;
+      border-radius: 4px; font-size: 12px; padding: 2px 8px;
+      margin: 2px; font-family: monospace;
+    }
+    .highlight {
+      background: #1e293b; border-left: 3px solid #6366f1;
+      border-radius: 0 8px 8px 0; padding: 14px 16px; margin: 16px 0;
+    }
+    .highlight p { margin: 0; }
+    .no-collect {
+      background: #0f2a1a; border-left: 3px solid #22c55e;
+      border-radius: 0 8px 8px 0; padding: 14px 16px; margin: 16px 0;
+    }
+    .no-collect p { margin: 0; color: #86efac; }
+    a { color: #818cf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid #1e293b;
+      font-size: 13px; color: #475569; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="logo">
+    <div class="logo-icon">🧾</div>
+    <div>
+      <div class="logo-text">apodixxi+</div>
+      <div class="logo-sub">Greek Receipt Scanner</div>
+    </div>
+  </div>
+
+  <h1>Πολιτική Απορρήτου</h1>
+  <p class="updated">Τελευταία ενημέρωση: Ιούνιος 2026</p>
+
+  <p>
+    Η εφαρμογή <strong>apodixxi+</strong> σας επιτρέπει να σαρώνετε αποδείξεις ελληνικών
+    supermarket, να παρακολουθείτε τις αγορές σας και να λαμβάνετε έξυπνες αναλύσεις
+    δαπανών. Η προστασία των προσωπικών σας δεδομένων είναι προτεραιότητά μας.
+  </p>
+
+  <!-- 1 -->
+  <h2>1. Δεδομένα που συλλέγουμε</h2>
+
+  <p><strong>Δεδομένα λογαριασμού</strong></p>
+  <ul>
+    <li>Διεύθυνση email (για εγγραφή / σύνδεση)</li>
+    <li>Πληροφορίες Google λογαριασμού, μόνο αν επιλέξετε «Σύνδεση με Google» (όνομα, email)</li>
+  </ul>
+
+  <p><strong>Δεδομένα αποδείξεων</strong></p>
+  <ul>
+    <li>Όνομα καταστήματος, ημερομηνία, σύνολο</li>
+    <li>Προϊόντα με τιμές, ποσότητες και ΦΠΑ</li>
+    <li>Αριθμός απόδειξης, τρόπος πληρωμής</li>
+    <li>URL που προέκυψε από τη σάρωση QR code</li>
+  </ul>
+
+  <p><strong>Τεχνικά δεδομένα</strong></p>
+  <ul>
+    <li>Αναγνωριστικό συσκευής (device ID) — δημιουργείται τοπικά, δεν συνδέεται με ταυτότητα</li>
+  </ul>
+
+  <p><strong>Δεδομένα χρήσης AI</strong></p>
+  <ul>
+    <li>Ερωτήσεις που υποβάλλετε στον AI βοηθό (αποθηκεύονται αποκλειστικά για να σας επιστραφεί απάντηση)</li>
+    <li>Κατηγοριοποιήσεις προϊόντων (ανώνυμα, για βελτίωση της ακρίβειας ταξινόμησης)</li>
+  </ul>
+
+  <!-- 2 -->
+  <h2>2. Δεδομένα που ΔΕΝ συλλέγουμε</h2>
+  <div class="no-collect">
+    <p>
+      ✅ &nbsp;Δεν έχουμε πρόσβαση στην κάμερά σας — χρησιμοποιείται <em>μόνο</em> τοπικά
+      για ανάγνωση QR code και καμία εικόνα δεν αποστέλλεται στον server.<br><br>
+      ✅ &nbsp;Δεν συλλέγουμε SMS, ιστορικό κλήσεων, ήχο, τοποθεσία, επαφές ή αρχεία.<br><br>
+      ✅ &nbsp;Δεν πουλάμε δεδομένα σε τρίτους.
+    </p>
+  </div>
+
+  <!-- 3 -->
+  <h2>3. Πώς χρησιμοποιούμε τα δεδομένα</h2>
+  <ul>
+    <li>Εμφάνιση του ιστορικού αποδείξεών σας</li>
+    <li>Δημιουργία στατιστικών δαπανών ανά κατηγορία και κατάστημα</li>
+    <li>Σύγκριση τιμών μεταξύ καταστημάτων</li>
+    <li>Παροχή AI αναλύσεων και προτάσεων εξοικονόμησης</li>
+    <li>Βελτίωση της αυτόματης κατηγοριοποίησης προϊόντων μέσω συλλογικής μάθησης (ανώνυμα)</li>
+  </ul>
+
+  <!-- 4 -->
+  <h2>4. Αποθήκευση & ασφάλεια</h2>
+  <p>
+    Τα δεδομένα αποθηκεύονται σε MongoDB στον server <code>api.apodixxi.app</code>,
+    ο οποίος φιλοξενείται σε ασφαλές περιβάλλον εντός ΕΕ. Η επικοινωνία γίνεται
+    αποκλειστικά μέσω HTTPS/TLS.
+  </p>
+  <p>
+    Τα ευαίσθητα διαπιστευτήρια (tokens) αποθηκεύονται στο
+    <span class="tag">Expo SecureStore</span> της συσκευής σας, όχι σε απλό κείμενο.
+  </p>
+
+  <!-- 5 -->
+  <h2>5. Τρίτα μέρη (Third Parties)</h2>
+  <ul>
+    <li>
+      <strong>Google Sign-In</strong> — Αν επιλέξετε σύνδεση με Google,
+      εφαρμόζονται οι
+      <a href="https://policies.google.com/privacy" target="_blank">Πολιτικές Απορρήτου της Google</a>.
+    </li>
+    <li>
+      <strong>Google AdMob</strong> — Η εφαρμογή εμφανίζει διαφημίσεις μέσω AdMob.
+      Η Google ενδέχεται να χρησιμοποιεί ανώνυμα διαφημιστικά αναγνωριστικά.
+      Δείτε τις <a href="https://support.google.com/admob/answer/6128543" target="_blank">πολιτικές AdMob</a>.
+    </li>
+    <li>
+      <strong>Expo / EAS</strong> — Ο πάροχος υποδομής της εφαρμογής (updates OTA, builds).
+    </li>
+    <li>
+      <strong>AI (Gemini)</strong> — Τα μηνύματά σας προς τον AI βοηθό αποστέλλονται
+      στο Gemini API της Google για επεξεργασία. Δεν χρησιμοποιούνται για εκπαίδευση
+      μοντέλων σύμφωνα με τους όρους του API.
+    </li>
+  </ul>
+
+  <!-- 6 -->
+  <h2>6. Διατήρηση δεδομένων</h2>
+  <p>
+    Τα δεδομένα σας διατηρούνται όσο ο λογαριασμός σας είναι ενεργός.
+    Μπορείτε να ζητήσετε <strong>πλήρη διαγραφή</strong> του λογαριασμού και
+    όλων των δεδομένων σας από τη σελίδα:
+  </p>
+  <div class="highlight">
+    <p>
+      🗑️ &nbsp;<a href="https://api.apodixxi.app/delete-account">api.apodixxi.app/delete-account</a>
+    </p>
+  </div>
+
+  <!-- 7 -->
+  <h2>7. Δικαιώματά σας (GDPR)</h2>
+  <p>Ως χρήστης εντός ΕΕ έχετε δικαίωμα:</p>
+  <ul>
+    <li>Πρόσβασης στα δεδομένα σας</li>
+    <li>Διόρθωσης ανακριβών δεδομένων</li>
+    <li>Διαγραφής («δικαίωμα στη λήθη»)</li>
+    <li>Φορητότητας δεδομένων (export)</li>
+    <li>Εναντίωσης στην επεξεργασία</li>
+  </ul>
+  <p>
+    Για άσκηση οποιουδήποτε δικαιώματος, επικοινωνήστε μαζί μας στο email παρακάτω.
+  </p>
+
+  <!-- 8 -->
+  <h2>8. Ηλικία χρήστη</h2>
+  <p>
+    Η εφαρμογή απευθύνεται σε χρήστες <strong>άνω των 13 ετών</strong>.
+    Δεν συλλέγουμε εσκεμμένα δεδομένα από παιδιά κάτω των 13.
+  </p>
+
+  <!-- 9 -->
+  <h2>9. Αλλαγές στην Πολιτική</h2>
+  <p>
+    Ενδέχεται να ενημερώνουμε την παρούσα πολιτική. Σε σημαντικές αλλαγές θα
+    λαμβάνετε ειδοποίηση εντός της εφαρμογής. Η συνέχιση χρήσης μετά από αλλαγή
+    θεωρείται αποδοχή της νέας έκδοσης.
+  </p>
+
+  <!-- 10 -->
+  <h2>10. Επικοινωνία</h2>
+  <div class="highlight">
+    <p>
+      Για οποιαδήποτε ερώτηση σχετικά με τα δεδομένα σας:<br>
+      📧 &nbsp;<a href="mailto:privacy@apodixxi.app">privacy@apodixxi.app</a>
+    </p>
+  </div>
+
+  <footer>
+    &copy; 2026 apodixxi+ &nbsp;·&nbsp;
+    <a href="https://api.apodixxi.app/privacy">api.apodixxi.app/privacy</a>
+  </footer>
+
+</div>
+</body>
+</html>'''
+    return HTMLResponse(content=html)
+
+
 # Account Deletion Web Page
 @api_router.get("/delete-account", response_class=HTMLResponse)
 async def delete_account_page():
