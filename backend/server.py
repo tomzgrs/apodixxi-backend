@@ -3402,6 +3402,38 @@ async def delete_receipt(receipt_id: str):
     return {"status": "deleted"}
 
 
+class ItemCategoryUpdate(BaseModel):
+    category: str
+
+@api_router.patch("/receipts/{receipt_id}/items/{item_index}/category")
+async def update_item_category(receipt_id: str, item_index: int, body: ItemCategoryUpdate):
+    """Update a product's category and save it to the collective learning DB."""
+    if body.category not in MASTER_CATEGORIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Μη έγκυρη κατηγορία. Επιτρεπόμενες: {MASTER_CATEGORIES}"
+        )
+    receipt = await db.receipts.find_one({"id": receipt_id})
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    items = receipt.get("items", [])
+    if item_index < 0 or item_index >= len(items):
+        raise HTTPException(status_code=404, detail="Item index out of range")
+
+    items[item_index]["category"] = body.category
+    await db.receipts.update_one({"id": receipt_id}, {"$set": {"items": items}})
+
+    # Collective learning: save user correction with higher weight
+    product_name = items[item_index].get("description", items[item_index].get("name", ""))
+    if product_name:
+        # User corrections count double — call twice to outweigh AI guesses
+        await save_learned_category(product_name, body.category, source="user_correction")
+        await save_learned_category(product_name, body.category, source="user_correction")
+
+    return {"status": "updated", "category": body.category, "product": product_name}
+
+
 @api_router.get("/products/search")
 async def search_products(q: str = Query(..., min_length=2), device_id: str = Query("")):
     query = {"description": {"$regex": q, "$options": "i"}}
@@ -5694,6 +5726,83 @@ MASTER_CATEGORIES = [
     "Άλλο"
 ]
 
+# ── Collective Learning ──────────────────────────────────────────────────────
+# Product→category knowledge base built from all users' corrections.
+# Uses the `product_categories_learned` MongoDB collection.
+
+def _normalize_product_key(name: str) -> str:
+    """Normalize a product name to a stable lookup key (no accents, lowercase)."""
+    if not name:
+        return ""
+    nfkd = unicodedata.normalize('NFD', str(name))
+    no_marks = ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
+    cleaned = re.sub(r'[^\w\s]', ' ', no_marks.lower())
+    return re.sub(r'\s+', ' ', cleaned).strip()
+
+async def get_learned_category(product_name: str) -> Optional[str]:
+    """Return the learned category for a product, or None if unknown."""
+    key = _normalize_product_key(product_name)
+    if not key:
+        return None
+    doc = await db.product_categories_learned.find_one({"key": key})
+    if doc and doc.get("corrections_count", 0) >= 1:
+        return doc.get("category")
+    return None
+
+async def save_learned_category(product_name: str, category: str, source: str = "ai") -> None:
+    """Upsert a product→category mapping into the collective learning DB."""
+    key = _normalize_product_key(product_name)
+    if not key or category not in MASTER_CATEGORIES:
+        return
+    await db.product_categories_learned.update_one(
+        {"key": key},
+        {
+            "$set": {
+                "key": key,
+                "original_name": product_name,
+                "category": category,
+                "last_source": source,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "$inc": {"corrections_count": 1},
+        },
+        upsert=True,
+    )
+
+async def get_few_shot_examples(limit: int = 10) -> str:
+    """Return top learned product→category pairs as few-shot text for AI prompts."""
+    docs = await db.product_categories_learned.find(
+        {"corrections_count": {"$gte": 1}},
+        {"_id": 0, "original_name": 1, "category": 1, "corrections_count": 1},
+    ).sort("corrections_count", -1).limit(limit).to_list(limit)
+    if not docs:
+        return ""
+    lines = "\n".join([f'  - "{d["original_name"]}" → {d["category"]}' for d in docs])
+    return f"\nΓνωστά προϊόντα (από ιστορικό χρηστών):\n{lines}"
+
+def _match_master_category(raw: str) -> str:
+    """Match a raw AI response string to the closest MASTER_CATEGORY."""
+    raw_lower = raw.lower().strip()
+    for cat in MASTER_CATEGORIES:
+        if cat.lower() in raw_lower or raw_lower in cat.lower():
+            return cat
+    # Partial keyword fallback
+    keyword_map = {
+        "τροφ": "Τρόφιμα & Ποτά", "ποτ": "Τρόφιμα & Ποτά", "γαλακ": "Τρόφιμα & Ποτά",
+        "αναψ": "Τρόφιμα & Ποτά", "κρε": "Τρόφιμα & Ποτά", "ψαρ": "Τρόφιμα & Ποτά",
+        "προσωπ": "Προσωπική Φροντίδα", "καλλ": "Προσωπική Φροντίδα", "σαμπ": "Προσωπική Φροντίδα",
+        "καθαρ": "Καθαριότητα & Σπίτι", "απορρ": "Καθαριότητα & Σπίτι", "χαρτ": "Καθαριότητα & Σπίτι",
+        "βρεφ": "Βρεφικά Είδη", "παιδ": "Βρεφικά Είδη",
+        "κατοικ": "Κατοικίδια", "ζω": "Κατοικίδια",
+        "bazaar": "Είδη Bazaar / Σπιτιού", "σπιτ": "Είδη Bazaar / Σπιτιού",
+    }
+    for kw, cat in keyword_map.items():
+        if kw in raw_lower:
+            return cat
+    return "Άλλο"
+
+# ────────────────────────────────────────────────────────────────────────────
+
 async def generate_ai_content(prompt: str) -> str:
     """Generate content using Gemini AI."""
     if not AI_AVAILABLE:
@@ -5720,11 +5829,18 @@ async def generate_ai_content(prompt: str) -> str:
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
 async def classify_product_with_ai(product_name: str, store_name: str = "") -> str:
-    """Classify a product into one of the master categories using Gemini AI."""
+    """Classify a product into one of the master categories.
+    Checks the collective learning DB first; falls back to AI with few-shot examples."""
+    # 1. Check collective learning DB
+    learned = await get_learned_category(product_name)
+    if learned:
+        return learned
+
     if not AI_AVAILABLE:
         return "Άλλο"
-    
+
     try:
+        few_shot = await get_few_shot_examples(8)
         prompt = f"""Κατηγοριοποίησε το παρακάτω προϊόν supermarket σε ΜΙΑ από τις εξής κατηγορίες:
 1. Τρόφιμα & Ποτά (Γαλακτοκομικά, Αλλαντικά, Κρεοπωλείο, Μαναβική, Κατεψυγμένα, Σνακ, Ποτά/Αναψυκτικά)
 2. Προσωπική Φροντίδα (Σαμπουάν, Αφρόλουτρα, Στοματική Υγιεινή, Καλλυντικά)
@@ -5733,33 +5849,48 @@ async def classify_product_with_ai(product_name: str, store_name: str = "") -> s
 5. Κατοικίδια (Τροφές ζώων, Άμμος γάτας)
 6. Είδη Bazaar / Σπιτιού (Κουζινικά, Ηλεκτρικές συσκευές, Ένδυση)
 7. Άλλο
-
+{few_shot}
 Προϊόν: {product_name}
 {f'Κατάστημα: {store_name}' if store_name else ''}
 
 Απάντησε ΜΟΝΟ με το όνομα της κατηγορίας, χωρίς εξηγήσεις."""
 
         response_text = await generate_ai_content(prompt)
-        category = response_text.strip()
-        
-        # Validate response is one of our categories
-        for master_cat in MASTER_CATEGORIES:
-            if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
-                return master_cat
-        
-        return "Άλλο"
+        category = _match_master_category(response_text)
+        # Save result to collective learning DB (source="ai")
+        await save_learned_category(product_name, category, source="ai")
+        return category
     except Exception as e:
         logger.error(f"AI classification error: {e}")
         return "Άλλο"
 
 async def batch_classify_products(products: list) -> dict:
-    """Classify multiple products in a single AI call for efficiency."""
-    if not AI_AVAILABLE or not products:
-        return {p: "Άλλο" for p in products}
-    
+    """Classify multiple products efficiently.
+    Checks collective learning DB first; sends only unknown ones to AI."""
+    if not products:
+        return {}
+
+    result: dict = {}
+    unknown = []
+
+    # 1. Check collective learning DB for each product
+    for p in products[:50]:
+        learned = await get_learned_category(p)
+        if learned:
+            result[p] = learned
+        else:
+            unknown.append(p)
+
+    if not unknown:
+        return result
+
+    if not AI_AVAILABLE:
+        result.update({p: "Άλλο" for p in unknown})
+        return result
+
     try:
-        products_list = "\n".join([f"- {p}" for p in products[:50]])  # Limit to 50 products
-        
+        few_shot = await get_few_shot_examples(8)
+        products_list = "\n".join([f"- {p}" for p in unknown])
         prompt = f"""Κατηγοριοποίησε τα παρακάτω προϊόντα supermarket. Για κάθε προϊόν, δώσε ΜΙΑ από τις κατηγορίες:
 - Τρόφιμα & Ποτά
 - Προσωπική Φροντίδα
@@ -5768,7 +5899,7 @@ async def batch_classify_products(products: list) -> dict:
 - Κατοικίδια
 - Είδη Bazaar / Σπιτιού
 - Άλλο
-
+{few_shot}
 Προϊόντα:
 {products_list}
 
@@ -5776,28 +5907,26 @@ async def batch_classify_products(products: list) -> dict:
 Μόνο JSON, χωρίς εξηγήσεις."""
 
         response_text = await generate_ai_content(prompt)
-        
-        # Try to parse JSON response
-        import re
-        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+
+        # Robust JSON extraction (handles nested braces)
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
         if json_match:
-            result = json.loads(json_match.group())
-            # Validate categories
-            validated = {}
-            for product, category in result.items():
-                matched = False
-                for master_cat in MASTER_CATEGORIES:
-                    if master_cat.lower() in category.lower() or category.lower() in master_cat.lower():
-                        validated[product] = master_cat
-                        matched = True
-                        break
-                if not matched:
-                    validated[product] = "Άλλο"
-            return validated
-        return {p: "Άλλο" for p in products}
+            ai_result = json.loads(json_match.group())
+            for product, raw_cat in ai_result.items():
+                category = _match_master_category(raw_cat)
+                result[product] = category
+                await save_learned_category(product, category, source="ai_batch")
+
+        # Fill any remaining unknowns
+        for p in unknown:
+            if p not in result:
+                result[p] = "Άλλο"
+
+        return result
     except Exception as e:
         logger.error(f"Batch AI classification error: {e}")
-        return {p: "Άλλο" for p in products}
+        result.update({p: "Άλλο" for p in unknown if p not in result})
+        return result
 
 class AIInsightRequest(BaseModel):
     device_id: str
@@ -5895,41 +6024,98 @@ async def get_ai_insights(request: AIInsightRequest):
 
 @api_router.post("/ai/chat")
 async def ai_chat(request: AIChatRequest):
-    """Chat with AI assistant about shopping habits."""
+    """Chat with AI assistant about shopping habits.
+    Provides full receipt context (products, prices, dates) and cross-store price comparisons.
+    Semantic matching (e.g. 'cola' → Coca Cola, Pepsi Cola) is handled by the LLM."""
     if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
-    
-    # Fetch user's receipt data for context
-    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(50)
-    
-    # Build context
-    total_spent = sum(r.get("total_amount", r.get("total", 0)) for r in receipts)
-    recent_receipts = receipts[:5] if receipts else []
-    
-    context = f"""
-Πληροφορίες χρήστη:
-- Αριθμός αποδείξεων: {len(receipts)}
-- Συνολικά έξοδα: {total_spent:.2f}€
-- Πρόσφατες αγορές: {', '.join([r.get('store_name', 'Άγνωστο') for r in recent_receipts])}
-"""
-    
-    session_id = request.session_id or f"chat_{request.device_id}_{uuid.uuid4().hex[:8]}"
-    
-    try:
-        system_prompt = f"""Είσαι ο AI βοηθός του apodixxi, μιας εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
-Απαντάς πάντα στα ελληνικά, σύντομα και φιλικά.
-{context}
-Μπορείς να βοηθήσεις με ερωτήσεις σχετικά με:
-- Έξοδα και στατιστικά αγορών
-- Συμβουλές εξοικονόμησης
-- Σύγκριση τιμών μεταξύ καταστημάτων
-- Προτάσεις προϊόντων
 
-Χρήστης: {request.message}"""
-        
-        response_text = await generate_ai_content(system_prompt)
-        
-        # Store chat message in database
+    # Fetch ALL user receipts sorted by date descending
+    receipts = await db.receipts.find(
+        {"device_id": request.device_id}
+    ).sort([("receipt_date", -1), ("created_at", -1)]).to_list(300)
+
+    total_spent = sum(r.get("total_amount", r.get("total", 0)) for r in receipts)
+
+    # Build per-receipt detail lines and cross-store price map
+    receipt_lines = []
+    product_price_map: dict = {}  # normalized_key → [{name, store, price, date}]
+
+    for r in receipts:
+        rdate = r.get("receipt_date") or (r.get("date") or r.get("created_at", ""))[:10]
+        store = r.get("store_name", "Άγνωστο")
+        item_parts = []
+        for item in r.get("items", []):
+            name = item.get("description") or item.get("name", "")
+            price = item.get("total_value") or item.get("total_price") or 0.0
+            unit_price = item.get("unit_price") or 0.0
+            qty = item.get("quantity") or 1
+            if not name:
+                continue
+            display_price = unit_price if unit_price and unit_price != price else price
+            item_parts.append(f"{name} x{qty}={price:.2f}€")
+            # Build cross-store price lookup
+            key = _normalize_product_key(name)
+            if key:
+                product_price_map.setdefault(key, []).append({
+                    "name": name, "store": store,
+                    "price": display_price, "date": rdate
+                })
+
+        if item_parts:
+            receipt_lines.append(
+                f"[{rdate}] {store} ({r.get('total', 0):.2f}€): "
+                + "; ".join(item_parts[:20])
+            )
+
+    # Build cross-store price comparison summary (from this user's history)
+    comparison_lines = []
+    for key, entries in product_price_map.items():
+        unique_stores = {}
+        for e in entries:
+            s = e["store"]
+            if s not in unique_stores or e["price"] < unique_stores[s]["price"]:
+                unique_stores[s] = e
+        if len(unique_stores) >= 2:
+            sorted_stores = sorted(unique_stores.values(), key=lambda x: x["price"])
+            cheapest = sorted_stores[0]
+            priciest = sorted_stores[-1]
+            if priciest["price"] > cheapest["price"] * 1.05:
+                saving = priciest["price"] - cheapest["price"]
+                comparison_lines.append(
+                    f'{cheapest["name"]}: {cheapest["store"]} {cheapest["price"]:.2f}€ '
+                    f'vs {priciest["store"]} {priciest["price"]:.2f}€ '
+                    f'(εξοικονόμηση {saving:.2f}€/τεμ)'
+                )
+
+    history_text = "\n".join(receipt_lines) if receipt_lines else "Δεν υπάρχουν αποδείξεις ακόμα."
+    comparison_text = (
+        "\nΣύγκριση τιμών από το ιστορικό σου:\n" + "\n".join(comparison_lines[:15])
+        if comparison_lines else ""
+    )
+
+    few_shot = await get_few_shot_examples(5)
+    session_id = request.session_id or f"chat_{request.device_id}_{uuid.uuid4().hex[:8]}"
+
+    try:
+        system_prompt = f"""Είσαι ο AI βοηθός του apodixxi, εφαρμογής παρακολούθησης αποδείξεων supermarket στην Ελλάδα.
+Απαντάς ΠΑΝΤΑ στα ελληνικά, σύντομα και φιλικά.
+
+Έχεις πρόσβαση στο ΠΛΗΡΕΣ ιστορικό αγορών του χρήστη με προϊόντα, ποσότητες, τιμές και ημερομηνίες.
+Όταν ρωτάς για ένα προϊόν (π.χ. "cola"), ψάξε για ΟΛΑ τα παρόμοια ονόματα (Coca Cola, Pepsi Cola, Cola Zero κτλ.).
+Μπορείς να απαντήσεις για συγκεκριμένες τιμές, ημερομηνίες και συγκρίσεις μεταξύ καταστημάτων.
+{few_shot}
+
+--- ΙΣΤΟΡΙΚΟ ΑΓΟΡΩΝ (πιο πρόσφατα πρώτα) ---
+Συνολικές αποδείξεις: {len(receipts)} | Συνολικά έξοδα: {total_spent:.2f}€
+
+{history_text}
+{comparison_text}
+--- ΤΕΛΟΣ ΙΣΤΟΡΙΚΟΥ ---"""
+
+        full_prompt = f"{system_prompt}\n\nΧρήστης: {request.message}"
+        response_text = await generate_ai_content(full_prompt)
+
         await db.ai_chats.insert_one({
             "device_id": request.device_id,
             "session_id": session_id,
@@ -5937,11 +6123,8 @@ async def ai_chat(request: AIChatRequest):
             "ai_response": response_text,
             "created_at": datetime.now(timezone.utc).isoformat()
         })
-        
-        return {
-            "response": response_text,
-            "session_id": session_id
-        }
+
+        return {"response": response_text, "session_id": session_id}
     except Exception as e:
         logger.error(f"AI chat error: {e}")
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
