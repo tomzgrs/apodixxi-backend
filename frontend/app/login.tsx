@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { useAuth, API_URL } from '../src/AuthContext';
 import { useTheme } from '../src/ThemeContext';
 import * as WebBrowser from 'expo-web-browser';
@@ -23,9 +24,12 @@ import { I18nContext } from './_layout';
 
 WebBrowser.maybeCompleteAuthSession();
 
-// App version - hardcoded for production stability
-const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '33';
+const APP_VERSION = Constants.expoConfig?.version ?? '?';
+const BUILD_NUMBER = String(
+  Constants.expoConfig?.android?.versionCode ??
+  Constants.expoConfig?.ios?.buildNumber ??
+  '?'
+);
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password';
 
