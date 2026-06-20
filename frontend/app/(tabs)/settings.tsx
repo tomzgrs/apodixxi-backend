@@ -11,9 +11,13 @@ import { useAuth } from '../../src/AuthContext';
 import { Typography, Spacing, Radius, Shadows } from '../../src/theme';
 import { api } from '../../src/api';
 import { getStoreLogo } from '../../src/storeLogos';
-// App version - hardcoded for production stability
-const APP_VERSION = '1.0.0';
-const BUILD_NUMBER = '33';
+import Constants from 'expo-constants';
+const APP_VERSION = Constants.expoConfig?.version ?? '?';
+const BUILD_NUMBER = String(
+  Constants.expoConfig?.android?.versionCode ??
+  Constants.expoConfig?.ios?.buildNumber ??
+  '?'
+);
 
 export default function SettingsScreen() {
   const { t, lang, setLang } = useContext(I18nContext);
