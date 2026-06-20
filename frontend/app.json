@@ -2,7 +2,7 @@
   "expo": {
     "name": "apodixxi",
     "slug": "apodixxi",
-    "version": "1.0.0",
+    "version": "1.1.36",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -21,7 +21,7 @@
     },
     "android": {
       "package": "com.apodixxi.app",
-      "versionCode": 35,
+      "versionCode": 36,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#111827"
@@ -80,15 +80,7 @@
           "iosUrlScheme": "com.googleusercontent.apps.889769499922-i22pgttm5dnai4804fvsft7l8sacrn0n"
         }
       ],
-      "expo-updates",
-      [
-        "@sentry/react-native",
-        {
-          "organization": "REPLACE_WITH_SENTRY_ORG",
-          "project": "REPLACE_WITH_SENTRY_PROJECT",
-          "url": "https://sentry.io/"
-        }
-      ]
+      "expo-updates"
     ],
     "experiments": {
       "typedRoutes": true
