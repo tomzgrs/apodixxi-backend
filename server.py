@@ -2844,7 +2844,7 @@ async def get_recommendations(
             {"start_date": {"$exists": False}},
             {"start_date": {"$lte": now}}
         ]
-    }).sort("priority", -1).limit(limit * 3).to_list(limit * 3)
+    }).sort("priority", -1).to_list(None)
 
     # Collect user's purchased mainCategories for category-targeted promotions
     user_receipts = await db.receipts.find(
@@ -2874,9 +2874,9 @@ async def get_recommendations(
             general_promos.append(promo)
 
     # Show matching promotions first, then general ones — all users see all promotions
+    # Every qualifying, in-window promotion is shown (no cap); limit only caps the
+    # auto-generated extras appended further below.
     for promo in matching_promos + general_promos:
-        if len(recommendations) >= limit:
-            break
         recommendations.append({
             "id": promo["_id"],
             "type": "promotion",
@@ -2893,8 +2893,13 @@ async def get_recommendations(
             "is_sponsored": True
         })
     
+    # All admin promotions added so far must always survive; limit only caps the
+    # auto-generated extras that follow, so many promotions never starve the extras.
+    num_promotions = len(recommendations)
+    auto_cap = num_promotions + limit
+
     # 2. Generate automatic recommendations based on purchase history
-    if len(recommendations) < limit:
+    if len(recommendations) < auto_cap:
         # Get user's frequent products
         pipeline = [
             {"$match": {"device_id": device_id}},
@@ -2914,7 +2919,7 @@ async def get_recommendations(
         
         # Find better prices for frequent products
         for product in frequent_products:
-            if len(recommendations) >= limit:
+            if len(recommendations) >= auto_cap:
                 break
             
             product_name = product["_id"]
@@ -2947,7 +2952,7 @@ async def get_recommendations(
                             break
     
     # 3. Add store-based recommendations
-    if len(recommendations) < limit and location == "dashboard":
+    if len(recommendations) < auto_cap and location == "dashboard":
         # Get user's most visited store
         store_pipeline = [
             {"$match": {"device_id": device_id}},
@@ -2970,8 +2975,10 @@ async def get_recommendations(
                 "is_sponsored": False
             })
     
+    # Return every qualifying promotion plus the (capped) auto-generated extras.
+    # Do NOT truncate to limit here, otherwise promotions would be cut again.
     return {
-        "recommendations": recommendations[:limit],
+        "recommendations": recommendations,
         "total": len(recommendations)
     }
 
