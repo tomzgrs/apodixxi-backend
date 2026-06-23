@@ -21,8 +21,7 @@
       },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.apodixxi.app",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "889769499922-6p2t89jofqvp5711qvhn2hh20mdvmgrc.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "889769499922-mh96og0dig0nohhvgl6htv59qjqv147j.apps.googleusercontent.com"
       },
       "channel": "preview"
     },
@@ -50,13 +49,14 @@
       }
     },
     "production": {
-      "credentialsSource": "local",
       "channel": "production",
       "android": {
+        "credentialsSource": "local",
         "buildType": "app-bundle",
         "image": "ubuntu-22.04-jdk-17-ndk-r21e"
       },
       "ios": {
+        "credentialsSource": "local",
         "resourceClass": "m-medium"
       },
       "env": {
