@@ -4326,10 +4326,10 @@ async def delete_products_by_store(store_name: str = Query(...)):
 
 # Admin endpoint to delete receipts by store name
 @api_router.delete("/admin/receipts/by-store")
-async def delete_receipts_by_store(store_name: str = Query(...), device_id: str = Query(...)):
-    """Delete all receipts from a specific store for a device."""
+async def delete_receipts_by_store(store_name: str = Query(...), device_id: str = Query(None), current_user: dict = Depends(get_current_user)):
+    """Delete all receipts from a specific store for the authenticated account."""
     result = await db.receipts.delete_many({
-        "device_id": device_id,
+        **receipt_owner_query(current_user),
         "store_name": {"$regex": store_name, "$options": "i"}
     })
     return {"deleted_count": result.deleted_count, "store_name": store_name}
@@ -6582,13 +6582,13 @@ class AIRecommendationRequest(BaseModel):
     limit: int = 5
 
 @api_router.post("/ai/insights")
-async def get_ai_insights(request: AIInsightRequest):
+async def get_ai_insights(request: AIInsightRequest, current_user: dict = Depends(get_current_user)):
     """Get AI-powered insights about user's shopping habits."""
     if not AI_AVAILABLE:
         raise HTTPException(status_code=503, detail="AI service not available")
     
-    # Fetch user's receipt data
-    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(100)
+    # Fetch user's receipt data (scoped to the authenticated account)
+    receipts = await db.receipts.find(receipt_owner_query(current_user)).to_list(100)
     
     if not receipts:
         return {"insight": "Δεν υπάρχουν αρκετά δεδομένα για ανάλυση. Σκανάρετε περισσότερες αποδείξεις!"}
@@ -6662,13 +6662,13 @@ async def get_ai_insights(request: AIInsightRequest):
 
 
 @api_router.post("/ai/chat")
-async def ai_chat(request: AIChatRequest):
+async def ai_chat(request: AIChatRequest, current_user: dict = Depends(get_current_user)):
     """Chat with AI assistant about shopping habits."""
     if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
-    # Fetch user's receipt data for context
-    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(50)
+    # Fetch user's receipt data for context (scoped to the authenticated account)
+    receipts = await db.receipts.find(receipt_owner_query(current_user)).to_list(50)
     
     # Build context
     total_spent = sum(r.get("total_amount", r.get("total", 0)) for r in receipts)
@@ -6745,13 +6745,13 @@ async def ai_chat(request: AIChatRequest):
 
 
 @api_router.post("/ai/smart-recommendations")
-async def get_ai_recommendations(request: AIRecommendationRequest):
+async def get_ai_recommendations(request: AIRecommendationRequest, current_user: dict = Depends(get_current_user)):
     """Get AI-powered product recommendations based on shopping history."""
     if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
-    # Fetch user's purchase history
-    receipts = await db.receipts.find({"device_id": request.device_id}).to_list(100)
+    # Fetch user's purchase history (scoped to the authenticated account)
+    receipts = await db.receipts.find(receipt_owner_query(current_user)).to_list(100)
     
     if not receipts:
         return {"recommendations": [], "message": "Σκανάρετε αποδείξεις για εξατομικευμένες προτάσεις!"}
@@ -6816,22 +6816,23 @@ async def get_ai_recommendations(request: AIRecommendationRequest):
 
 
 @api_router.get("/ai/weekly-summary")
-async def get_weekly_summary(device_id: str):
+async def get_weekly_summary(device_id: str = Query(None), current_user: dict = Depends(get_current_user)):
     """Get AI-generated weekly shopping summary."""
     if not AI_AVAILABLE:
         raise HTTPException(status_code=500, detail="AI service not configured")
     
-    # Get receipts from last 7 days
+    # Get receipts from last 7 days (scoped to the authenticated account)
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    owner_q = receipt_owner_query(current_user)
     
     receipts = await db.receipts.find({
-        "device_id": device_id,
+        **owner_q,
         "created_at": {"$gte": week_ago.isoformat()}
     }).to_list(100)
     
     if not receipts:
         # Try getting all receipts if none in last week
-        receipts = await db.receipts.find({"device_id": device_id}).to_list(20)
+        receipts = await db.receipts.find(owner_q).to_list(20)
     
     if not receipts:
         return {
