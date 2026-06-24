@@ -154,6 +154,26 @@ async def get_optional_user(credentials: HTTPAuthorizationCredentials = Depends(
         pass
     return None
 
+
+def receipt_owner_query(user: dict) -> dict:
+    """Scope a receipts query to the authenticated account.
+
+    Receipts belong to an account (identified by user_id / user_email), NOT to
+    the physical device. This prevents one account from seeing another account's
+    receipts on a shared phone.
+    """
+    ors = []
+    uid = user.get("_id") if user else None
+    email = (user.get("email") or "").lower() if user else ""
+    if uid:
+        ors.append({"user_id": uid})
+    if email:
+        ors.append({"user_email": email})
+    if not ors:
+        # No identity -> match nothing rather than leaking everything
+        return {"_id": "__no_owner__"}
+    return {"$or": ors}
+
 # ============ AUTH MODELS ============
 
 class UserSignupRequest(BaseModel):
@@ -1497,6 +1517,8 @@ async def signup(request: UserSignupRequest):
     
     # Create user
     user_id = str(uuid.uuid4())
+    # Each account gets its OWN device_id; never adopt the client's shared one.
+    user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
     user = {
         "_id": user_id,
         "email": request.email.lower(),
@@ -1507,6 +1529,7 @@ async def signup(request: UserSignupRequest):
         "account_type": "free",  # free or paid
         "subscription_expires_at": None,
         "is_email_verified": False,
+        "device_id": user_device_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "last_login": datetime.now(timezone.utc).isoformat()
     }
@@ -1521,6 +1544,7 @@ async def signup(request: UserSignupRequest):
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "device_id": user_device_id,
         "user": {
             "id": user_id,
             "email": user["email"],
@@ -1528,7 +1552,8 @@ async def signup(request: UserSignupRequest):
             "phone": user["phone"],
             "auth_provider": user["auth_provider"],
             "account_type": user["account_type"],
-            "is_email_verified": user["is_email_verified"]
+            "is_email_verified": user["is_email_verified"],
+            "device_id": user_device_id
         }
     }
 
@@ -1547,22 +1572,10 @@ async def login(request: UserLoginRequest):
     if not verify_password(request.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Get or create device_id for user
-    # CRITICAL: Always use the user's stored device_id if exists, to preserve receipt history
-    # Only use client's device_id if user has no stored device_id
-    user_device_id = user.get("device_id")
-    
-    if not user_device_id:
-        # New user or user without device_id - use client's or generate new
-        user_device_id = request.device_id or f"dev_{uuid.uuid4().hex[:20]}"
-    elif request.device_id and request.device_id != user_device_id:
-        # Client has different device_id - merge receipts from client's device to user's device
-        # This ensures receipts scanned before login are preserved
-        await db.receipts.update_many(
-            {"device_id": request.device_id},
-            {"$set": {"device_id": user_device_id, "user_email": user["email"]}}
-        )
-        logger.info(f"Merged receipts from {request.device_id} to {user_device_id}")
+    # Each account keeps its OWN device_id. Never adopt the client's (shared)
+    # device_id and never merge receipts scanned by another account - receipts
+    # are owned by the account, not the physical phone.
+    user_device_id = user.get("device_id") or f"dev_{uuid.uuid4().hex[:20]}"
     
     # Update last login and device_id
     await db.users.update_one(
@@ -2629,13 +2642,8 @@ async def export_receipts_excel(user: dict = Depends(get_current_user)):
             detail="Η εξαγωγή δεδομένων είναι διαθέσιμη μόνο για συνδρομητές apodixxi+"
         )
     
-    # Get user's receipts
-    device_id = user.get("device_id")
-    
-    # Filter receipts by user's device_id
-    query = {}
-    if device_id:
-        query["device_id"] = device_id
+    # Receipts are owned by the account, not the device
+    query = receipt_owner_query(user)
     
     receipts = await db.receipts.find(query).sort("date", -1).to_list(1000)
     
@@ -2828,11 +2836,12 @@ class PromotionCreate(BaseModel):
 
 @api_router.get("/recommendations")
 async def get_recommendations(
-    device_id: str = Query(...),
+    current_user: dict = Depends(get_current_user),
     limit: int = Query(5, ge=1, le=20),
     location: str = Query("dashboard")  # dashboard, after_save, compare
 ):
     """Get personalized recommendations for a user."""
+    owner_q = receipt_owner_query(current_user)
     recommendations = []
     
     # 1. Get active admin promotions
@@ -2848,7 +2857,7 @@ async def get_recommendations(
 
     # Collect user's purchased mainCategories for category-targeted promotions
     user_receipts = await db.receipts.find(
-        {"device_id": device_id},
+        owner_q,
         {"items.mainCategory": 1}
     ).to_list(200)
     user_categories: set = set()
@@ -2902,7 +2911,7 @@ async def get_recommendations(
     if len(recommendations) < auto_cap:
         # Get user's frequent products
         pipeline = [
-            {"$match": {"device_id": device_id}},
+            {"$match": owner_q},
             {"$unwind": "$items"},
             {"$group": {
                 "_id": {"$toUpper": "$items.description"},
@@ -2955,7 +2964,7 @@ async def get_recommendations(
     if len(recommendations) < auto_cap and location == "dashboard":
         # Get user's most visited store
         store_pipeline = [
-            {"$match": {"device_id": device_id}},
+            {"$match": owner_q},
             {"$group": {"_id": "$store_name", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": 1}
@@ -2985,15 +2994,17 @@ async def get_recommendations(
 
 @api_router.get("/recommendations/after-save")
 async def get_after_save_recommendations(
-    device_id: str = Query(...),
     receipt_id: str = Query(...),
-    limit: int = Query(3)
+    limit: int = Query(3),
+    current_user: dict = Depends(get_current_user)
 ):
     """Get recommendations after saving a receipt."""
     recommendations = []
     
-    # Get the saved receipt
-    receipt = await db.receipts.find_one({"id": receipt_id})
+    # Get the saved receipt (must belong to the authenticated account)
+    receipt = await db.receipts.find_one(
+        {"$and": [receipt_owner_query(current_user), {"id": receipt_id}]}
+    )
     if not receipt:
         return {"recommendations": [], "total": 0}
     
@@ -3243,50 +3254,14 @@ async def register_device(
 @api_router.post("/receipts/import-url")
 async def import_receipt_from_url(
     input: URLImportInput,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    current_user: dict = Depends(get_current_user)
 ):
     url = input.url.strip()
     provider = detect_provider(url)
     
-    # Extract user email from JWT token if provided
-    user_email = ""
-    if credentials and credentials.credentials:
-        logger.info(f"[import-url] Token received: {credentials.credentials[:20]}...")
-        try:
-            payload = verify_token(credentials.credentials)
-            user_email = payload.get("email", "")
-            logger.info(f"[import-url] Extracted email from token: {user_email}")
-        except Exception as e:
-            logger.warning(f"[import-url] Token verification failed: {e}")
-    
-    # FALLBACK: If no token, try to get email from device_id lookup
-    if not user_email and input.device_id:
-        # First try direct device_id match
-        user_doc = await db.users.find_one({"device_id": input.device_id})
-        if user_doc:
-            user_email = user_doc.get("email", "")
-            logger.info(f"[import-url] Fallback: Found email from device_id: {user_email}")
-        else:
-            # Try to find user by matching device association (check devices collection)
-            device_doc = await db.devices.find_one({"device_id": input.device_id})
-            if device_doc and device_doc.get("user_id"):
-                user_doc = await db.users.find_one({"_id": device_doc.get("user_id")})
-                if user_doc:
-                    user_email = user_doc.get("email", "")
-                    logger.info(f"[import-url] Fallback: Found email via devices collection: {user_email}")
-            
-            # If still no email, check if this device_id has any previous receipts with user info
-            if not user_email:
-                recent_receipt = await db.receipts.find_one(
-                    {"device_id": input.device_id, "user_email": {"$ne": "", "$exists": True}},
-                    sort=[("created_at", -1)]
-                )
-                if recent_receipt and recent_receipt.get("user_email"):
-                    user_email = recent_receipt.get("user_email")
-                    logger.info(f"[import-url] Fallback: Found email from previous receipt: {user_email}")
-            
-            if not user_email:
-                logger.warning(f"[import-url] No user found for device_id: {input.device_id}")
+    # Receipt belongs to the authenticated account (login is required to scan).
+    user_email = (current_user.get("email") or "").lower()
+    user_id = current_user.get("_id")
     
     logger.info(f"[import-url] Processing URL: {url[:50]}... | user_email: {user_email}")
 
@@ -3345,6 +3320,8 @@ async def import_receipt_from_url(
 
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
+    doc["user_id"] = user_id
+    doc["user_email"] = user_email
     await db.receipts.insert_one(doc)
 
     enriched = await index_products_with_categories(
@@ -3461,7 +3438,11 @@ async def index_products_with_categories(
 
 
 @api_router.post("/receipts/import-xml")
-async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile = File(...)):
+async def import_receipt_from_xml(
+    device_id: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
     content = await file.read()
     xml_str = content.decode('utf-8')
     receipt_data = parse_mydata_xml(xml_str)
@@ -3471,6 +3452,8 @@ async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile =
 
     receipt = ReceiptData(device_id=device_id, **receipt_data)
     doc = receipt.dict()
+    doc["user_id"] = current_user.get("_id")
+    doc["user_email"] = (current_user.get("email") or "").lower()
     await db.receipts.insert_one(doc)
 
     enriched = await index_products_with_categories(
@@ -3488,7 +3471,10 @@ async def import_receipt_from_xml(device_id: str = Form(...), file: UploadFile =
 
 
 @api_router.post("/receipts/import-webview")
-async def import_receipt_from_webview(input: WebViewExtractedData):
+async def import_receipt_from_webview(
+    input: WebViewExtractedData,
+    current_user: dict = Depends(get_current_user)
+):
     """Import receipt from WebView DOM extraction (Epsilon Digital stores)."""
     receipt_data = parse_webview_extracted(
         raw_text=input.raw_text,
@@ -3503,6 +3489,8 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
 
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
+    doc["user_id"] = current_user.get("_id")
+    doc["user_email"] = (current_user.get("email") or "").lower()
     await db.receipts.insert_one(doc)
 
     enriched = await index_products_with_categories(
@@ -3520,7 +3508,10 @@ async def import_receipt_from_webview(input: WebViewExtractedData):
 
 
 @api_router.post("/receipts/manual")
-async def create_manual_receipt(input: ManualReceiptInput):
+async def create_manual_receipt(
+    input: ManualReceiptInput,
+    current_user: dict = Depends(get_current_user)
+):
     receipt_data = {
         "store_name": input.store_name,
         "store_address": "",
@@ -3540,6 +3531,8 @@ async def create_manual_receipt(input: ManualReceiptInput):
     }
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
+    doc["user_id"] = current_user.get("_id")
+    doc["user_email"] = (current_user.get("email") or "").lower()
     await db.receipts.insert_one(doc)
 
     enriched = await index_products_with_categories(
@@ -3557,13 +3550,18 @@ async def create_manual_receipt(input: ManualReceiptInput):
 
 
 @api_router.get("/receipts")
-async def get_receipts(device_id: str = Query(...), skip: int = 0, limit: int = 50, search: str = ""):
-    query = {"device_id": device_id}
+async def get_receipts(
+    skip: int = 0,
+    limit: int = 50,
+    search: str = "",
+    current_user: dict = Depends(get_current_user)
+):
+    query = receipt_owner_query(current_user)
     if search:
-        query["$or"] = [
+        query = {"$and": [query, {"$or": [
             {"store_name": {"$regex": search, "$options": "i"}},
             {"items.description": {"$regex": search, "$options": "i"}}
-        ]
+        ]}]}
     # Sort by the printed purchase date (`date`), falling back to the scan date
     # (`created_at`). `date` is a string in mixed formats, so parse it in Python
     # to get a correct chronological order, then paginate the sorted result.
@@ -3596,15 +3594,17 @@ async def get_receipts(device_id: str = Query(...), skip: int = 0, limit: int = 
 # IMPORTANT: This must come BEFORE /receipts/{receipt_id} to avoid path conflict
 @api_router.get("/receipts/by-store")
 async def get_receipts_by_store(
-    device_id: str = Query(...),
     store_name: str = Query(...),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500)
+    limit: int = Query(100, ge=1, le=500),
+    current_user: dict = Depends(get_current_user)
 ):
     """Get all receipts from a specific store."""
     query = {
-        "device_id": device_id,
-        "store_name": {"$regex": f"^{store_name}$", "$options": "i"}
+        "$and": [
+            receipt_owner_query(current_user),
+            {"store_name": {"$regex": f"^{store_name}$", "$options": "i"}}
+        ]
     }
     
     total = await db.receipts.count_documents(query)
@@ -3619,8 +3619,11 @@ async def get_receipts_by_store(
 
 
 @api_router.get("/receipts/{receipt_id}")
-async def get_receipt(receipt_id: str):
-    receipt = await db.receipts.find_one({"id": receipt_id}, {"_id": 0})
+async def get_receipt(receipt_id: str, current_user: dict = Depends(get_current_user)):
+    receipt = await db.receipts.find_one(
+        {"$and": [receipt_owner_query(current_user), {"id": receipt_id}]},
+        {"_id": 0}
+    )
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     # Sanitize float values
@@ -3628,8 +3631,10 @@ async def get_receipt(receipt_id: str):
 
 
 @api_router.delete("/receipts/{receipt_id}")
-async def delete_receipt(receipt_id: str):
-    result = await db.receipts.delete_one({"id": receipt_id})
+async def delete_receipt(receipt_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.receipts.delete_one(
+        {"$and": [receipt_owner_query(current_user), {"id": receipt_id}]}
+    )
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Receipt not found")
     return {"status": "deleted"}
@@ -3785,37 +3790,15 @@ async def get_product_prices(
 
 
 @api_router.get("/stats")
-async def get_stats(
-    device_id: str = Query(...),
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    # If user is authenticated, auto-link device to user
-    if credentials and credentials.credentials:
-        try:
-            payload = verify_token(credentials.credentials)
-            user_email = payload.get("email", "")
-            user_id = payload.get("sub")
-            if user_email:
-                # Update user's device_id
-                await db.users.update_one(
-                    {"email": user_email.lower()},
-                    {"$set": {"device_id": device_id}}
-                )
-                # Update devices collection
-                await db.devices.update_one(
-                    {"device_id": device_id},
-                    {"$set": {"user_email": user_email, "user_id": user_id, "linked_at": datetime.now(timezone.utc).isoformat()}},
-                    upsert=True
-                )
-                logger.info(f"[stats] Auto-linked device {device_id} to user {user_email}")
-        except Exception:
-            pass  # Token invalid, just continue without linking
-    
-    total_receipts = await db.receipts.count_documents({"device_id": device_id})
+async def get_stats(current_user: dict = Depends(get_current_user)):
+    # Stats are scoped to the authenticated account, not the device.
+    owner_q = receipt_owner_query(current_user)
+
+    total_receipts = await db.receipts.count_documents(owner_q)
     total_products = await db.products.count_documents({})
 
     pipeline = [
-        {"$match": {"device_id": device_id}},
+        {"$match": owner_q},
         {"$group": {"_id": None, "total_spent": {"$sum": "$total"}, "avg_receipt": {"$avg": "$total"}}}
     ]
     result = await db.receipts.aggregate(pipeline).to_list(1)
@@ -3823,13 +3806,13 @@ async def get_stats(
     avg_receipt = result[0]["avg_receipt"] if result else 0
 
     store_pipeline = [
-        {"$match": {"device_id": device_id}},
+        {"$match": owner_q},
         {"$group": {"_id": "$store_name", "count": {"$sum": 1}, "total": {"$sum": "$total"}}},
         {"$sort": {"count": -1}}
     ]
     stores = await db.receipts.aggregate(store_pipeline).to_list(20)
 
-    recent = await db.receipts.find({"device_id": device_id}, {"_id": 0, "id": 1, "store_name": 1, "total": 1, "date": 1, "created_at": 1}).sort("created_at", -1).limit(5).to_list(5)
+    recent = await db.receipts.find(owner_q, {"_id": 0, "id": 1, "store_name": 1, "total": 1, "date": 1, "created_at": 1}).sort("created_at", -1).limit(5).to_list(5)
 
     return {
         "total_receipts": total_receipts,
@@ -3842,12 +3825,16 @@ async def get_stats(
 
 
 @api_router.get("/stats/categories")
-async def get_category_stats(device_id: str = Query(...)):
-    """Return spending breakdown by mainCategory → subCategory for this device."""
+async def get_category_stats(
+    device_id: str = Query(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Return spending breakdown by mainCategory → subCategory for this account."""
     from collections import defaultdict
 
+    # Receipts are scoped to the account; overrides remain per-device settings.
     receipts = await db.receipts.find(
-        {"device_id": device_id},
+        receipt_owner_query(current_user),
         {"_id": 0, "items": 1}
     ).to_list(10000)
 
@@ -3928,12 +3915,14 @@ async def get_category_products(
     category: str = Query(...),
     subcategory: Optional[str] = Query(default=None),
     month: Optional[str] = Query(default=None),
+    current_user: dict = Depends(get_current_user),
 ):
     """Return products for a given mainCategory / subCategory."""
     from collections import defaultdict
 
+    # Receipts are scoped to the account; overrides remain per-device settings.
     receipts = await db.receipts.find(
-        {"device_id": device_id},
+        receipt_owner_query(current_user),
         {"_id": 0, "items": 1, "store_name": 1, "date": 1}
     ).to_list(10000)
 
@@ -4129,12 +4118,12 @@ async def get_best_price(name: str = Query(..., min_length=2)):
 
 
 @api_router.get("/stats/analytics")
-async def get_analytics(device_id: str = Query(...), months: int = Query(default=6, ge=1, le=12)):
+async def get_analytics(months: int = Query(default=6, ge=1, le=12), current_user: dict = Depends(get_current_user)):
     """Get spending analytics: monthly breakdown and store distribution."""
     
-    # Get all receipts for this device
+    # Scoped to the authenticated account, not the device
     receipts = await db.receipts.find(
-        {"device_id": device_id}, 
+        receipt_owner_query(current_user), 
         {"_id": 0, "date": 1, "total": 1, "store_name": 1, "items": 1, "created_at": 1}
     ).to_list(10000)
     
@@ -4317,10 +4306,10 @@ async def get_analytics(device_id: str = Query(...), months: int = Query(default
 
 
 @api_router.get("/backup/export")
-async def export_data(device_id: str = Query(...)):
-    receipts = await db.receipts.find({"device_id": device_id}, {"_id": 0}).to_list(10000)
+async def export_data(current_user: dict = Depends(get_current_user)):
+    receipts = await db.receipts.find(receipt_owner_query(current_user), {"_id": 0}).to_list(10000)
     return {
-        "device_id": device_id,
+        "device_id": current_user.get("device_id"),
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "total_receipts": len(receipts),
         "receipts": receipts
@@ -7076,11 +7065,10 @@ async def download_icon_page():
 @api_router.delete("/account/delete")
 async def delete_account(current_user: dict = Depends(get_current_user)):
     """Delete user account and all associated data."""
-    user_id = current_user["id"]
-    device_id = current_user.get("device_id")
+    user_id = current_user["_id"]
     
-    # Delete all user data
-    await db.receipts.delete_many({"device_id": device_id})
+    # Delete all user data (receipts are owned by the account, not the device)
+    await db.receipts.delete_many(receipt_owner_query(current_user))
     await db.users.delete_one({"_id": user_id})
     
     return {"success": True, "message": "Ο λογαριασμός και όλα τα δεδομένα διαγράφηκαν επιτυχώς"}
