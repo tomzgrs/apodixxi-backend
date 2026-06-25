@@ -2836,7 +2836,7 @@ class PromotionCreate(BaseModel):
 
 @api_router.get("/recommendations")
 async def get_recommendations(
-    current_user: dict = Depends(get_current_user),
+    current_user: Optional[dict] = Depends(get_optional_user),
     limit: int = Query(5, ge=1, le=20),
     location: str = Query("dashboard")  # dashboard, after_save, compare
 ):
@@ -2996,7 +2996,7 @@ async def get_recommendations(
 async def get_after_save_recommendations(
     receipt_id: str = Query(...),
     limit: int = Query(3),
-    current_user: dict = Depends(get_current_user)
+    current_user: Optional[dict] = Depends(get_optional_user)
 ):
     """Get recommendations after saving a receipt."""
     recommendations = []
