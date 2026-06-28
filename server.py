@@ -454,6 +454,55 @@ async def refresh_approved_stores():
     except Exception as e:
         logger.error(f"Failed to refresh approved stores: {e}")
 
+
+async def get_personal_vat_mapping(user_id: str) -> dict:
+    """Load a single user's private VAT -> store-name mapping (apodixxi+ feature).
+
+    Each user can add unsupported stores to their own private list so only their
+    receipts from that store are recognized. Stored server-side in
+    db.personal_stores. Keys are normalized (digits-only) VAT numbers.
+    """
+    mapping: dict = {}
+    if not user_id:
+        return mapping
+    try:
+        stores = await db.personal_stores.find({"user_id": user_id}, {"_id": 0}).to_list(1000)
+        for s in stores:
+            clean_vat = re.sub(r'\D', '', s.get("vat", "") or "")
+            name = (s.get("store_name") or "").strip()
+            if clean_vat and name:
+                mapping[clean_vat] = name
+    except Exception as e:
+        logger.error(f"Failed to load personal stores for {user_id}: {e}")
+    return mapping
+
+
+async def apply_personal_store_mapping(receipt_data: dict, user: dict) -> None:
+    """For apodixxi+ users, recognize a store from their private VAT mapping.
+
+    Consulted in addition to the global STORE_VAT_MAPPING and the admin-approved
+    APPROVED_VAT_MAPPING. Global/approved recognition always takes precedence: the
+    personal name is only applied when the VAT is not already globally recognized.
+    Mutates receipt_data["store_name"] in place. No-op for free accounts.
+    """
+    try:
+        if not user or not check_user_is_paid(user):
+            return
+        vat = receipt_data.get("store_vat", "") if receipt_data else ""
+        clean_vat = re.sub(r'\D', '', vat) if vat else ""
+        if not clean_vat:
+            return
+        if clean_vat in STORE_VAT_MAPPING or clean_vat in APPROVED_VAT_MAPPING:
+            return
+        personal_mapping = await get_personal_vat_mapping(user.get("_id"))
+        name = personal_mapping.get(clean_vat)
+        if name:
+            receipt_data["store_name"] = name
+            logger.info(f"[store-mapping] Applied personal store mapping: {clean_vat} -> {name}")
+    except Exception as e:
+        logger.error(f"Failed to apply personal store mapping: {e}")
+
+
 def detect_store_brand(store_name: str) -> str:
     """Detect store brand from name using keywords (for franchises)."""
     if not store_name:
@@ -3344,6 +3393,9 @@ async def import_receipt_from_url(
     if not receipt_data or not receipt_data.get("items"):
         raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
 
+    # apodixxi+ premium: recognize the store from this user's private VAT list
+    await apply_personal_store_mapping(receipt_data, current_user)
+
     receipt_data["user_email"] = user_email
     receipt_data["receipt_url"] = url
 
@@ -3479,6 +3531,9 @@ async def import_receipt_from_xml(
     if not receipt_data["items"]:
         raise HTTPException(status_code=400, detail="Could not parse any products from this XML")
 
+    # apodixxi+ premium: recognize the store from this user's private VAT list
+    await apply_personal_store_mapping(receipt_data, current_user)
+
     receipt = ReceiptData(device_id=device_id, **receipt_data)
     doc = receipt.dict()
     doc["user_id"] = current_user.get("_id")
@@ -3515,6 +3570,9 @@ async def import_receipt_from_webview(
 
     if not receipt_data["items"]:
         raise HTTPException(status_code=400, detail="Could not parse any products from the extracted data")
+
+    # apodixxi+ premium: recognize the store from this user's private VAT list
+    await apply_personal_store_mapping(receipt_data, current_user)
 
     receipt = ReceiptData(device_id=input.device_id, **receipt_data)
     doc = receipt.dict()
@@ -4452,6 +4510,88 @@ async def request_store_review(
         logger.error(f"Failed to send notification email: {e}")
     
     return {"success": True, "message": "Request submitted for review", "request_id": review_request["id"]}
+
+
+# ============ PERSONAL (PER-USER) STORES — apodixxi+ premium ============
+# Each apodixxi+ user can keep a private list of unsupported stores (ΑΦΜ + name)
+# so only THEIR receipts from that store are recognized, without waiting for the
+# global admin review queue. Stored server-side in db.personal_stores.
+
+PERSONAL_STORES_PAID_ONLY_MSG = (
+    "Τα προσωπικά καταστήματα είναι διαθέσιμα μόνο για συνδρομητές apodixxi+"
+)
+
+
+@api_router.get("/stores/personal")
+async def list_personal_stores(current_user: dict = Depends(get_current_user)):
+    """List the signed-in user's private custom stores (apodixxi+ only)."""
+    if not check_user_is_paid(current_user):
+        raise HTTPException(status_code=403, detail=PERSONAL_STORES_PAID_ONLY_MSG)
+    stores = await db.personal_stores.find(
+        {"user_id": current_user.get("_id")}, {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+    return {"stores": stores}
+
+
+@api_router.post("/stores/personal")
+async def add_personal_store(
+    vat: str = Body(...),
+    store_name: str = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Add or update a private custom store for the signed-in user (apodixxi+ only)."""
+    if not check_user_is_paid(current_user):
+        raise HTTPException(status_code=403, detail=PERSONAL_STORES_PAID_ONLY_MSG)
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    name = (store_name or "").strip()
+    if not clean_vat:
+        raise HTTPException(status_code=400, detail="Μη έγκυρο ΑΦΜ")
+    if not name:
+        raise HTTPException(status_code=400, detail="Το όνομα καταστήματος είναι υποχρεωτικό")
+    user_id = current_user.get("_id")
+    now = datetime.now(timezone.utc).isoformat()
+    existing = await db.personal_stores.find_one({"user_id": user_id, "vat": clean_vat})
+    if existing:
+        await db.personal_stores.update_one(
+            {"user_id": user_id, "vat": clean_vat},
+            {"$set": {"store_name": name, "updated_at": now}}
+        )
+        store = {
+            "id": existing.get("id"),
+            "user_id": user_id,
+            "vat": clean_vat,
+            "store_name": name,
+            "created_at": existing.get("created_at"),
+            "updated_at": now,
+        }
+    else:
+        store = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "vat": clean_vat,
+            "store_name": name,
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db.personal_stores.insert_one(dict(store))
+    return {"success": True, "store": store}
+
+
+@api_router.delete("/stores/personal/{vat}")
+async def delete_personal_store(
+    vat: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove a private custom store for the signed-in user (apodixxi+ only)."""
+    if not check_user_is_paid(current_user):
+        raise HTTPException(status_code=403, detail=PERSONAL_STORES_PAID_ONLY_MSG)
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    result = await db.personal_stores.delete_one(
+        {"user_id": current_user.get("_id"), "vat": clean_vat}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Το κατάστημα δεν βρέθηκε")
+    return {"success": True, "deleted_count": result.deleted_count}
 
 
 # ============ ADMIN ENDPOINTS ============
