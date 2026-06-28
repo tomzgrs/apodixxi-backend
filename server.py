@@ -6050,6 +6050,9 @@ async def admin_dashboard():
                         actions += '<button class="btn btn-success" onclick="approveStoreReview(\\'' + id + '\\')">✓ Έγκριση</button> ';
                         actions += '<button class="btn btn-secondary" onclick="rejectStoreReview(\\'' + id + '\\')">✕ Απόρριψη</button> ';
                     }
+                    if (r.status === 'approved' && r.vat) {
+                        actions += '<button class="btn btn-warning" onclick="removeApprovedStore(\\'' + escapeHtml(r.vat) + '\\')">↩️ Ανάκληση έγκρισης</button>' + ' ';
+                    }
                     actions += '<button class="btn btn-danger" onclick="deleteStoreReview(\\'' + id + '\\')">🗑️ Διαγραφή</button>';
                     return '<tr>' +
                         '<td><strong>' + escapeHtml(r.store_name || 'Δεν δόθηκε') + '</strong></td>' +
@@ -6098,6 +6101,15 @@ async def admin_dashboard():
                 loadStoreReviews();
             } catch (err) { alert('Σφάλμα σύνδεσης'); }
         }
+
+        async function removeApprovedStore(vat) {
+              if (!confirm('Ανάκληση έγκρισης; Το κατάστημα δεν θα αναγνωρίζεται πλέον στις αποδείξεις.')) return;
+              try {
+                  const res = await apiCall('/admin/approved-stores/' + encodeURIComponent(vat), { method: 'DELETE' });
+                  if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                  loadStoreReviews();
+              } catch (err) { alert('Σφάλμα σύνδεσης'); }
+          }
 
         async function loadUsers() {
             try {
@@ -6590,6 +6602,31 @@ async def delete_store_review(
         raise HTTPException(status_code=404, detail="Review not found")
     
     return {"success": True, "message": "Review deleted"}
+
+
+@api_router.delete("/admin/approved-stores/{vat}")
+async def remove_approved_store(
+    vat: str,
+    admin_key: str = Query(...)
+):
+    """Remove a store from the live approved list (Admin only).
+
+    Deletes the db.approved_stores row so the parser stops recognizing that
+    VAT, then refreshes the in-memory APPROVED_VAT_MAPPING immediately so the
+    change takes effect without a redeploy. Used to undo a store that was
+    approved by mistake.
+    """
+    if admin_key != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    result = await db.approved_stores.delete_one({"vat": vat})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Approved store not found")
+
+    # Refresh the in-memory mapping so the parser stops recognizing it immediately.
+    await refresh_approved_stores()
+
+    return {"success": True, "message": "Approved store removed"}
 
 
 @api_router.get("/admin/stats")
