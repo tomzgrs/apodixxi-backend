@@ -614,6 +614,131 @@ async def fetch_entersoft_invoice(url: str) -> str:
     logger.info(f"[entersoft] No iframe found at {url}, using page HTML directly")
     return html
 
+def _entersoft_clean_text(raw_html: str) -> str:
+    """Normalize Entersoft PDF-preview XHTML into newline-separated text fields."""
+    s = re.sub(r'<style[\s\S]*?</style>', ' ', raw_html or '', flags=re.I)
+    s = re.sub(r'<script[\s\S]*?</script>', ' ', s, flags=re.I)
+    s = re.sub(r'<[^>]+>', ' ', s)
+    s = s.replace('&nbsp;', ' ')
+    s = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), s)
+    s = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), s)
+    s = s.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    s = re.sub(r'[ \t\u00a0]+', ' ', s)
+    s = re.sub(r'\s*\n\s*', '\n', s)
+    s = re.sub(r'\n{2,}', '\n', s)
+    return s.strip()
+
+
+_ENT_NUM_RE = re.compile(r'^\d{1,3}(?:\.\d{3})*,\d+$')
+_ENT_VAT_RE = re.compile(r'^(\d{1,2})%$')
+
+
+def _parse_entersoft_items_from_text(text: str) -> list:
+    """Extract product rows from cleaned Entersoft PDF-preview text.
+
+    Per-row columns: code, description, unit, quantity, unit price,
+    pre-discount value, [discount], net value, VAT%. The discount column is
+    omitted when zero (4 numbers), present when there is a discount (5 numbers).
+    Anchored on the trailing VAT% token and scanned backwards, robust to the
+    positional XHTML the new e-invoicing.gr PDF export produces.
+    """
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    try:
+        start_i = lines.index('ΦΠΑ%')
+    except ValueError:
+        start_i = -1
+    end_i = next((k for k, l in enumerate(lines) if 'ΑΝΑΛΥΣΗ ΦΠΑ' in l), len(lines))
+    sec = lines[start_i + 1:end_i] if start_i >= 0 else lines[:end_i]
+
+    items = []
+    for i in range(len(sec)):
+        vm = _ENT_VAT_RE.match(sec[i])
+        if not vm:
+            continue
+        j = i - 1
+        nums = []
+        while j >= 0 and _ENT_NUM_RE.match(sec[j]):
+            nums.insert(0, parse_greek_number(sec[j]))
+            j -= 1
+        if len(nums) < 4 or j - 2 < 0:
+            continue
+        unit = sec[j]
+        desc = sec[j - 1]
+        code = sec[j - 2]
+        if ' ' in code or _ENT_NUM_RE.match(code) or _ENT_VAT_RE.match(code):
+            continue
+        qty = nums[0]
+        unit_price = nums[1]
+        pre = nums[2]
+        if len(nums) >= 5:
+            discount = nums[3]
+            net = nums[4]
+        else:
+            discount = 0.0
+            net = nums[3]
+        items.append({
+            "code": code,
+            "description": desc,
+            "unit": unit,
+            "quantity": qty,
+            "unit_price": unit_price,
+            "pre_discount_value": pre,
+            "discount": discount,
+            "vat_percent": float(vm.group(1)),
+            "total_value": net,
+        })
+    return items
+
+
+def _entersoft_fill_header_from_text(text: str, data: dict) -> None:
+    """Fill store/VAT/date/totals from cleaned text when DOM selectors miss."""
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+    def _after(label):
+        for k, l in enumerate(lines):
+            if l == label and k + 1 < len(lines):
+                return lines[k + 1]
+        return ''
+
+    if not data.get("store_name"):
+        for l in lines:
+            if l and l != 'Document':
+                data["store_name"] = l
+                break
+    if not data.get("store_vat"):
+        for l in lines:
+            mm = re.search(r'(?:Α\.?Φ\.?Μ\.?|ΑΦΜ)\.?:?\s*(?:EL)?(\d{9,12})', l)
+            if mm:
+                data["store_vat"] = re.sub(r'\D', '', mm.group(1))[:9]
+                break
+    if not data.get("receipt_number"):
+        rn = _after('Αρ. Παραστατικού:')
+        if rn:
+            data["receipt_number"] = rn
+    if not data.get("date"):
+        dt = _after('Ημ/νία έκδοσης:')
+        if dt:
+            data["date"] = dt
+    if not data.get("total"):
+        data["total"] = parse_greek_number(_after('ΤΕΛΙΚΗ ΑΞΙΑ'))
+    if not data.get("net_total"):
+        data["net_total"] = parse_greek_number(_after('Καθαρή Αξία'))
+    if not data.get("vat_total"):
+        data["vat_total"] = parse_greek_number(_after('Φ.Π.Α'))
+    if not data.get("subtotal"):
+        data["subtotal"] = parse_greek_number(_after('Αξία προ έκπτωσης'))
+    if not data.get("discount_total"):
+        data["discount_total"] = parse_greek_number(_after('Έκπτωσεις/Κρατήσεις'))
+    if not data.get("payment_method"):
+        for k, l in enumerate(lines):
+            if l == 'Τρόπος Πληρωμής':
+                for cand in lines[k + 1:k + 4]:
+                    if cand and cand != 'Ποσό Πληρωμής' and not _ENT_NUM_RE.match(cand):
+                        data["payment_method"] = cand
+                        break
+                break
+
+
 def parse_entersoft(html: str, source_url: str) -> dict:
     soup = BeautifulSoup(html, 'lxml')
     data = {
@@ -762,6 +887,16 @@ def parse_entersoft(html: str, source_url: str) -> dict:
             sibling = div.find_next_sibling('div')
             if sibling:
                 data["vat_total"] = parse_greek_number(sibling.get_text(strip=True))
+
+    # Fallback: newer e-invoicing.gr receipts render as positional PDF-preview
+    # XHTML (no <tbody>/.table/.fontSize8pt). Extract products from cleaned text.
+    if not data["items"]:
+        _ent_txt = _entersoft_clean_text(html)
+        _ent_items = _parse_entersoft_items_from_text(_ent_txt)
+        if _ent_items:
+            logger.info(f"[parse_entersoft] DOM selectors found 0 items; text fallback extracted {len(_ent_items)}")
+            data["items"] = _ent_items
+            _entersoft_fill_header_from_text(_ent_txt, data)
 
     if not data["total"] and data["items"]:
         data["total"] = sum(i["total_value"] for i in data["items"])
