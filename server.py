@@ -373,6 +373,12 @@ STORE_VAT_MAPPING = {
     "094150585": "ΜΟΥΣΤΑΚΑΣ",
 }
 
+# Admin-approved stores loaded from the database (VAT -> store name).
+# Populated from db.approved_stores at startup and whenever a store review is approved,
+# so the parser recognizes approved stores without a code change. Keys are normalized
+# (digits-only) VAT numbers, just like STORE_VAT_MAPPING.
+APPROVED_VAT_MAPPING: dict = {}
+
 # Keywords to detect store brand from name (for franchises with different VAT)
 STORE_BRAND_KEYWORDS = {
     "ΣΚΛΑΒΕΝΙΤ": "ΣΚΛΑΒΕΝΙΤΗΣ",
@@ -423,7 +429,30 @@ def get_store_name_from_vat(vat: str, fallback: str = "") -> str:
     clean_vat = re.sub(r'\D', '', vat) if vat else ""
     if clean_vat and clean_vat in STORE_VAT_MAPPING:
         return STORE_VAT_MAPPING[clean_vat]
+    if clean_vat and clean_vat in APPROVED_VAT_MAPPING:
+        return APPROVED_VAT_MAPPING[clean_vat]
     return fallback
+
+
+async def refresh_approved_stores():
+    """Load admin-approved stores from the DB into APPROVED_VAT_MAPPING.
+
+    Lets the parser recognize stores approved via the admin dashboard without a code
+    change. Safe to call repeatedly (at startup and after each approval).
+    """
+    try:
+        approved = await db.approved_stores.find({}, {"_id": 0}).to_list(1000)
+        mapping = {}
+        for s in approved:
+            clean_vat = re.sub(r'\D', '', s.get("vat", "") or "")
+            name = (s.get("store_name") or "").strip()
+            if clean_vat and name:
+                mapping[clean_vat] = name
+        APPROVED_VAT_MAPPING.clear()
+        APPROVED_VAT_MAPPING.update(mapping)
+        logger.info(f"Loaded {len(APPROVED_VAT_MAPPING)} approved store(s) into VAT mapping")
+    except Exception as e:
+        logger.error(f"Failed to refresh approved stores: {e}")
 
 def detect_store_brand(store_name: str) -> str:
     """Detect store brand from name using keywords (for franchises)."""
@@ -4339,11 +4368,14 @@ async def delete_receipts_by_store(store_name: str = Query(...), device_id: str 
 @api_router.get("/stores/validate-vat")
 async def validate_vat(vat: str = Query(...)):
     """Check if a VAT number is in our known stores list."""
-    is_known = vat in STORE_VAT_MAPPING
-    store_name = STORE_VAT_MAPPING.get(vat, None)
+    clean_vat = re.sub(r'\D', '', vat) if vat else ""
+    store_name = STORE_VAT_MAPPING.get(clean_vat) or APPROVED_VAT_MAPPING.get(clean_vat)
+    # Fall back to the raw value for backwards compatibility with already-clean input
+    if store_name is None:
+        store_name = STORE_VAT_MAPPING.get(vat) or APPROVED_VAT_MAPPING.get(vat)
     return {
         "vat": vat,
-        "is_known": is_known,
+        "is_known": store_name is not None,
         "store_name": store_name
     }
 
@@ -4354,7 +4386,7 @@ async def get_supported_stores():
     """Get list of all supported stores with their VAT numbers."""
     stores = []
     seen = set()
-    for vat, name in STORE_VAT_MAPPING.items():
+    for vat, name in list(STORE_VAT_MAPPING.items()) + list(APPROVED_VAT_MAPPING.items()):
         if name not in seen:
             stores.append({"name": name, "vat": vat})
             seen.add(name)
@@ -4407,7 +4439,7 @@ async def request_store_review(
             </tr>
         </table>
         <p style="margin-top: 20px;">
-            <a href="/admin" style="display: inline-block; padding: 12px 24px; background: #0D9488; color: white; text-decoration: none; border-radius: 8px; font-weight: 500;">
+            <a href="{PUBLIC_API_URL}/api/admin/dashboard" style="display: inline-block; padding: 12px 24px; background: #0D9488; color: white; text-decoration: none; border-radius: 8px; font-weight: 500;">
                 Διαχείριση Αιτήσεων
             </a>
         </p>
@@ -5338,6 +5370,10 @@ async def admin_dashboard():
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span>Αποδείξεις</span>
                 </div>
+                <div class="nav-item" data-page="store-requests">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1-5h16l1 5"/><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M9 21v-6h6v6"/></svg>
+                    <span>Αιτήσεις Καταστημάτων</span>
+                </div>
                 <div class="nav-item" data-page="users">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                     <span>Χρήστες</span>
@@ -5403,6 +5439,31 @@ async def admin_dashboard():
                 <div id="receiptsPagination" style="padding: 20px; text-align: center;"></div>
             </div>
             
+            <!-- Store Requests Page -->
+            <div class="page" id="page-store-requests">
+                <div class="page-header">
+                    <h2>Αιτήσεις Καταστημάτων</h2>
+                    <p>Διαχείριση αιτήσεων προσθήκης καταστημάτων από χρήστες</p>
+                </div>
+                <div class="filters">
+                    <select class="filter-input" id="storeReviewStatus" onchange="loadStoreReviews()">
+                        <option value="pending">Σε αναμονή</option>
+                        <option value="approved">Εγκεκριμένες</option>
+                        <option value="rejected">Απορριφθείσες</option>
+                        <option value="all">Όλες</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="loadStoreReviews()">Ανανέωση</button>
+                </div>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="table-wrap"><table>
+                            <thead><tr><th>Κατάστημα</th><th>ΑΦΜ</th><th>Απόδειξη</th><th>Device</th><th>Ημερομηνία</th><th>Κατάσταση</th><th>Ενέργειες</th></tr></thead>
+                            <tbody id="storeReviewsTable"></tbody>
+                        </table></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Users Page -->
             <div class="page" id="page-users">
                 <div class="page-header">
@@ -5690,6 +5751,7 @@ async def admin_dashboard():
                 // Load page data
                 if (page === 'overview') loadOverview();
                 else if (page === 'receipts') loadReceipts();
+                else if (page === 'store-requests') loadStoreReviews();
                 else if (page === 'users') loadUsers();
                 else if (page === 'promotions') loadPromotions();
                 else if (page === 'promo-codes') loadPromoCodes();
@@ -5813,6 +5875,90 @@ async def admin_dashboard():
             window.open(url, '_blank');
         }
         
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        async function loadStoreReviews() {
+            const status = document.getElementById('storeReviewStatus').value;
+            const tbody = document.getElementById('storeReviewsTable');
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">Φόρτωση...</td></tr>';
+            try {
+                const res = await apiCall('/admin/store-reviews?status=' + encodeURIComponent(status));
+                const data = await res.json();
+                const reviews = data.reviews || [];
+                if (reviews.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν αιτήσεις</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = reviews.map(function(r) {
+                    const id = escapeHtml(r.id);
+                    const statusBadge = r.status === 'approved'
+                        ? '<span class="badge badge-success">Εγκεκριμένη</span>'
+                        : (r.status === 'rejected'
+                            ? '<span class="badge badge-warning">Απορρίφθηκε</span>'
+                            : '<span class="badge badge-info">Σε αναμονή</span>');
+                    const dateStr = r.created_at ? new Date(r.created_at).toLocaleString('el-GR') : '-';
+                    const receiptCell = r.receipt_url
+                        ? '<a href="' + escapeHtml(r.receipt_url) + '" target="_blank" class="btn btn-secondary" style="padding:2px 8px;font-size:12px;">Άνοιγμα</a>'
+                        : '-';
+                    const device = escapeHtml(r.device_id || '');
+                    let actions = '';
+                    if (r.status === 'pending') {
+                        actions += '<button class="btn btn-success" onclick="approveStoreReview(\\'' + id + '\\')">✓ Έγκριση</button> ';
+                        actions += '<button class="btn btn-secondary" onclick="rejectStoreReview(\\'' + id + '\\')">✕ Απόρριψη</button> ';
+                    }
+                    actions += '<button class="btn btn-danger" onclick="deleteStoreReview(\\'' + id + '\\')">🗑️ Διαγραφή</button>';
+                    return '<tr>' +
+                        '<td><strong>' + escapeHtml(r.store_name || 'Δεν δόθηκε') + '</strong></td>' +
+                        '<td>' + escapeHtml(r.vat || '-') + '</td>' +
+                        '<td>' + receiptCell + '</td>' +
+                        '<td title="' + device + '" style="font-size:12px;color:#666;">' + (device ? device.substring(0, 10) + '…' : '-') + '</td>' +
+                        '<td style="font-size:12px;">' + dateStr + '</td>' +
+                        '<td>' + statusBadge + '</td>' +
+                        '<td style="white-space:nowrap;">' + actions + '</td>' +
+                        '</tr>';
+                }).join('');
+            } catch (err) {
+                console.error('Error loading store reviews:', err);
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:#dc2626;">Σφάλμα φόρτωσης</td></tr>';
+            }
+        }
+
+        async function approveStoreReview(id) {
+            if (!confirm('Έγκριση αυτού του καταστήματος; Θα αναγνωρίζεται πλέον στις αποδείξεις.')) return;
+            try {
+                const res = await apiCall('/admin/store-reviews/' + id + '/approve', { method: 'POST' });
+                if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                loadStoreReviews();
+            } catch (err) { alert('Σφάλμα σύνδεσης'); }
+        }
+
+        async function rejectStoreReview(id) {
+            const reason = prompt('Λόγος απόρριψης (προαιρετικό):', '');
+            if (reason === null) return;
+            try {
+                const res = await apiCall('/admin/store-reviews/' + id + '/reject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reason)
+                });
+                if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                loadStoreReviews();
+            } catch (err) { alert('Σφάλμα σύνδεσης'); }
+        }
+
+        async function deleteStoreReview(id) {
+            if (!confirm('Οριστική διαγραφή αυτής της αίτησης;')) return;
+            try {
+                const res = await apiCall('/admin/store-reviews/' + id, { method: 'DELETE' });
+                if (!res.ok) { const e = await res.json(); alert('Σφάλμα: ' + (e.detail || res.status)); return; }
+                loadStoreReviews();
+            } catch (err) { alert('Σφάλμα σύνδεσης'); }
+        }
+
         async function loadUsers() {
             try {
                 const res = await apiCall('/admin/users/all?limit=200');
@@ -6246,8 +6392,7 @@ async def approve_store_review(
         }}
     )
     
-    # Note: To actually add to STORE_VAT_MAPPING, you need to update the code
-    # For now, we'll save it to a separate collection
+    # Persist the approved store so it survives restarts...
     await db.approved_stores.update_one(
         {"vat": review["vat"]},
         {"$set": {
@@ -6257,7 +6402,11 @@ async def approve_store_review(
         }},
         upsert=True
     )
-    
+
+    # ...and refresh the in-memory mapping so the parser recognizes it immediately,
+    # without a code change or redeploy.
+    await refresh_approved_stores()
+
     return {"success": True, "message": f"Store {review['store_name']} approved"}
 
 
@@ -6347,6 +6496,11 @@ async def get_admin_stats(
 
 
 # ============ EMAIL NOTIFICATIONS ============
+
+# Public base URL of the production API, used to build absolute links in emails
+# (e.g. the "Διαχείριση Αιτήσεων" button). No trailing slash. Override via env if the
+# domain ever changes; the default points at the live Coolify deployment.
+PUBLIC_API_URL = os.environ.get("PUBLIC_API_URL", "https://api.apodixxi.app").rstrip("/")
 
 # Email settings from environment
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@example.com")
@@ -7545,6 +7699,11 @@ app.include_router(no_prefix_router)
 @app.get("/")
 async def root():
     return {"message": "apodixxi API", "version": "1.0.0", "status": "healthy"}
+
+@app.on_event("startup")
+async def load_approved_stores_on_startup():
+    """Warm the approved-stores VAT mapping so admin-approved stores are recognized."""
+    await refresh_approved_stores()
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
