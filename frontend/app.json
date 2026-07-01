@@ -2,7 +2,7 @@
   "expo": {
     "name": "apodixxi",
     "slug": "apodixxi",
-    "version": "1.1.37",
+    "version": "1.1.39",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -14,6 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.apodixxi.app",
+      "buildNumber": "39",
       "infoPlist": {
         "NSCameraUsageDescription": "Scan receipt QR codes to import purchases",
         "ITSAppUsesNonExemptEncryption": false
@@ -21,7 +22,7 @@
     },
     "android": {
       "package": "com.apodixxi.app",
-      "versionCode": 37,
+      "versionCode": 39,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#111827"
