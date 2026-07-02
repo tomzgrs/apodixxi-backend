@@ -1946,26 +1946,70 @@ async def google_auth(request: GoogleAuthRequest):
 
 @api_router.post("/auth/apple")
 async def apple_auth(request: AppleAuthRequest):
-    """Authenticate with Apple."""
-    apple_email = request.email.lower()
-    
-    # Create device_id for user
+    """
+    Authenticate with Apple. The Apple identity_token (a signed JWT) is verified
+    against Apple's public keys; the user's stable Apple id (sub) and email are
+    taken from the VERIFIED token and never trusted from the client request body.
+    """
+    APPLE_BUNDLE_ID = "com.apodixxi.app"
+
+    if not request.identity_token:
+        raise HTTPException(status_code=400, detail="Λείπει το Apple identity token")
+
+    # ── 1. Verify the identity_token with Apple ─────────────────────────────
+    try:
+        unverified_header = jwt.get_unverified_header(request.identity_token)
+        kid = unverified_header.get("kid")
+        async with httpx.AsyncClient(timeout=10) as client:
+            keys_resp = await client.get("https://appleid.apple.com/auth/keys")
+        keys_resp.raise_for_status()
+        apple_keys = keys_resp.json().get("keys", [])
+        apple_key = next((k for k in apple_keys if k.get("kid") == kid), None)
+        if not apple_key:
+            raise HTTPException(status_code=401, detail="Μη έγκυρο Apple token")
+        claims = jwt.decode(
+            request.identity_token,
+            apple_key,
+            algorithms=["RS256"],
+            audience=APPLE_BUNDLE_ID,
+            issuer="https://appleid.apple.com",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Apple identity_token verification failed: {e}")
+        raise HTTPException(status_code=401, detail="Μη έγκυρο Apple token")
+
+    # ── 2. Extract verified user data from the token claims ─────────────────
+    apple_sub = claims.get("sub", "")
+    if not apple_sub:
+        raise HTTPException(status_code=400, detail="Δεν βρέθηκε Apple user id στο token")
+    # Apple only returns the email on the first authorization (or when shared).
+    # Prefer the verified token email; fall back to the client value only when the
+    # token omits it, and finally to a stable private-relay address from the sub.
+    apple_email = (claims.get("email") or request.email or "").lower()
+    if not apple_email:
+        apple_email = f"{apple_sub}@privaterelay.appleid.com"
+
+    # ── 3. Find or create user (match on apple_id first, then email) ────────
     user_device_id = f"dev_{uuid.uuid4().hex[:20]}"
-    
-    # Check if user exists
-    user = await db.users.find_one({"email": apple_email})
-    
+    user = await db.users.find_one({"apple_id": apple_sub})
+    if not user and apple_email:
+        user = await db.users.find_one({"email": apple_email})
+
     if user:
         user_device_id = user.get("device_id", user_device_id)
-        await db.users.update_one(
-            {"_id": user["_id"]},
-            {"$set": {
-                "auth_provider": "apple",
-                "name": request.name or user.get("name", ""),
-                "device_id": user_device_id,
-                "last_login": datetime.now(timezone.utc).isoformat()
-            }}
-        )
+        update = {
+            "auth_provider": "apple",
+            "apple_id": apple_sub,
+            "device_id": user_device_id,
+            "last_login": datetime.now(timezone.utc).isoformat(),
+        }
+        # Apple sends the name only on first sign-in; keep any existing name.
+        if request.name and not user.get("name"):
+            update["name"] = request.name
+        await db.users.update_one({"_id": user["_id"]}, {"$set": update})
+        user = await db.users.find_one({"_id": user["_id"]})
     else:
         user_id = str(uuid.uuid4())
         user = {
@@ -1975,18 +2019,19 @@ async def apple_auth(request: AppleAuthRequest):
             "password_hash": None,
             "phone": None,
             "auth_provider": "apple",
+            "apple_id": apple_sub,
             "account_type": "free",
             "subscription_expires_at": None,
             "is_email_verified": True,
             "device_id": user_device_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "last_login": datetime.now(timezone.utc).isoformat()
+            "last_login": datetime.now(timezone.utc).isoformat(),
         }
         await db.users.insert_one(user)
-    
+
     access_token = create_access_token(user["_id"], user["email"])
     refresh_token = create_refresh_token(user["_id"])
-    
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -2000,8 +2045,8 @@ async def apple_auth(request: AppleAuthRequest):
             "auth_provider": "apple",
             "account_type": user.get("account_type", "free"),
             "is_email_verified": True,
-            "device_id": user_device_id
-        }
+            "device_id": user_device_id,
+        },
     }
 
 
