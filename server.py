@@ -1504,6 +1504,26 @@ def parse_peppol_html(html: str, source_url: str) -> dict:
                 if val > 0:
                     data["total"] = val
     
+    # Fallback: newer e-invoicing.gr receipts (contentType=PDF, e.g. the
+    # delivery/διακίνηση variant with an extra "ΣΤΟΙΧΕΙΑ ΔΙΑΚΙΝΗΣΗΣ" section)
+    # render as positional PDF-preview XHTML with no <tbody>/.table. Reuse the
+    # Entersoft text extractor which anchors on the trailing ΦΠΑ% column.
+    if not data["items"]:
+        _txt = _entersoft_clean_text(html)
+        _items = _parse_entersoft_items_from_text(_txt)
+        if _items:
+            logger.info(f"[parse_peppol_html] DOM found 0 items; text fallback extracted {len(_items)}")
+            data["items"] = _items
+            _entersoft_fill_header_from_text(_txt, data)
+            if not data["total"]:
+                data["total"] = round(sum(i["total_value"] for i in _items), 2)
+            if not data["net_total"]:
+                data["net_total"] = round(sum(i["pre_discount_value"] for i in _items), 2)
+            if not data["vat_total"]:
+                data["vat_total"] = round(data["total"] - data["net_total"], 2)
+            if not data["discount_total"]:
+                data["discount_total"] = round(sum(i["discount"] for i in _items), 2)
+
     # Use clean store name (VAT mapping or keyword detection)
     data["store_name"] = get_clean_store_name(data["store_vat"], data["store_name"])
     
@@ -3531,6 +3551,19 @@ async def import_receipt_from_url(
     # apodixxi+ premium: recognize the store from this user's private VAT list
     await apply_personal_store_mapping(receipt_data, current_user)
 
+    # Signal to the app whether this store's VAT is recognized (global, approved,
+    # or this user's personal mapping). If not, the app prompts the user to submit
+    # the store for review instead of importing silently under a raw name.
+    _clean_vat = re.sub(r'\D', '', receipt_data.get("store_vat", "") or "")
+    store_recognized = False
+    if _clean_vat:
+        if _clean_vat in STORE_VAT_MAPPING or _clean_vat in APPROVED_VAT_MAPPING:
+            store_recognized = True
+        else:
+            _personal = await get_personal_vat_mapping(user_id)
+            if _clean_vat in _personal:
+                store_recognized = True
+
     receipt_data["user_email"] = user_email
     receipt_data["receipt_url"] = url
 
@@ -3552,7 +3585,13 @@ async def import_receipt_from_url(
         await db.receipts.update_one({"id": doc["id"]}, {"$set": {"items": enriched}})
 
     doc.pop("_id", None)
-    return {"status": "success", "receipt": doc}
+    return {
+        "status": "success",
+        "receipt": doc,
+        "store_recognized": store_recognized,
+        "store_vat": _clean_vat,
+        "store_name": receipt_data.get("store_name", ""),
+    }
 
 
 # ── Helper: index products into the products collection with AI categories ──
@@ -3870,26 +3909,94 @@ async def search_products(q: str = Query(..., min_length=2), device_id: str = Qu
 
 
 @api_router.get("/products/compare")
-async def compare_product_prices(q: str = Query(..., min_length=2)):
-    products = await db.products.find(
-        {"description": {"$regex": q, "$options": "i"}},
-        {"_id": 0}
-    ).to_list(100)
+async def compare_product_prices(
+    q: str = Query(..., min_length=2),
+    current_user: Optional[dict] = Depends(get_optional_user),
+):
+    rx = {"$regex": re.escape(q), "$options": "i"}
 
-    stores = {}
-    for p in products:
+    # Crowdsourced prices aggregated from ALL users' indexed products.
+    crowd_products = await db.products.find({"description": rx}, {"_id": 0}).to_list(100)
+
+    # The signed-in user's OWN purchase history, sourced from their own receipts
+    # so crowdsourced prices from other users never leak into their history.
+    own_stores: dict = {}
+    if current_user:
+        owner_q = dict(receipt_owner_query(current_user))
+        owner_q["items.description"] = rx
+        own_receipts = await db.receipts.find(
+            owner_q,
+            {"_id": 0, "store_name": 1, "date": 1, "id": 1, "items": 1},
+        ).sort("date", -1).to_list(500)
+        agg: dict = {}
+        for r in own_receipts:
+            store = r.get("store_name") or "Άγνωστο Κατάστημα"
+            rdate = r.get("date", "")
+            for it in r.get("items", []):
+                desc = it.get("description", "")
+                if not desc or not re.search(re.escape(q), desc, re.I):
+                    continue
+                entry = {
+                    "price": it.get("total_value", 0),
+                    "unit_price": it.get("unit_price", 0),
+                    "date": rdate,
+                    "quantity": it.get("quantity", 1),
+                    "receipt_id": r.get("id", ""),
+                }
+                key = (store, desc)
+                if key not in agg:
+                    agg[key] = {
+                        "description": desc,
+                        "store_name": store,
+                        "last_price": entry["price"],
+                        "last_unit_price": entry["unit_price"],
+                        "last_date": rdate,
+                        "price_history": [],
+                    }
+                agg[key]["price_history"].append(entry)
+        for (store, desc), prod in agg.items():
+            prod["price_history"].sort(key=lambda e: e.get("date", ""), reverse=True)
+            if prod["price_history"]:
+                prod["last_price"] = prod["price_history"][0]["price"]
+                prod["last_unit_price"] = prod["price_history"][0].get("unit_price", 0)
+                prod["last_date"] = prod["price_history"][0]["date"]
+            own_stores.setdefault(store, []).append(prod)
+
+    # Exclude the user's own (store, description) rows from the crowd bucket
+    # so their own purchases are not duplicated as "other users".
+    own_keys = set()
+    for store, prods in own_stores.items():
+        for prod in prods:
+            own_keys.add((store, prod["description"]))
+
+    other_stores: dict = {}
+    for p in crowd_products:
         store = p.get("store_name", "Unknown")
-        if store not in stores:
-            stores[store] = []
-        stores[store].append({
+        if (store, p.get("description", "")) in own_keys:
+            continue
+        other_stores.setdefault(store, []).append({
             "description": p["description"],
+            "store_name": store,
             "last_price": p.get("last_price", 0),
             "last_unit_price": p.get("last_unit_price", 0),
             "last_date": p.get("last_date", ""),
-            "price_history": p.get("price_history", [])
+            "price_history": p.get("price_history", []),
         })
 
-    return {"query": q, "stores": stores, "total_products": len(products)}
+    # Backward-compatible merged view (own first, then crowd).
+    merged: dict = {}
+    for store, prods in own_stores.items():
+        merged.setdefault(store, []).extend(prods)
+    for store, prods in other_stores.items():
+        merged.setdefault(store, []).extend(prods)
+
+    return {
+        "query": q,
+        "own_stores": own_stores,
+        "other_stores": other_stores,
+        "stores": merged,
+        "total_products": len(crowd_products),
+    }
 
 
 # ── Phase 2: Price Comparison API with Free / Paid tiers ──────────────────────
@@ -6369,7 +6476,7 @@ async def admin_dashboard():
                         <td>${p.price ? '€' + p.price.toFixed(2) : '-'} ${p.original_price ? '<small style="text-decoration:line-through;color:#999">€' + p.original_price.toFixed(2) + '</small>' : ''}</td>
                         <td>${p.store_name || '-'}</td>
                         <td>${p.url ? '<a href="' + p.url + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:12px;">🔗 Link</a>' : '<span style="color:#94a3b8;font-size:12px;">—</span>'}</td>
-                        <td><span class="badge ${p.is_active ? 'badge-success' : 'badge-warning'}">${p.is_active ? 'Ενεργή' : 'Ανενεργή'}</span></td>
+                        <td>${(function(){var _act = p.is_active && !(p.end_date && new Date(p.end_date) < new Date()); return '<span class="badge '+(_act?'badge-success':'badge-warning')+'">'+(_act?'Ενεργή':'Ανενεργή')+'</span>';})()}</td>
                         <td>${p.views_count || 0}</td>
                         <td>${p.clicks_count || 0}</td>
                         <td>
