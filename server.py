@@ -6793,11 +6793,15 @@ async def admin_dashboard():
 
 @api_router.get("/admin/store-reviews")
 async def get_store_reviews(
-    admin_key: str = Query(...),
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
     status: str = Query(default="pending")
 ):
     """Get all store review requests (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     query = {} if status == "all" else {"status": status}
@@ -6812,10 +6816,14 @@ async def get_store_reviews(
 @api_router.post("/admin/store-reviews/{review_id}/approve")
 async def approve_store_review(
     review_id: str,
-    admin_key: str = Query(...)
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
 ):
     """Approve a store review request and add it to known stores (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     review = await db.store_review_requests.find_one({"id": review_id})
@@ -6852,11 +6860,15 @@ async def approve_store_review(
 @api_router.post("/admin/store-reviews/{review_id}/reject")
 async def reject_store_review(
     review_id: str,
-    admin_key: str = Query(...),
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
     reason: str = Body(default="")
 ):
     """Reject a store review request (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     review = await db.store_review_requests.find_one({"id": review_id})
@@ -6878,10 +6890,14 @@ async def reject_store_review(
 @api_router.delete("/admin/store-reviews/{review_id}")
 async def delete_store_review(
     review_id: str,
-    admin_key: str = Query(...)
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
 ):
     """Delete a store review request (Admin only)."""
-    if admin_key != ADMIN_PASSWORD:
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     result = await db.store_review_requests.delete_one({"id": review_id})
