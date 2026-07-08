@@ -3960,8 +3960,22 @@ async def compare_product_prices(
 ):
     rx = {"$regex": re.escape(q), "$options": "i"}
 
-    # Crowdsourced prices aggregated from ALL users' indexed products.
+    # Allow-list of approved supermarket VATs: the pre-loaded known-store mapping
+    # plus any admin-approved store reviews. Products/receipts from custom or
+    # user-added VATs are excluded so private stores never pollute comparison.
+    approved_vats = set(STORE_VAT_MAPPING.keys())
+    async for s in db.approved_stores.find({}, {"_id": 0, "vat": 1}):
+        v = re.sub(r'\D', '', s.get("vat", "") or '')
+        if v:
+            approved_vats.add(v)
+
+    def _is_approved(vat) -> bool:
+        return re.sub(r'\D', '', (vat or '')) in approved_vats
+
+    # Crowdsourced prices aggregated from ALL users' indexed products,
+    # restricted to approved supermarket VATs.
     crowd_products = await db.products.find({"description": rx}, {"_id": 0}).to_list(100)
+    crowd_products = [p for p in crowd_products if _is_approved(p.get("store_vat"))]
 
     # The signed-in user's OWN purchase history, sourced from their own receipts
     # so crowdsourced prices from other users never leak into their history.
@@ -3971,10 +3985,12 @@ async def compare_product_prices(
         owner_q["items.description"] = rx
         own_receipts = await db.receipts.find(
             owner_q,
-            {"_id": 0, "store_name": 1, "date": 1, "id": 1, "items": 1},
+            {"_id": 0, "store_name": 1, "store_vat": 1, "date": 1, "id": 1, "items": 1},
         ).sort("date", -1).to_list(500)
         agg: dict = {}
         for r in own_receipts:
+            if not _is_approved(r.get("store_vat")):
+                continue
             store = r.get("store_name") or "Άγνωστο Κατάστημα"
             rdate = r.get("date", "")
             for it in r.get("items", []):
