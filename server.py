@@ -4725,6 +4725,48 @@ async def delete_receipts_by_store(store_name: str = Query(...), device_id: str 
     return {"deleted_count": result.deleted_count, "store_name": store_name}
 
 
+# Admin endpoint to delete a single receipt by id, regardless of owner
+@api_router.delete("/admin/receipts/{receipt_id}")
+async def admin_delete_receipt(
+    receipt_id: str,
+    admin_key: str = Query(None),
+    admin_token: str = Query(None),
+):
+    """Delete one receipt by id regardless of owner (Admin only).
+
+    Also removes the receipt's contribution to the shared, crowdsourced products
+    index: each product's price_history entry tagged with this receipt_id is
+    pulled, and any product left with no remaining history is deleted. Products
+    that still hold other users' history are preserved.
+    """
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    result = await db.receipts.delete_one({"id": receipt_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    # Pull this receipt's price points from the shared products index, then drop
+    # only the products that were affected by this receipt and now have no history.
+    affected = await db.products.find(
+        {"price_history.receipt_id": receipt_id}, {"_id": 1}
+    ).to_list(1000)
+    affected_ids = [p["_id"] for p in affected]
+    if affected_ids:
+        await db.products.update_many(
+            {"_id": {"$in": affected_ids}},
+            {"$pull": {"price_history": {"receipt_id": receipt_id}}},
+        )
+        await db.products.delete_many(
+            {"_id": {"$in": affected_ids}, "price_history": {"$size": 0}}
+        )
+
+    return {"status": "deleted", "receipt_id": receipt_id}
+
+
 # VAT validation endpoint
 @api_router.get("/stores/validate-vat")
 async def validate_vat(vat: str = Query(...)):
@@ -6289,7 +6331,7 @@ async def admin_dashboard():
                         <td>${r.date || '-'}</td>
                         <td><strong>€${(r.total || 0).toFixed(2)}</strong></td>
                         <td>${(r.items || []).length}</td>
-                        <td>${r.receipt_url ? `<a href="${r.receipt_url}" target="_blank" class="btn btn-secondary" style="padding:2px 8px;font-size:12px;">Άνοιγμα</a>` : '-'}</td>
+                        <td>${r.receipt_url ? `<a href="${r.receipt_url}" target="_blank" class="btn btn-secondary" style="padding:2px 8px;font-size:12px;">Άνοιγμα</a>` : '-'} <button class="btn btn-danger" style="padding:2px 8px;font-size:12px;" onclick="deleteReceipt('${r.id || r._id}')">Διαγραφή</button></td>
                     </tr>
                 `).join('');
                 
@@ -6306,6 +6348,19 @@ async def admin_dashboard():
         
         function prevReceiptsPage() { currentReceiptsPage--; loadReceipts(); }
         function nextReceiptsPage() { currentReceiptsPage++; loadReceipts(); }
+        
+        async function deleteReceipt(id) {
+            if (!id) return;
+            if (!confirm('Οριστική διαγραφή αυτής της απόδειξης;')) return;
+            try {
+                const res = await apiCall('/admin/receipts/' + encodeURIComponent(id), { method: 'DELETE' });
+                if (!res) return;
+                if (!res.ok) throw new Error('request failed');
+                loadReceipts();
+            } catch (err) {
+                alert('Σφάλμα κατά τη διαγραφή της απόδειξης');
+            }
+        }
         
         async function exportExcel() {
             const filterStore = document.getElementById('filterStore').value;
