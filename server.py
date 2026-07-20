@@ -3382,6 +3382,144 @@ async def create_promotion(
     return {"success": True, "promotion": promotion}
 
 
+@api_router.post("/admin/promotions/bulk-import")
+async def bulk_import_promotions(
+    file: UploadFile = File(...),
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
+    """Bulk-import promotions from an uploaded .xlsx (Admin only).
+    Upsert keyed on (product_name + store_name): existing -> update, new -> create.
+    Per-row validation: invalid rows are skipped and reported."""
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Απαιτείται αρχείο .xlsx")
+
+    from openpyxl import load_workbook
+    contents = await file.read()
+    try:
+        wb = load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Μη έγκυρο αρχείο Excel")
+    ws = wb.active
+
+    def _norm(s):
+        return re.sub(r"[\s\(\)€:.\-_/]+", "", str(s or "").strip().lower())
+
+    HEADER_MAP = {
+        "τίτλοςπροώθησης": "title", "τίτλος": "title",
+        "περιγραφή": "description",
+        "όνομαπροϊόντος": "product_name", "προϊόν": "product_name",
+        "τιμήπροσφοράς": "price", "τιμή": "price",
+        "αρχικήτιμή": "original_price",
+        "κατάστημα": "store_name",
+        "urlεικόνας": "image_url", "εικόνα": "image_url",
+        "urlπροσφορά": "url", "urlπροσφοράς": "url", "url": "url",
+        "ημνίαέναρξης": "start_date", "ημερομηνίαέναρξης": "start_date",
+        "ημνίαλήξης": "end_date", "ημερομηνίαλήξης": "end_date",
+    }
+
+    rows = ws.iter_rows(values_only=True)
+    try:
+        header_row = next(rows)
+    except StopIteration:
+        return {"success": True, "created": 0, "updated": 0, "skipped": 0, "errors": []}
+
+    col_field = {}
+    for idx, h in enumerate(header_row):
+        key = _norm(h)
+        if key in HEADER_MAP:
+            col_field[idx] = HEADER_MAP[key]
+
+    def _parse_price(v):
+        if v is None or str(v).strip() == "":
+            return None
+        return round(float(str(v).strip().replace("€", "").replace(",", ".")), 2)
+
+    created = updated = skipped = 0
+    errors = []
+    row_num = 1
+
+    for row in rows:
+        row_num += 1
+        if row is None or all((c is None or str(c).strip() == "") for c in row):
+            continue
+        data = {field: (row[idx] if idx < len(row) else None) for idx, field in col_field.items()}
+
+        title = str(data.get("title") or "").strip()
+        product_name = str(data.get("product_name") or "").strip()
+        store_name = str(data.get("store_name") or "").strip()
+
+        if not title and not product_name:
+            skipped += 1
+            errors.append({"row": row_num, "reason": "Λείπει τίτλος και όνομα προϊόντος"})
+            continue
+
+        try:
+            price = _parse_price(data.get("price"))
+        except (ValueError, TypeError):
+            skipped += 1
+            errors.append({"row": row_num, "reason": "Μη έγκυρη τιμή προσφοράς"})
+            continue
+        try:
+            original_price = _parse_price(data.get("original_price"))
+        except (ValueError, TypeError):
+            original_price = None
+
+        fields = {
+            "title": title or product_name,
+            "description": str(data.get("description") or "").strip(),
+            "product_name": product_name,
+            "price": price,
+            "original_price": original_price,
+            "store_name": store_name,
+            "store_vat": "",
+            "image_url": str(data.get("image_url") or "").strip(),
+            "barcode_code": "",
+            "barcode_image_url": "",
+            "url": str(data.get("url") or "").strip(),
+            "target_categories": [],
+            "target_stores": [],
+            "target_all_users": True,
+            "start_date": str(data.get("start_date")).strip() if data.get("start_date") not in (None, "") else None,
+            "end_date": str(data.get("end_date")).strip() if data.get("end_date") not in (None, "") else None,
+            "priority": 0,
+            "is_active": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        try:
+            if product_name:
+                result = await db.promotions.update_one(
+                    {"product_name": product_name, "store_name": store_name},
+                    {"$set": fields,
+                     "$setOnInsert": {"_id": str(uuid.uuid4()), "views_count": 0,
+                                      "clicks_count": 0,
+                                      "created_at": datetime.now(timezone.utc).isoformat()}},
+                    upsert=True,
+                )
+                if result.upserted_id is not None:
+                    created += 1
+                else:
+                    updated += 1
+            else:
+                await db.promotions.insert_one({**fields, "_id": str(uuid.uuid4()),
+                                                "views_count": 0, "clicks_count": 0,
+                                                "created_at": datetime.now(timezone.utc).isoformat()})
+                created += 1
+        except Exception as e:
+            skipped += 1
+            errors.append({"row": row_num, "reason": f"Σφάλμα αποθήκευσης: {str(e)[:80]}"})
+
+    return {"success": True, "created": created, "updated": updated,
+            "skipped": skipped, "errors": errors}
+
+
 @api_router.get("/admin/promotions")
 async def list_promotions(
     admin_key: str = Query(None),
@@ -5978,6 +6116,8 @@ async def admin_dashboard():
                 <div class="filters">
                     <button class="btn btn-primary" onclick="openPromotionModal()">+ Νέα Προώθηση</button>
                     <button class="btn btn-secondary" onclick="openExistingProductsModal()">Επιλογή από Υπάρχοντα</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('excelImportInput').click()">📥 Εισαγωγή από Excel</button>
+                    <input type="file" id="excelImportInput" accept=".xlsx" style="display:none" onchange="importPromotionsExcel(this)">
                 </div>
                 <div class="card">
                     <div class="card-body">
@@ -6607,6 +6747,34 @@ async def admin_dashboard():
             }
         }
         
+        async function importPromotionsExcel(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await fetch(`${API_BASE}/admin/promotions/bulk-import?admin_token=${adminToken}`, {
+                    method: 'POST', body: fd
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert('Σφάλμα: ' + (data.detail || 'Αποτυχία εισαγωγής'));
+                } else {
+                    let msg = `✅ ${data.created} νέες, ${data.updated} ενημερώθηκαν, ${data.skipped} απορρίφθηκαν`;
+                    if (data.errors && data.errors.length) {
+                        msg += '\n\nΑπορρίψεις:\n' + data.errors.slice(0, 10)
+                            .map(e => `Γραμμή ${e.row}: ${e.reason}`).join('\n');
+                    }
+                    alert(msg);
+                    loadPromotions();
+                }
+            } catch (err) {
+                alert('Σφάλμα σύνδεσης κατά την εισαγωγή');
+            } finally {
+                input.value = '';
+            }
+        }
+
         async function loadPromoCodes() {
             try {
                 const res = await apiCall('/admin/promo-codes');
