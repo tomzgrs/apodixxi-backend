@@ -6762,8 +6762,8 @@ async def admin_dashboard():
                 } else {
                     let msg = `✅ ${data.created} νέες, ${data.updated} ενημερώθηκαν, ${data.skipped} απορρίφθηκαν`;
                     if (data.errors && data.errors.length) {
-                        msg += '\n\nΑπορρίψεις:\n' + data.errors.slice(0, 10)
-                            .map(e => `Γραμμή ${e.row}: ${e.reason}`).join('\n');
+                        msg += '\\n\\nΑπορρίψεις:\\n' + data.errors.slice(0, 10)
+                            .map(e => `Γραμμή ${e.row}: ${e.reason}`).join('\\n');
                     }
                     alert(msg);
                     loadPromotions();
