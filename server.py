@@ -4943,6 +4943,31 @@ async def request_store_review(
     device_id: str = Body(...)
 ):
     """Submit a store for review to be added to the supported list."""
+    clean_vat = re.sub(r'\D', '', vat or '')
+
+    # 1. Already in the hardcoded VAT mapping → no review needed
+    if clean_vat and clean_vat in STORE_VAT_MAPPING:
+        known_name = STORE_VAT_MAPPING[clean_vat]
+        logger.info(f"[store-review] Rejected duplicate: VAT {clean_vat} already known as '{known_name}'")
+        return {"success": True, "message": "Store already supported", "already_known": True, "store_name": known_name}
+
+    # 2. Store name matches a known brand keyword → no review needed
+    if store_name:
+        brand = detect_store_brand(store_name)
+        if brand:
+            logger.info(f"[store-review] Rejected by keyword: '{store_name}' matched brand '{brand}'")
+            return {"success": True, "message": "Store already supported", "already_known": True, "store_name": brand}
+
+    # 3. Already a pending or approved request for this VAT → avoid duplicate
+    if clean_vat:
+        existing = await db.store_review_requests.find_one(
+            {"vat": clean_vat, "status": {"": ["pending", "approved"]}},
+            {"_id": 0, "status": 1}
+        )
+        if existing:
+            logger.info(f"[store-review] Rejected duplicate: VAT {clean_vat} already has a '{existing['status']}' request")
+            return {"success": True, "message": "Review already requested", "already_pending": True}
+
     review_request = {
         "id": str(uuid.uuid4()),
         "vat": vat,
