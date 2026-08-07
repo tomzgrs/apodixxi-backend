@@ -3586,6 +3586,45 @@ async def delete_promotion(
     return {"success": True}
 
 
+@api_router.delete("/admin/promotions-purge")
+async def purge_promotions_bulk(
+    store_name: str = Query("__ALL__"),
+    keep_count: int = Query(10),
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
+    """Bulk-delete excess promotions, keeping only the keep_count most recent per store.
+    Pass store_name=__ALL__ to clean all stores in one shot."""
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    query = {} if store_name == "__ALL__" else {"store_name": store_name}
+    all_promos = await db.promotions.find(
+        query, {"_id": 1, "created_at": 1, "store_name": 1}
+    ).sort("created_at", -1).to_list(None)
+
+    by_store = {}
+    for p in all_promos:
+        s = p.get("store_name", "?")
+        if s not in by_store:
+            by_store[s] = []
+        by_store[s].append(p["_id"])
+
+    to_delete = []
+    for s, ids in by_store.items():
+        to_delete.extend(ids[keep_count:])
+
+    if not to_delete:
+        return {"success": True, "deleted": 0, "kept": {s: len(v) for s, v in by_store.items()}}
+
+    result = await db.promotions.delete_many({"_id": {"$in": to_delete}})
+    kept = {s: min(len(v), keep_count) for s, v in by_store.items()}
+    return {"success": True, "deleted": result.deleted_count, "kept": kept}
+
+
 @api_router.post("/recommendations/{rec_id}/click")
 async def track_recommendation_click(rec_id: str):
     """Track when a user clicks on a recommendation."""
