@@ -17,6 +17,7 @@ import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
@@ -1167,7 +1168,78 @@ def parse_mydata_xml(xml_content: str) -> dict:
     return data
 
 
+
+def parse_aade_receipt(html: str, source_url: str) -> dict:
+    """Parse the public AADE cash-register receipt verification page.
+
+    AADE's q1.php page exposes the receipt metadata as label/value rows in an
+    ``info`` table.  It does not expose supermarket line items, so this parser
+    intentionally imports the receipt-level fields that are available there.
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    data = {
+        "store_name": "",
+        "store_address": "",
+        "store_vat": "",
+        "receipt_number": "",
+        "date": "",
+        "payment_method": "",
+        "items": [],
+        "subtotal": 0.0,
+        "discount_total": 0.0,
+        "total": 0.0,
+        "vat_total": 0.0,
+        "net_total": 0.0,
+        "source_url": source_url,
+        "source_type": "aade",
+        "provider": "AADE",
+    }
+
+    info_table = soup.find('table', class_='info')
+    if info_table:
+        for row in info_table.find_all('tr'):
+            cells = row.find_all(['td', 'th'])
+            if len(cells) < 2:
+                continue
+            label = ' '.join(cells[0].stripped_strings)
+            value = ' '.join(cells[1].stripped_strings)
+            normalized = re.sub(r'\s+', ' ', label).strip().casefold()
+
+            if normalized == 'συνολική αξία':
+                data["total"] = parse_greek_number(value)
+            elif normalized == 'αφμ εκδότη':
+                digits = re.sub(r'\D', '', value)
+                if len(digits) == 9:
+                    data["store_vat"] = digits
+            elif normalized == 'επωνυμία':
+                data["store_name"] = value.strip()
+            elif normalized == 'διεύθυνση':
+                data["store_address"] = value.strip()
+            elif normalized == 'ημερομηνία, ώρα':
+                data["date"] = value.strip()
+            elif normalized == 'αριθμός παραστατικού':
+                data["receipt_number"] = value.strip()
+            elif normalized == 'ποσό πληρωμής με κάρτα':
+                data["payment_method"] = 'Κάρτα'
+
+    # Defensive fallback for small AADE markup changes that remove the info
+    # table while retaining the human-readable receipt summary.
+    if not data["total"]:
+        summary = soup.find('p', class_='receipt')
+        summary_text = summary.get_text(' ', strip=True) if summary else ''
+        match = re.search(r'Συνολικού ποσού\s*([\d.,]+)', summary_text, re.IGNORECASE)
+        if match:
+            data["total"] = parse_greek_number(match.group(1))
+
+    return data
+
+
 def detect_provider(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or '').lower()
+    path = (parsed.path or '').lower()
+    if host in {'aade.gr', 'www.aade.gr', 'www1.aade.gr'} and path.startswith('/tameiakes/myweb/'):
+        return 'aade'
     if 'e-invoicing.gr' in url or 'entersoftone.gr' in url:
         # /edocuments/ViewInvoice/ URLs are PEPPOL format (confirmed from HTML structure)
         if 'ct=PEPPOL' in url or 'contentType=PEPPOL' in url or '/edocuments/ViewInvoice/' in url or '/edocuments/viewinvoice/' in url.lower():
@@ -3735,7 +3807,7 @@ async def import_receipt_from_url(
         return {"status": "webview_required", "url": url, "message": "This receipt requires WebView import. Opening in-app browser..."}
 
     if provider == 'unknown':
-        raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: e-invoicing.gr, entersoftone.gr, einvoice.impact.gr")
+        raise HTTPException(status_code=400, detail="Unknown receipt provider. Supported: aade.gr, e-invoicing.gr, entersoftone.gr, einvoice.impact.gr")
 
     # Check for duplicate receipt by URL
     if not input.force_import:
@@ -3759,6 +3831,9 @@ async def import_receipt_from_url(
         elif provider == 'impact':
             html = await fetch_html(url)
             receipt_data = parse_impact(html, url)
+        elif provider == 'aade':
+            html = await fetch_html(url)
+            receipt_data = parse_aade_receipt(html, url)
         else:
             raise HTTPException(status_code=400, detail="Parser not available for this provider")
     except HTTPException:
@@ -3767,7 +3842,10 @@ async def import_receipt_from_url(
         logger.error(f"[import-url] Parser error for provider={provider}: {e}")
         raise HTTPException(status_code=422, detail=f"Σφάλμα ανάλυσης απόδειξης ({provider}): {str(e)}")
 
-    if not receipt_data or not receipt_data.get("items"):
+    if provider == 'aade':
+        if not receipt_data or not receipt_data.get("store_name") or not receipt_data.get("store_vat") or not receipt_data.get("total"):
+            raise HTTPException(status_code=400, detail="Could not parse the required AADE receipt fields")
+    elif not receipt_data or not receipt_data.get("items"):
         raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
 
     # apodixxi+ premium: recognize the store from this user's private VAT list
