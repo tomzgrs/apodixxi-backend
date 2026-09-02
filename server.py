@@ -7356,7 +7356,7 @@ async def get_ai_status():
     """Diagnostic endpoint: check if Groq AI is configured and available."""
     return {
         "available": AI_AVAILABLE,
-        "model": "qwen/qwen3.6-27b" if AI_AVAILABLE else None,
+        "model": "qwen/qwen3.8-27b" if AI_AVAILABLE else None,
         "key_configured": bool(GROQ_API_KEY),
     }
 
@@ -7381,7 +7381,7 @@ async def generate_ai_content(prompt: str) -> str:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "qwen/qwen3.6-27b",
+                    "model": "qwen/qwen3.8-27b",
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1024,
                     "temperature": 0.7
