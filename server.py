@@ -740,7 +740,115 @@ def _entersoft_fill_header_from_text(text: str, data: dict) -> None:
                 break
 
 
+def _parse_mart_pdf_preview(text: str, source_url: str) -> Optional[dict]:
+    """Handle The Mart's separate gross/net unit columns and bare VAT numbers.
+
+    This layout is not the trailing-VAT% layout handled by the generic fallback.
+    Require its issuer and column markers; never interpret another store's
+    positional document with this column map.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    required = {'Περιγραφή Είδους', 'Τιμή Μον.', 'Τιμ.Μον.',
+                'Σύνολα Ποσοτήτων:', 'Τελικό Πληρωτέο με ΦΠΑ:'}
+    if not required.issubset(set(lines)):
+        return None
+    header_end = next((i for i, line in enumerate(lines)
+                       if line.startswith('Στοιχεία Πελάτη')), None)
+    if header_end is None:
+        return None
+    header = lines[:header_end]
+
+    def after(label, scope=lines):
+        for i, line in enumerate(scope[:-1]):
+            if line == label:
+                return scope[i + 1]
+        return ''
+
+    issuer_vat = re.sub(r'\D', '', after('Α.Φ.Μ.:', header))
+    if issuer_vat != '094021972':
+        return None
+    # Header text wraps across multiple lines; the first long numeric code after
+    # the description header starts the actual item section.
+    begin = lines.index('Περιγραφή Είδους') + 1
+    end = lines.index('Σύνολα Ποσοτήτων:')
+    section = lines[begin:end]
+    items = []
+    i = 0
+    while i < len(section):
+        if not re.fullmatch(r'\d{6,}', section[i]):
+            i += 1
+            continue
+        code = section[i]
+        j = i + 1
+        description = []
+        while j < len(section) and not _ENT_NUM_RE.fullmatch(section[j]):
+            # A second code before a price signals a broken row.
+            if re.fullmatch(r'\d{6,}', section[j]):
+                return None
+            description.append(section[j])
+            j += 1
+        if not description or j + 6 >= len(section):
+            return None
+        # Gross unit, net unit, unit, quantity, net before discount, net final, VAT.
+        gross_s, net_unit_s, unit, qty_s, pre_s, net_s, vat_s = section[j:j + 7]
+        if not all(_ENT_NUM_RE.fullmatch(value)
+                   for value in (gross_s, net_unit_s, qty_s, pre_s, net_s)):
+            return None
+        if not re.fullmatch(r'(?:0|6|13|24)', vat_s):
+            return None
+        gross_unit, qty, pre, net, vat = (
+            parse_greek_number(gross_s), parse_greek_number(qty_s),
+            parse_greek_number(pre_s), parse_greek_number(net_s), float(vat_s)
+        )
+        if qty <= 0 or pre < net or not all(
+                math.isfinite(value) for value in (gross_unit, qty, pre, net)):
+            return None
+        items.append({
+            'code': code, 'description': ' '.join(description), 'unit': unit,
+            'quantity': qty, 'unit_price': gross_unit,
+            'pre_discount_value': pre, 'discount': round(pre - net, 2),
+            'vat_percent': vat, 'total_value': round(net * (1 + vat / 100), 2),
+        })
+        i = j + 7
+
+    total = parse_greek_number(after('Τελικό Πληρωτέο με ΦΠΑ:'))
+    net_total = parse_greek_number(after('Σύνολο καθαρών αξιών:'))
+    vat_total = parse_greek_number(after('Σύνολο αξίας ΦΠΑ:'))
+    quantity_match = re.fullmatch(
+        r'([\d.,]+)\s+Είδη', after('Σύνολα Ποσοτήτων:')
+    )
+    if not items or total <= 0 or not quantity_match:
+        return None
+    # Reject partial extraction rather than saving an apparently valid receipt
+    # with missing products. Printed totals remain authoritative.
+    if abs(sum(item['quantity'] for item in items)
+           - parse_greek_number(quantity_match.group(1))) > 0.001:
+        return None
+    if (abs(sum(item['total_value'] for item in items) - total) > 0.02
+            or abs(sum(item['pre_discount_value'] - item['discount']
+                       for item in items) - net_total) > 0.02
+            or abs(net_total + vat_total - total) > 0.02):
+        return None
+    return {
+        'store_name': get_clean_store_name(issuer_vat, 'The Mart Α.Ε.'),
+        'store_vat': issuer_vat, 'store_address': after('ΔΙΕΥΘ.:', header),
+        'receipt_number': after('Σειρά/Αριθμός:', header),
+        'date': after('Ημερομηνία/Ώρα Έκδοσης:', header),
+        'payment_method': 'POS / e-POS' if 'POS / e-POS' in lines else '',
+        'items': items, 'total': total, 'net_total': net_total,
+        'vat_total': vat_total,
+        'discount_total': round(sum(item['discount'] * (1 + item['vat_percent'] / 100)
+                                    for item in items), 2),
+        'subtotal': round(sum(item['pre_discount_value'] * (1 + item['vat_percent'] / 100)
+                              for item in items), 2),
+        'source_url': source_url, 'source_type': 'entersoft', 'provider': 'Entersoft',
+    }
+
+
 def parse_entersoft(html: str, source_url: str) -> dict:
+    mart = _parse_mart_pdf_preview(_entersoft_clean_text(html), source_url)
+    if mart is not None:
+        return mart
     soup = BeautifulSoup(html, 'lxml')
     data = {
         "store_name": "",
@@ -1485,6 +1593,11 @@ def parse_peppol_html(html: str, source_url: str) -> dict:
     - VAT after store name in format "Α.Φ.Μ: XXXXXXXXX"
     - Products in table with classes table, table-sm, etc.
     """
+    mart = _parse_mart_pdf_preview(_entersoft_clean_text(html), source_url)
+    if mart is not None:
+        mart['source_type'] = 'peppol'
+        mart['provider'] = 'PEPPOL (e-invoicing.gr)'
+        return mart
     soup = BeautifulSoup(html, 'lxml')
     data = {
         "store_name": "",
