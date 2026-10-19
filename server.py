@@ -789,8 +789,18 @@ def _parse_mart_pdf_preview(text: str, source_url: str) -> Optional[dict]:
             j += 1
         if not description or j + 6 >= len(section):
             return None
-        # Gross unit, net unit, unit, quantity, net before discount, net final, VAT.
-        gross_s, net_unit_s, unit, qty_s, pre_s, net_s, vat_s = section[j:j + 7]
+        # Discounted rows insert a trailing-minus net discount before net final.
+        gross_s, net_unit_s, unit, qty_s, pre_s = section[j:j + 5]
+        k = j + 5
+        discount_s = None
+        if section[k].endswith('-'):
+            discount_s = section[k][:-1]
+            if not _ENT_NUM_RE.fullmatch(discount_s):
+                return None
+            k += 1
+        if k + 1 >= len(section):
+            return None
+        net_s, vat_s = section[k:k + 2]
         if not all(_ENT_NUM_RE.fullmatch(value)
                    for value in (gross_s, net_unit_s, qty_s, pre_s, net_s)):
             return None
@@ -803,13 +813,18 @@ def _parse_mart_pdf_preview(text: str, source_url: str) -> Optional[dict]:
         if qty <= 0 or pre < net or not all(
                 math.isfinite(value) for value in (gross_unit, qty, pre, net)):
             return None
+        if discount_s is not None:
+            discount = parse_greek_number(discount_s)
+            if (not math.isfinite(discount) or discount < 0
+                    or abs(pre - discount - net) > 0.011):
+                return None
         items.append({
             'code': code, 'description': ' '.join(description), 'unit': unit,
             'quantity': qty, 'unit_price': gross_unit,
             'pre_discount_value': pre, 'discount': round(pre - net, 2),
             'vat_percent': vat, 'total_value': round(net * (1 + vat / 100), 2),
         })
-        i = j + 7
+        i = k + 2
 
     total = parse_greek_number(after('Τελικό Πληρωτέο με ΦΠΑ:'))
     net_total = parse_greek_number(after('Σύνολο καθαρών αξιών:'))
