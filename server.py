@@ -1299,6 +1299,8 @@ def parse_aade_receipt(html: str, source_url: str) -> dict:
     ``info`` table.  It does not expose supermarket line items, so this parser
     intentionally imports the receipt-level fields that are available there.
     """
+    import unicodedata
+
     soup = BeautifulSoup(html, 'lxml')
     data = {
         "store_name": "",
@@ -1318,32 +1320,55 @@ def parse_aade_receipt(html: str, source_url: str) -> dict:
         "provider": "AADE",
     }
 
-    info_table = soup.find('table', class_='info')
-    if info_table:
+    # The public page has both full receipt tables and restricted FIM tables
+    # for receipts which have not been transmitted yet. Match field labels,
+    # never positional cells or unrelated numbers (recipient VAT, FIM, etc.).
+    info_tables = soup.select('table.info') or soup.find_all('table')
+    for info_table in info_tables:
         for row in info_table.find_all('tr'):
             cells = row.find_all(['td', 'th'])
             if len(cells) < 2:
                 continue
             label = ' '.join(cells[0].stripped_strings)
             value = ' '.join(cells[1].stripped_strings)
-            normalized = re.sub(r'\s+', ' ', label).strip().casefold()
+            normalized = ''.join(
+                char for char in unicodedata.normalize('NFD', label.casefold())
+                if unicodedata.category(char) != 'Mn'
+            )
+            normalized = re.sub(r'\s+', ' ', normalized.replace('.', '')).strip(' :')
 
-            if normalized == 'συνολική αξία':
+            if normalized == 'συνολικη αξια':
                 data["total"] = parse_greek_number(value)
-            elif normalized == 'αφμ εκδότη':
-                digits = re.sub(r'\D', '', value)
-                if len(digits) == 9:
-                    data["store_vat"] = digits
-            elif normalized == 'επωνυμία':
+            elif normalized == 'αφμ εκδοτη':
+                vat_match = re.fullmatch(r'(?:EL\s*)?([0-9]{9})', value.strip(), re.IGNORECASE)
+                if vat_match:
+                    data["store_vat"] = vat_match.group(1)
+            elif normalized == 'επωνυμια':
                 data["store_name"] = value.strip()
-            elif normalized == 'διεύθυνση':
+            elif normalized == 'διευθυνση':
                 data["store_address"] = value.strip()
-            elif normalized == 'ημερομηνία, ώρα':
+            elif normalized == 'ημερομηνια, ωρα':
                 data["date"] = value.strip()
-            elif normalized == 'αριθμός παραστατικού':
+            elif normalized == 'αριθμος παραστατικου':
                 data["receipt_number"] = value.strip()
-            elif normalized == 'ποσό πληρωμής με κάρτα':
+            elif normalized == 'ποσο πληρωμης με καρτα':
                 data["payment_method"] = 'Κάρτα'
+
+    # On the restricted page the issuer VAT is not a table row. AADE instead
+    # identifies the registered FIM owner in a specific warning. Do not infer
+    # VAT from SIG, arbitrary nine-digit numbers, or the recipient's VAT.
+    if not data["store_vat"]:
+        warning_text = ' '.join(
+            node.get_text(' ', strip=True)
+            for node in soup.select('.callout.warning, .callout.box-warning')
+        )
+        vat_match = re.search(
+            r'δηλωμένη\s+στον\s+ΑΦΜ\s*[:：]?\s*([0-9]{9})(?![0-9])',
+            warning_text,
+            re.IGNORECASE,
+        )
+        if vat_match:
+            data["store_vat"] = vat_match.group(1)
 
     # Defensive fallback for small AADE markup changes that remove the info
     # table while retaining the human-readable receipt summary.
@@ -3971,13 +3996,25 @@ async def import_receipt_from_url(
         raise HTTPException(status_code=422, detail=f"Σφάλμα ανάλυσης απόδειξης ({provider}): {str(e)}")
 
     if provider == 'aade':
-        if not receipt_data or not receipt_data.get("store_name") or not receipt_data.get("store_vat") or not receipt_data.get("total"):
-            raise HTTPException(status_code=400, detail="Could not parse the required AADE receipt fields")
+        import math
+
+        if (not receipt_data
+                or not receipt_data.get("store_name", "").strip()
+                or not re.fullmatch(r'[0-9]{9}', receipt_data.get("store_vat", ""))
+                or not math.isfinite(receipt_data.get("total", 0))
+                or receipt_data.get("total", 0) <= 0):
+            raise HTTPException(
+                status_code=400,
+                detail="Δεν βρέθηκαν έγκυρα στοιχεία ΑΑΔΕ: επωνυμία, ΑΦΜ εκδότη και συνολικό ποσό.",
+            )
     elif not receipt_data or not receipt_data.get("items"):
         raise HTTPException(status_code=400, detail="Could not parse any products from this receipt")
 
     # apodixxi+ premium: recognize the store from this user's private VAT list
-    await apply_personal_store_mapping(receipt_data, current_user)
+    # Preserve AADE's legal issuer name verbatim rather than replacing it with
+    # a user's private store nickname.
+    if provider != 'aade':
+        await apply_personal_store_mapping(receipt_data, current_user)
 
     # Signal to the app whether this store's VAT is recognized (global, approved,
     # or this user's personal mapping). If not, the app prompts the user to submit
