@@ -442,13 +442,13 @@ async def refresh_approved_stores():
     change. Safe to call repeatedly (at startup and after each approval).
     """
     try:
-        approved = await db.approved_stores.find({}, {"_id": 0}).to_list(1000)
+        approved = await db.approved_stores.find({}, {"_id": 0}).to_list(length=None)
         mapping = {}
         for s in approved:
             clean_vat = re.sub(r'\D', '', s.get("vat", "") or "")
             name = (s.get("store_name") or "").strip()
-            if clean_vat and name:
-                mapping[clean_vat] = name
+            if re.fullmatch(r'[0-9]{9}', clean_vat):
+                mapping[clean_vat] = name or f"ΑΦΜ {clean_vat}"
         APPROVED_VAT_MAPPING.clear()
         APPROVED_VAT_MAPPING.update(mapping)
         logger.info(f"Loaded {len(APPROVED_VAT_MAPPING)} approved store(s) into VAT mapping")
@@ -5187,15 +5187,34 @@ async def admin_delete_receipt(
     return {"status": "deleted", "receipt_id": receipt_id}
 
 
+async def find_approved_store(vat: str):
+    """Read approval from shared storage, not a possibly stale worker cache.
+
+    An approval is valid even when extraction did not supply a business name.
+    The VAT label is only a display fallback, not an inferred legal name.
+    """
+    clean_vat = re.sub(r'\D', '', vat or "")
+    if not re.fullmatch(r'[0-9]{9}', clean_vat):
+        return None
+    store = await db.approved_stores.find_one({
+        "vat": {"$in": list(dict.fromkeys([clean_vat, vat, f"EL{clean_vat}"]))}
+    }, {"_id": 0})
+    if store is None:
+        APPROVED_VAT_MAPPING.pop(clean_vat, None)
+        return None
+    name = (store.get("store_name") or "").strip() or f"ΑΦΜ {clean_vat}"
+    APPROVED_VAT_MAPPING[clean_vat] = name
+    return name
+
+
 # VAT validation endpoint
 @api_router.get("/stores/validate-vat")
 async def validate_vat(vat: str = Query(...)):
     """Check if a VAT number is in our known stores list."""
     clean_vat = re.sub(r'\D', '', vat) if vat else ""
-    store_name = STORE_VAT_MAPPING.get(clean_vat) or APPROVED_VAT_MAPPING.get(clean_vat)
-    # Fall back to the raw value for backwards compatibility with already-clean input
+    store_name = STORE_VAT_MAPPING.get(clean_vat)
     if store_name is None:
-        store_name = STORE_VAT_MAPPING.get(vat) or APPROVED_VAT_MAPPING.get(vat)
+        store_name = await find_approved_store(vat)
     return {
         "vat": vat,
         "is_known": store_name is not None,
@@ -5207,6 +5226,7 @@ async def validate_vat(vat: str = Query(...)):
 @api_router.get("/stores/supported")
 async def get_supported_stores():
     """Get list of all supported stores with their VAT numbers."""
+    await refresh_approved_stores()
     stores = []
     seen = set()
     for vat, name in list(STORE_VAT_MAPPING.items()) + list(APPROVED_VAT_MAPPING.items()):
@@ -5239,6 +5259,9 @@ async def request_store_review(
         if brand:
             logger.info(f"[store-review] Rejected by keyword: '{store_name}' matched brand '{brand}'")
             return {"success": True, "message": "Store already supported", "already_known": True, "store_name": brand}
+
+    if clean_vat and await find_approved_store(vat) is not None:
+        return {"success": True, "message": "Store already approved", "already_known": True}
 
     # 3. Already a pending or approved request for this VAT → avoid duplicate
     if clean_vat:
@@ -7376,24 +7399,28 @@ async def approve_store_review(
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     
-    # Update the review status
+    clean_vat = re.sub(r'\D', '', review.get("vat") or "")
+    if not re.fullmatch(r'[0-9]{9}', clean_vat):
+        raise HTTPException(status_code=400, detail="Η έγκριση απαιτεί έγκυρο εννεαψήφιο ΑΦΜ.")
+
+    # Persist the approved store so it survives restarts...
+    await db.approved_stores.update_one(
+        {"vat": clean_vat},
+        {"$set": {
+            "vat": clean_vat,
+            "store_name": (review.get("store_name") or "").strip(),
+            "approved_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+
+    # Mark the request approved only after the shared recognition record exists.
     await db.store_review_requests.update_one(
         {"id": review_id},
         {"$set": {
             "status": "approved",
             "approved_at": datetime.now(timezone.utc).isoformat()
         }}
-    )
-    
-    # Persist the approved store so it survives restarts...
-    await db.approved_stores.update_one(
-        {"vat": review["vat"]},
-        {"$set": {
-            "vat": review["vat"],
-            "store_name": review["store_name"],
-            "approved_at": datetime.now(timezone.utc).isoformat()
-        }},
-        upsert=True
     )
 
     # ...and refresh the in-memory mapping so the parser recognizes it immediately,
