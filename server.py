@@ -3748,7 +3748,10 @@ async def bulk_import_promotions(
 @api_router.get("/admin/promotions")
 async def list_promotions(
     admin_key: str = Query(None),
-    admin_token: str = Query(None)
+    admin_token: str = Query(None),
+    status: str = Query("all", pattern="^(all|active|inactive)$"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200)
 ):
     """List all promotions (Admin only)."""
     is_valid = admin_key == ADMIN_PASSWORD
@@ -3757,8 +3760,50 @@ async def list_promotions(
     if not is_valid:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
-    promotions = await db.promotions.find().sort("created_at", -1).to_list(100)
-    return {"promotions": promotions}
+    query = {}
+    if status != "all":
+        # Stored dates can be ISO dates or timestamps. Invalid/missing expiry
+        # does not turn an otherwise enabled promotion into an expired one.
+        expiry = {"$convert": {
+            "input": "$end_date", "to": "date", "onError": None, "onNull": None
+        }}
+        expired = {"$and": [
+            {"$ne": [expiry, None]},
+            {"$lt": [expiry, datetime.now(timezone.utc)]},
+        ]}
+        active = {"$and": [{"$eq": ["$is_active", True]}, {"$not": [expired]}]}
+        query = {"$expr": active if status == "active" else {"$not": [active]}}
+    total = await db.promotions.count_documents(query)
+    promotions = await db.promotions.find(query).sort(
+        [("created_at", -1), ("_id", 1)]
+    ).skip(skip).limit(limit).to_list(limit)
+    return {"promotions": promotions, "total": total, "skip": skip, "limit": limit}
+
+
+class PromotionBulkDelete(BaseModel):
+    ids: List[str] = Field(..., min_length=1, max_length=500)
+
+
+@api_router.post("/admin/promotions/bulk-delete")
+async def delete_selected_promotions(
+    body: PromotionBulkDelete,
+    admin_key: str = Query(None),
+    admin_token: str = Query(None)
+):
+    """Delete only explicitly selected promotion IDs, never an unbounded filter."""
+    is_valid = admin_key == ADMIN_PASSWORD
+    if not is_valid and admin_token:
+        is_valid = await verify_admin_token(admin_token)
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    ids = list(dict.fromkeys(body.ids))
+    if any(not value.strip() or value != value.strip() or len(value) > 128 for value in ids):
+        raise HTTPException(status_code=400, detail="Μη έγκυρη επιλογή προσφορών.")
+    result = await db.promotions.delete_many({"_id": {"$in": ids}})
+    return {
+        "success": True, "requested": len(ids), "deleted": result.deleted_count,
+        "not_found": len(ids) - result.deleted_count,
+    }
 
 
 @api_router.patch("/admin/promotions/{promo_id}")
@@ -6097,6 +6142,16 @@ async def admin_dashboard():
         tr:hover td {
             background: #f9fafb;
         }
+        .promotion-check {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-width: 44px; min-height: 44px; cursor: pointer;
+        }
+        .promotion-check input { width: 20px; height: 20px; accent-color: #0D9488; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .promotion-selection-bar {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 12px; margin-bottom: 16px;
+        }
         
         /* Buttons */
         .btn {
@@ -6449,13 +6504,32 @@ async def admin_dashboard():
                     <button class="btn btn-secondary" onclick="document.getElementById('excelImportInput').click()">📥 Εισαγωγή από Excel</button>
                     <input type="file" id="excelImportInput" accept=".xlsx" style="display:none" onchange="importPromotionsExcel(this)">
                 </div>
+                <div class="promotion-selection-bar">
+                    <label for="promotionStatus">Κατάσταση:</label>
+                    <select id="promotionStatus" onchange="changePromotionFilter()">
+                        <option value="inactive">Ανενεργές / ληγμένες</option>
+                        <option value="active">Ενεργές</option>
+                        <option value="all">Όλες</option>
+                    </select>
+                    <button class="btn btn-secondary" id="refreshPromotions" onclick="loadPromotions()">Ανανέωση</button>
+                    <button class="btn btn-danger" id="deleteSelectedPromotions" onclick="deleteSelectedPromotions()" disabled>
+                        Διαγραφή επιλεγμένων (<span id="promotionSelectionCount">0</span>)
+                    </button>
+                    <span id="promotionSelectionMessage" role="status" aria-live="polite">Δεν υπάρχουν επιλεγμένες προσφορές.</span>
+                </div>
+                <p style="color:#6b7280;margin-bottom:12px;">Το γενικό checkbox επιλέγει μόνο τις προσφορές της τρέχουσας σελίδας. Η διαγραφή είναι οριστική.</p>
                 <div class="card">
                     <div class="card-body">
                         <div class="table-wrap"><table>
-                            <thead><tr><th>Τίτλος</th><th>Προϊόν</th><th>Τιμή</th><th>Κατάστημα</th><th>URL</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
+                            <thead><tr><th><label class="promotion-check"><input type="checkbox" id="selectAllPromotions" aria-label="Επιλογή όλων των προσφορών της σελίδας" onchange="selectAllPromotionRows(this.checked)"></label></th><th>Τίτλος</th><th>Προϊόν</th><th>Τιμή</th><th>Κατάστημα</th><th>URL</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="promotionsTable"></tbody>
                         </table></div>
                     </div>
+                </div>
+                <div class="promotion-selection-bar">
+                    <button class="btn btn-secondary" id="previousPromotions" onclick="changePromotionPage(-1)" disabled>Προηγούμενη</button>
+                    <span id="promotionPageInfo" role="status" aria-live="polite"></span>
+                    <button class="btn btn-secondary" id="nextPromotions" onclick="changePromotionPage(1)" disabled>Επόμενη</button>
                 </div>
             </div>
             
@@ -7050,31 +7124,157 @@ async def admin_dashboard():
             }
         }
         
+        const selectedPromotionIds = new Set();
+        let promotionRows = [];
+        let promotionOffset = 0;
+        let promotionTotal = 0;
+        const promotionPageSize = 100;
+        let promotionLoading = false;
+        let promotionDeleting = false;
+        let promotionLoadSequence = 0;
+
+        function promotionIsActive(p) {
+            return !!p.is_active && !(p.end_date && new Date(p.end_date) < new Date());
+        }
+
+        function promotionHtml(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, c =>
+                ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+        }
+
+        function updatePromotionSelection() {
+            const busy = promotionLoading || promotionDeleting;
+            const master = document.getElementById('selectAllPromotions');
+            const count = selectedPromotionIds.size;
+            master.checked = promotionRows.length > 0 && count === promotionRows.length;
+            master.indeterminate = count > 0 && count < promotionRows.length;
+            master.disabled = busy || !promotionRows.length;
+            document.getElementById('promotionSelectionCount').textContent = count;
+            document.getElementById('promotionSelectionMessage').textContent = count
+                ? `Επιλεγμένες: ${count} από ${promotionRows.length} στη σελίδα.`
+                : 'Δεν υπάρχουν επιλεγμένες προσφορές.';
+            document.getElementById('deleteSelectedPromotions').disabled = busy || !count;
+            document.getElementById('promotionStatus').disabled = busy;
+            document.getElementById('refreshPromotions').disabled = busy;
+            document.getElementById('previousPromotions').disabled = busy || promotionOffset === 0;
+            document.getElementById('nextPromotions').disabled = busy || promotionOffset + promotionPageSize >= promotionTotal;
+            document.querySelectorAll('#promotionsTable input, #promotionsTable button').forEach(el => {
+                el.disabled = busy;
+                if (el.type === 'checkbox') el.checked = selectedPromotionIds.has(el.dataset.promoId);
+            });
+        }
+
+        function togglePromotionSelection(id, checked) {
+            if (promotionLoading || promotionDeleting || !promotionRows.some(p => p._id === id)) return;
+            if (checked) selectedPromotionIds.add(id);
+            else selectedPromotionIds.delete(id);
+            updatePromotionSelection();
+        }
+
+        function selectAllPromotionRows(checked) {
+            if (promotionLoading || promotionDeleting) return;
+            selectedPromotionIds.clear();
+            if (checked) promotionRows.forEach(p => selectedPromotionIds.add(p._id));
+            updatePromotionSelection();
+        }
+
+        function changePromotionFilter() {
+            if (promotionDeleting) return;
+            promotionOffset = 0;
+            loadPromotions();
+        }
+
+        function changePromotionPage(direction) {
+            if (promotionLoading || promotionDeleting) return;
+            promotionOffset = Math.max(0, promotionOffset + direction * promotionPageSize);
+            loadPromotions();
+        }
+
         async function loadPromotions() {
+            if (promotionDeleting) return;
+            const sequence = ++promotionLoadSequence;
+            promotionLoading = true;
+            selectedPromotionIds.clear();
+            promotionRows = [];
+            document.getElementById('promotionsTable').innerHTML = '<tr><td colspan="10">Φόρτωση προσφορών…</td></tr>';
+            updatePromotionSelection();
             try {
-                const res = await apiCall('/admin/promotions');
+                const status = document.getElementById('promotionStatus').value;
+                const res = await apiCall(`/admin/promotions?status=${status}&skip=${promotionOffset}&limit=${promotionPageSize}`);
+                if (!res.ok) throw new Error('Δεν ήταν δυνατή η φόρτωση των προσφορών.');
                 const data = await res.json();
-                
-                document.getElementById('promotionsTable').innerHTML = (data.promotions || []).map(p => `
-                    <tr>
-                        <td>${p.title || '-'}</td>
-                        <td>${p.product_name || '-'}</td>
+                if (sequence !== promotionLoadSequence) return;
+                promotionTotal = data.total;
+                if (promotionOffset > 0 && !data.promotions.length) {
+                    promotionOffset = Math.max(0, Math.floor((promotionTotal - 1) / promotionPageSize) * promotionPageSize);
+                    return await loadPromotions();
+                }
+                promotionRows = data.promotions || [];
+                document.getElementById('promotionPageInfo').textContent = promotionTotal
+                    ? `${promotionOffset + 1}–${promotionOffset + promotionRows.length} από ${promotionTotal}`
+                    : '0 προσφορές';
+                document.getElementById('promotionsTable').innerHTML = promotionRows.map(p => `
+                    <tr data-promo-id="${promotionHtml(p._id)}">
+                        <td><label class="promotion-check"><input type="checkbox" data-promo-id="${promotionHtml(p._id)}" aria-label="${promotionHtml('Επιλογή: ' + (p.title || p.product_name || p._id))}" onchange="togglePromotionSelection(this.dataset.promoId, this.checked)"></label></td>
+                        <td>${promotionHtml(p.title || '-')}</td>
+                        <td>${promotionHtml(p.product_name || '-')}</td>
                         <td>${p.price ? '€' + p.price.toFixed(2) : '-'} ${p.original_price ? '<small style="text-decoration:line-through;color:#999">€' + p.original_price.toFixed(2) + '</small>' : ''}</td>
-                        <td>${p.store_name || '-'}</td>
-                        <td>${p.url ? '<a href="' + p.url + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:12px;">🔗 Link</a>' : '<span style="color:#94a3b8;font-size:12px;">—</span>'}</td>
-                        <td>${(function(){var _act = p.is_active && !(p.end_date && new Date(p.end_date) < new Date()); return '<span class="badge '+(_act?'badge-success':'badge-warning')+'">'+(_act?'Ενεργή':'Ανενεργή')+'</span>';})()}</td>
+                        <td>${promotionHtml(p.store_name || '-')}</td>
+                        <td>${p.url && /^https?:\\/\\//i.test(p.url) ? '<a href="' + promotionHtml(p.url) + '" target="_blank" rel="noopener noreferrer" style="color:#3b82f6;text-decoration:none;font-size:12px;">🔗 Link</a>' : '<span style="color:#94a3b8;font-size:12px;">—</span>'}</td>
+                        <td>${promotionIsActive(p) ? '<span class="badge badge-success">Ενεργή</span>' : '<span class="badge badge-warning">Ανενεργή</span>'}</td>
                         <td>${p.views_count || 0}</td>
                         <td>${p.clicks_count || 0}</td>
                         <td>
-                            <button class="btn btn-secondary" onclick="togglePromotion('${p._id}', ${!p.is_active})">${p.is_active ? 'Απενεργ.' : 'Ενεργ.'}</button>
-                            <button class="btn btn-primary" style="margin:0 4px;" onclick="editPromotion('${p._id}')">✏️ Επεξ/σία</button>
-                              <button class="btn btn-danger" onclick="deletePromotion('${p._id}')">🗑️ Διαγραφή</button>
+                            <button class="btn btn-secondary" onclick="togglePromotion(this.closest('tr').dataset.promoId, ${!p.is_active})">${p.is_active ? 'Απενεργ.' : 'Ενεργ.'}</button>
+                            <button class="btn btn-primary" style="margin:0 4px;" onclick="editPromotion(this.closest('tr').dataset.promoId)">✏️ Επεξ/σία</button>
+                            <button class="btn btn-danger" onclick="deletePromotion(this.closest('tr').dataset.promoId)">🗑️ Διαγραφή</button>
                         </td>
                     </tr>
-                `).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν προωθήσεις</td></tr>';
+                `).join('') || '<tr><td colspan="10" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν προσφορές σε αυτή την κατάσταση.</td></tr>';
             } catch (err) {
                 console.error('Error loading promotions:', err);
+                if (sequence === promotionLoadSequence) {
+                    promotionTotal = 0;
+                    document.getElementById('promotionPageInfo').textContent = '';
+                    document.getElementById('promotionsTable').innerHTML = '<tr><td colspan="10">Αποτυχία φόρτωσης. Πατήστε Ανανέωση για νέα προσπάθεια.</td></tr>';
+                }
+            } finally {
+                if (sequence === promotionLoadSequence) {
+                    promotionLoading = false;
+                    updatePromotionSelection();
+                }
             }
+        }
+
+        async function deleteSelectedPromotions() {
+            if (promotionLoading || promotionDeleting || !selectedPromotionIds.size) return;
+            const ids = [...selectedPromotionIds];
+            const activeCount = promotionRows.filter(p => selectedPromotionIds.has(p._id) && promotionIsActive(p)).length;
+            const warning = activeCount ? ` Προσοχή: ${activeCount} από αυτές είναι ενεργές.` : '';
+            if (!confirm(`Να διαγραφούν οριστικά οι ${ids.length} επιλεγμένες προσφορές;${warning} Η διαγραφή δεν αναιρείται.`)) return;
+            promotionDeleting = true;
+            updatePromotionSelection();
+            let completed = false;
+            try {
+                const res = await apiCall('/admin/promotions/bulk-delete', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ids}),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(typeof data.detail === 'string' ? data.detail : 'Η διαγραφή απέτυχε. Δοκιμάστε ξανά.');
+                }
+                const data = await res.json();
+                selectedPromotionIds.clear();
+                completed = true;
+                alert(`Διαγράφηκαν ${data.deleted} προσφορές.` + (data.not_found ? ` ${data.not_found} δεν βρέθηκαν (πιθανόν είχαν ήδη διαγραφεί).` : ''));
+            } catch (err) {
+                alert('Σφάλμα: ' + err.message);
+            } finally {
+                promotionDeleting = false;
+                updatePromotionSelection();
+            }
+            if (completed) await loadPromotions();
         }
         
         async function importPromotionsExcel(input) {
@@ -7174,33 +7374,35 @@ async def admin_dashboard():
         }
         
         async function togglePromotion(id, isActive) {
+            if (promotionLoading || promotionDeleting) return;
             try {
-                await fetch(`${API_BASE}/admin/promotions/${id}?admin_token=${adminToken}`, {
+                const res = await apiCall('/admin/promotions/' + encodeURIComponent(id), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ is_active: isActive })
                 });
-                loadPromotions();
+                if (!res.ok) throw new Error('Δεν αποθηκεύτηκε η αλλαγή κατάστασης.');
+                await loadPromotions();
             } catch (err) {
-                alert('Σφάλμα');
+                alert('Σφάλμα: ' + err.message);
             }
         }
         
         async function deletePromotion(id) {
+            if (promotionLoading || promotionDeleting) return;
             if (!confirm('Διαγραφή προώθησης;')) return;
             try {
-                await fetch(`${API_BASE}/admin/promotions/${id}?admin_token=${adminToken}`, { method: 'DELETE' });
-                loadPromotions();
+                const res = await apiCall('/admin/promotions/' + encodeURIComponent(id), { method: 'DELETE' });
+                if (!res.ok) throw new Error('Η διαγραφή απέτυχε.');
+                await loadPromotions();
             } catch (err) {
-                alert('Σφάλμα');
+                alert('Σφάλμα: ' + err.message);
             }
         }
 
           async function editPromotion(id) {
               try {
-                  const res = await apiCall('/admin/promotions');
-                  const data = await res.json();
-                  const p = (data.promotions || []).find(x => x._id === id);
+                  const p = promotionRows.find(x => x._id === id);
                   if (!p) return alert('Δεν βρέθηκε η προώθηση');
                   document.getElementById('editPromoId').value = p._id;
                   document.getElementById('editPromoTitle').value = p.title || '';
