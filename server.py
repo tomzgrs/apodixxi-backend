@@ -6521,7 +6521,7 @@ async def admin_dashboard():
                 <div class="card">
                     <div class="card-body">
                         <div class="table-wrap"><table>
-                            <thead><tr><th><label class="promotion-check"><input type="checkbox" id="selectAllPromotions" aria-label="Επιλογή όλων των προσφορών της σελίδας" onchange="selectAllPromotionRows(this.checked)"></label></th><th>Τίτλος</th><th>Προϊόν</th><th>Τιμή</th><th>Κατάστημα</th><th>URL</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
+                            <thead><tr><th><label class="promotion-check"><input type="checkbox" id="selectAllPromotions" aria-label="Επιλογή όλων των προσφορών της σελίδας" onchange="selectAllPromotionRows(this.checked)"></label></th><th>Τίτλος</th><th>Προϊόν</th><th>Διάστημα ισχύος</th><th>Τιμή</th><th>Κατάστημα</th><th>URL</th><th>Κατάσταση</th><th>Views</th><th>Clicks</th><th>Ενέργειες</th></tr></thead>
                             <tbody id="promotionsTable"></tbody>
                         </table></div>
                     </div>
@@ -7142,6 +7142,30 @@ async def admin_dashboard():
                 ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
         }
 
+        function promotionFormatDate(value) {
+            if (!value) return '';
+            const raw = String(value).trim();
+            const iso = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+            if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+            const local = raw.match(/^(\\d{1,2})[./-](\\d{1,2})[./-](\\d{4})/);
+            if (local) return `${local[1].padStart(2, '0')}/${local[2].padStart(2, '0')}/${local[3]}`;
+            const parsed = new Date(raw);
+            return Number.isNaN(parsed.getTime())
+                ? ''
+                : new Intl.DateTimeFormat('el-GR', {
+                    timeZone: 'Europe/Athens', day: '2-digit', month: '2-digit', year: 'numeric'
+                }).format(parsed);
+        }
+
+        function promotionDateRange(p) {
+            const start = promotionFormatDate(p.start_date);
+            const end = promotionFormatDate(p.end_date);
+            if (start && end) return `${start} – ${end}`;
+            if (start) return `Από ${start}`;
+            if (end) return `Έως ${end}`;
+            return '—';
+        }
+
         function updatePromotionSelection() {
             const busy = promotionLoading || promotionDeleting;
             const master = document.getElementById('selectAllPromotions');
@@ -7196,7 +7220,7 @@ async def admin_dashboard():
             promotionLoading = true;
             selectedPromotionIds.clear();
             promotionRows = [];
-            document.getElementById('promotionsTable').innerHTML = '<tr><td colspan="10">Φόρτωση προσφορών…</td></tr>';
+            document.getElementById('promotionsTable').innerHTML = '<tr><td colspan="11">Φόρτωση προσφορών…</td></tr>';
             updatePromotionSelection();
             try {
                 const status = document.getElementById('promotionStatus').value;
@@ -7218,6 +7242,7 @@ async def admin_dashboard():
                         <td><label class="promotion-check"><input type="checkbox" data-promo-id="${promotionHtml(p._id)}" aria-label="${promotionHtml('Επιλογή: ' + (p.title || p.product_name || p._id))}" onchange="togglePromotionSelection(this.dataset.promoId, this.checked)"></label></td>
                         <td>${promotionHtml(p.title || '-')}</td>
                         <td>${promotionHtml(p.product_name || '-')}</td>
+                        <td>${promotionHtml(promotionDateRange(p))}</td>
                         <td>${p.price ? '€' + p.price.toFixed(2) : '-'} ${p.original_price ? '<small style="text-decoration:line-through;color:#999">€' + p.original_price.toFixed(2) + '</small>' : ''}</td>
                         <td>${promotionHtml(p.store_name || '-')}</td>
                         <td>${p.url && /^https?:\\/\\//i.test(p.url) ? '<a href="' + promotionHtml(p.url) + '" target="_blank" rel="noopener noreferrer" style="color:#3b82f6;text-decoration:none;font-size:12px;">🔗 Link</a>' : '<span style="color:#94a3b8;font-size:12px;">—</span>'}</td>
@@ -7230,13 +7255,13 @@ async def admin_dashboard():
                             <button class="btn btn-danger" onclick="deletePromotion(this.closest('tr').dataset.promoId)">🗑️ Διαγραφή</button>
                         </td>
                     </tr>
-                `).join('') || '<tr><td colspan="10" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν προσφορές σε αυτή την κατάσταση.</td></tr>';
+                `).join('') || '<tr><td colspan="11" style="text-align:center;padding:40px;color:#999;">Δεν υπάρχουν προσφορές σε αυτή την κατάσταση.</td></tr>';
             } catch (err) {
                 console.error('Error loading promotions:', err);
                 if (sequence === promotionLoadSequence) {
                     promotionTotal = 0;
                     document.getElementById('promotionPageInfo').textContent = '';
-                    document.getElementById('promotionsTable').innerHTML = '<tr><td colspan="10">Αποτυχία φόρτωσης. Πατήστε Ανανέωση για νέα προσπάθεια.</td></tr>';
+                    document.getElementById('promotionsTable').innerHTML = '<tr><td colspan="11">Αποτυχία φόρτωσης. Πατήστε Ανανέωση για νέα προσπάθεια.</td></tr>';
                 }
             } finally {
                 if (sequence === promotionLoadSequence) {
